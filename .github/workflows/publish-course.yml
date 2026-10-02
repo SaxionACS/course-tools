@@ -60,10 +60,10 @@ jobs:
       - name: Install Chrome Headless Shell (Mermaid diagrams in PDFs)
         run: quarto install chrome-headless-shell --no-prompt
 
-      - name: Install the Lato font
+      - name: Install the Lato font and Graphviz (needed by most PlantUML diagrams)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fonts-lato
+          sudo apt-get install -y --no-install-recommends fonts-lato graphviz
 
       - name: Cache PlantUML
         id: plantuml-cache

@@ -38,13 +38,16 @@ def find_plantuml() -> list[str] | None:
     return [exe] if exe else None
 
 
-def _version(cmd: list[str]) -> str | None:
+def _version(cmd: list[str], require_success: bool = True) -> str | None:
+    """First line of the output of `cmd` (e.g. `tool --version`), or None."""
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
     text = (out.stdout or out.stderr).strip().splitlines()
-    return text[0] if out.returncode == 0 and text else None
+    if not text or (require_success and out.returncode != 0):
+        return None
+    return text[0]
 
 
 # --------------------------------------------------------------------------
@@ -161,7 +164,13 @@ def cmd_doctor(args) -> int:
     report("Quarto", quarto and _version([quarto, "--version"]), hint="see requirements.md")
     report("Typst (bundled with Quarto)", quarto and _version([quarto, "typst", "--version"]))
     plantuml = find_plantuml()
-    report("PlantUML", plantuml and _version(plantuml + ["-version"]), hint="needs Java; set PLANTUML_JAR")
+    # `plantuml -version` also checks Graphviz and fails without it, although
+    # PlantUML itself works; Graphviz is checked separately below.
+    version = plantuml and _version(plantuml + ["-version"], require_success=False)
+    report("PlantUML", version if version and "PlantUML" in version else None,
+           hint="needs Java; set PLANTUML_JAR or put plantuml on PATH")
+    report("Graphviz (PlantUML diagrams other than sequence diagrams)", _version(["dot", "-V"]),
+           hint="sudo apt install graphviz")
     report("Java", _version(["java", "-version"]) or (shutil.which("java") and "installed"))
     chrome = os.environ.get("QUARTO_CHROMIUM")
     report("Chrome for Mermaid in PDFs", chrome or "managed by Quarto (run: quarto install chrome-headless-shell)",

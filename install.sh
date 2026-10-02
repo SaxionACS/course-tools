@@ -33,11 +33,11 @@ fi
 
 step() { printf '\n==> %s\n' "$*"; }
 
-step "System packages (Python, pipx, Java for PlantUML, Lato font, git-lfs)"
+step "System packages (Python, pipx, Java and Graphviz for PlantUML, Lato font, git-lfs)"
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   ca-certificates curl git git-lfs python3 python3-venv pipx \
-  default-jre-headless fonts-lato zip unzip
+  default-jre-headless graphviz fonts-lato zip unzip
 
 step "Quarto ${QUARTO_VERSION}"
 if command -v quarto >/dev/null && [[ "$(quarto --version)" == "${QUARTO_VERSION}" ]]; then

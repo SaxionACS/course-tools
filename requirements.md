@@ -13,6 +13,7 @@ workflow installs the same versions in CI.
 | Chrome Headless Shell | latest | renders Mermaid diagrams for PDFs | `quarto install chrome-headless-shell` |
 | Java (JRE) | ≥ 11 | runs PlantUML | `default-jre-headless` (apt) |
 | [PlantUML](https://plantuml.com) | 1.2026.8 | renders PlantUML diagrams | jar in `/usr/local/lib/plantuml`, wrapper `/usr/local/bin/plantuml` |
+| [Graphviz](https://graphviz.org) | any | layout engine PlantUML needs for all diagram types except sequence diagrams | `graphviz` (apt) |
 | Lato font | any | body font of the PDFs | `fonts-lato` (apt) |
 | git, git-lfs | any | version control; LFS is optional (e.g. for large slide files) | apt |
 | zip, unzip, curl | any | downloads and archives | apt |
