@@ -79,9 +79,12 @@ repositories.
    git tag v1.0.0 && git tag -f v1 && git push origin v1.0.0 && git push -f origin v1
    ```
 
-   For a compatible fix, tag `v1.0.1` and move `v1` to it. All courses pick
-   up the fix on their next build. For an incompatible change, release `v2`;
-   courses switch by changing `@v1` (and `tools-ref`) in their workflow.
+   For a compatible fix, tag `v1.0.1` and move `v1` to it; for a compatible
+   new feature, `v1.1.0`. All courses pick up the change on their next build.
+   For an incompatible change, release `v2`; courses switch by changing `@v1`
+   (and `tools-ref`) in their workflow. Keep `version` in `pyproject.toml` and
+   `__version__` in `src/course_tools/__init__.py` equal to the tag (without
+   the `v`), so that `course --version` shows which release a build used.
 3. **Create the template repository** from `course_template` and mark it as a
    template (*Settings → General → Template repository*).
 

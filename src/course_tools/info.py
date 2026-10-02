@@ -265,7 +265,7 @@ def assessment_page(assessment: dict, general: dict) -> str:
         out += [f"- **{lo['id']}** – {lo['text']}" for lo in los]
         out.append("")
     for c in components:
-        if c.get("description") or c.get("matrix"):
+        if c.get("description") or c.get("matrix") or c.get("rubric"):
             weight = c.get("weight")
             suffix = f" ({weight}%)" if has_matrices and weight is not None else ""
             out += [f"### {_component_title(c)}{suffix}", ""]
@@ -273,6 +273,8 @@ def assessment_page(assessment: dict, general: dict) -> str:
                 out += [str(c["description"]).strip(), ""]
             if c.get("matrix"):
                 out += _component_matrix(c, los)
+            if c.get("rubric"):
+                out += _component_rubric(c, los)
 
     if has_matrices:
         assessed = {str(lo) for c in components for lo in (c.get("matrix") or {})}
@@ -298,11 +300,13 @@ def _component_matrix(component: dict, los: list[dict]) -> list[str]:
     column_totals = dict.fromkeys(bloom_keys, 0)
     lines = [
         "::: {.assessment-matrix}", "",
-        # PDF: the page is narrower than the screen; smaller text, and let long
-        # Bloom level names in the header break (scoped to this matrix).
+        # PDF: the page is narrower than the screen; smaller text, let long
+        # Bloom level names in the header break, and keep the (short) table on
+        # one page (scoped to this matrix).
         "```{=typst}",
         "#set text(size: 8.5pt)",
         "#show table.cell.where(y: 0): set text(hyphenate: true)",
+        "#show table: it => block(breakable: false, it)",
         "```", "",
         "| LO | " + " | ".join(b["name"] for b in BLOOM) + " | Total | Graded |",
         _separator([("l", 9)] + [("c", 13)] * len(BLOOM) + [("c", 9), ("l", 13)]),
@@ -341,6 +345,59 @@ def _component_matrix(component: dict, los: list[dict]) -> list[str]:
     lines.append("| **Total** | " + " | ".join(f"**{_num(column_totals[k])}**" if column_totals[k] else "" for k in bloom_keys)
                  + f" | **{_num(total)}** | |")
     return lines + ["", ":::", ""]
+
+
+def _points(value, where: str) -> str | None:
+    """`30` -> "0 to 30"; `[-20, 0]` -> "−20 to 0"."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+        low, high = 0, value
+    elif (isinstance(value, (list, tuple)) and len(value) == 2
+          and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)
+          and value[0] <= value[1]):
+        low, high = value
+    else:
+        _warn(f"assessment.yaml: {where}: `points` must be a maximum (e.g. 30) or a range (e.g. [-20, 0])")
+        return None
+    return f"{_num(low)} to {_num(high)}".replace("-", "−")
+
+
+def _component_rubric(component: dict, los: list[dict]) -> list[str]:
+    """Rough grading criteria of a component (e.g. a project), with points per criterion."""
+    name = _component_title(component)
+    rubric = component["rubric"]
+    if not isinstance(rubric, dict) or not isinstance(rubric.get("criteria"), list) or not rubric["criteria"]:
+        _warn(f"assessment.yaml: {name}: `rubric` needs a list of `criteria`")
+        return []
+
+    covered = rubric.get("learning_outcomes")
+    if isinstance(covered, (str, int)):
+        covered = [covered]
+    covered = [str(lo) for lo in (covered or (component.get("matrix") or {}))]
+    known = {lo["id"] for lo in los}
+    in_matrix = {str(lo) for lo in (component.get("matrix") or {})}
+    for lo in covered:
+        if lo not in known:
+            _warn(f"assessment.yaml: {name}: rubric learning outcome {lo} is not in general.yaml")
+        elif in_matrix and lo not in in_matrix:
+            _warn(f"assessment.yaml: {name}: rubric learning outcome {lo} is not in the matrix of this component")
+
+    heading = "Grading criteria" + (f" ({', '.join(covered)})" if covered else "")
+    out = [f"#### {heading}", "",
+           "| Criterion | Points | Description |",
+           _separator([("l", 24), ("c", 12), ("l", 64)])]
+    for i, criterion in enumerate(rubric["criteria"], start=1):
+        if not isinstance(criterion, dict) or not criterion.get("name"):
+            _warn(f"assessment.yaml: {name}: rubric criterion {i} needs a `name`")
+            continue
+        where = f"{name}, rubric criterion {criterion['name']!r}"
+        points = _points(criterion.get("points"), where) if "points" in criterion else None
+        if "points" not in criterion:
+            _warn(f"assessment.yaml: {where}: no `points`")
+        out.append(f"| **{_cell(criterion['name'])}** | {points or ''} | {_cell(criterion.get('description'))} |")
+    out.append("")
+    if rubric.get("grading"):
+        out += [str(rubric["grading"]).strip(), ""]
+    return out
 
 
 def _bloom_legend(custom_verbs: dict) -> list[str]:

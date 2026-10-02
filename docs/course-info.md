@@ -77,6 +77,7 @@ Each component has:
 | `graded` | `individual` or `group`: default for the learning outcomes in the matrix. |
 | `description` | Longer description (Markdown), shown above the matrix. |
 | `matrix` | The assessment matrix of this component (see below). |
+| `rubric` | Optional: rough grading criteria of this component (see below). |
 
 ### Assessment matrices
 
@@ -113,6 +114,41 @@ The build warns:
 - when a key is not a Bloom level;
 - when `graded` is missing or is not `individual` / `group`;
 - when a learning outcome isn't assessed by any component.
+
+### Grading criteria (rubric)
+
+A component can have rough grading criteria, for example for a project. This
+is optional and meant for the few cases where the criteria should be on the
+website; the detailed rubric stays in Brightspace.
+
+```yaml
+components:
+  - id: CAP
+    name: Capstone project
+    weight: 40
+    matrix:
+      LO5: { applying: 30, analyzing: 20, evaluating: 20, creating: 30 }
+    rubric:
+      learning_outcomes: [LO5]      # optional; default: the learning outcomes in the matrix
+      criteria:
+        - name: Working functionality
+          points: 30                # a maximum: 0 to 30
+          description: The project meets the specified requirements and functions correctly.
+        - name: Teamwork
+          points: [-20, 0]          # a range, e.g. for deductions
+          description: Points are deducted for students not contributing to the project.
+      grading: |
+        How the points become a grade (Markdown).
+```
+
+The Assessment page shows the criteria as a table (criterion, points,
+description) below the matrix of the component, under the heading *Grading
+criteria (LO5)*, followed by the `grading` text. Nothing is calculated: you
+describe in `grading` how the points lead to a grade.
+
+The build warns when a criterion has no `name` or no valid `points`, or when a
+learning outcome of the rubric is not in `general.yaml` or not in the matrix of
+the component.
 
 ### Bloom legend
 
