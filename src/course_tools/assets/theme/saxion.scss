@@ -111,6 +111,12 @@ table {
   }
 }
 
+// Learning outcomes on the Assessment page: the ids stand out.
+.learning-outcomes table td:first-child {
+  color: $saxion-green;
+  white-space: nowrap;
+}
+
 // Assessment matrices: many columns, so a slightly smaller font; the Total
 // column is shaded.
 .assessment-matrix table {

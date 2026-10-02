@@ -71,9 +71,7 @@ Each component has:
 | `name` | E.g. `Written exam`. |
 | `form` | Form of the assessment. |
 | `weight` | Percentage of the final grade. |
-| `minimum` | Minimum grade, e.g. `5.5`. |
 | `when` | E.g. `Week 9`. |
-| `resit` | `true` / `false`. |
 | `graded` | `individual` or `group`: default for the learning outcomes in the matrix. |
 | `description` | Longer description (Markdown), shown above the matrix. |
 | `matrix` | The assessment matrix of this component (see below). |
@@ -101,10 +99,11 @@ The Bloom levels are `remembering`, `understanding`, `applying`, `analyzing`,
 `evaluating` and `creating`. The short forms (`remember`, `apply`, …) and the
 British spellings (`analyse`, `analysing`) also work.
 
-The page shows a table for each component. Each row is a learning outcome,
-with columns for the six Bloom levels, a total, and whether it is graded
-individually or as a group. A *Total* row closes the table. Below all
-matrices is a legend of Bloom's taxonomy with example verbs.
+The page starts with a *Learning outcomes* section listing all learning
+outcomes of `general.yaml`. Then it shows a table for each component. Each row
+is a learning outcome, with columns for the six Bloom levels, a total, and
+whether it is graded individually or as a group. A *Total* row closes the
+table. Below all matrices is a legend of Bloom's taxonomy with example verbs.
 
 The build warns:
 
@@ -130,6 +129,8 @@ components:
       LO5: { applying: 30, analyzing: 20, evaluating: 20, creating: 30 }
     rubric:
       learning_outcomes: [LO5]      # optional; default: the learning outcomes in the matrix
+      description: |                # optional; shown above the table (Markdown)
+        The project is graded at the demonstration in week 10.
       criteria:
         - name: Working functionality
           points: 30                # a maximum: 0 to 30
@@ -141,9 +142,9 @@ components:
         How the points become a grade (Markdown).
 ```
 
-The Assessment page shows the criteria as a table (criterion, points,
-description) below the matrix of the component, under the heading *Grading
-criteria (LO5)*, followed by the `grading` text. Nothing is calculated: you
+The Assessment page shows the criteria below the matrix of the component,
+under the heading *Grading criteria (LO5)*: first the `description`, then a
+table (criterion, points, description), then the `grading` text. Nothing is calculated: you
 describe in `grading` how the points lead to a grade.
 
 The build warns when a criterion has no `name` or no valid `points`, or when a

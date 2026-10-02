@@ -232,10 +232,20 @@ def assessment_page(assessment: dict, general: dict) -> str:
     if assessment.get("introduction"):
         out += [str(assessment["introduction"]).strip(), ""]
 
+    has_matrices = any(c.get("matrix") for c in components)
+    if los and (has_matrices or any(c.get("rubric") for c in components)):
+        out += ["## Learning outcomes", "",
+                "The assessment shows whether you have achieved these learning outcomes.", "",
+                "::: {.learning-outcomes}", "",
+                "| | Learning outcome |",
+                _separator([("l", 8), ("l", 92)])]
+        out += [f"| **{_cell(lo['id'])}** | {_cell(lo['text'])} |" for lo in los]
+        out += ["", ":::", ""]
+
     if components:
         out += ["## Components", ""]
-        out += ["| Component | Form | Weight | Minimum grade | When | Resit |",
-                _separator([("l", 20), ("l", 34), ("r", 10), ("r", 12), ("l", 13), ("l", 9)])]
+        out += ["| Component | Form | Weight | When |",
+                _separator([("l", 24), ("l", 50), ("r", 10), ("l", 16)])]
         total = 0
         for c in components:
             weight = c.get("weight")
@@ -243,8 +253,7 @@ def assessment_page(assessment: dict, general: dict) -> str:
                 total += weight
             out.append(
                 f"| **{_cell(_component_title(c))}** | {_cell(c.get('form'))} "
-                f"| {_cell(f'{weight}%' if weight is not None else None)} | {_cell(c.get('minimum'))} "
-                f"| {_cell(c.get('when'))} | {_cell(c.get('resit'))} |"
+                f"| {_cell(f'{weight}%' if weight is not None else None)} | {_cell(c.get('when'))} |"
             )
         out.append("")
         if total and total != 100:
@@ -253,17 +262,13 @@ def assessment_page(assessment: dict, general: dict) -> str:
     if assessment.get("final_grade"):
         out += ["## Final grade", "", str(assessment["final_grade"]).strip(), ""]
 
-    has_matrices = any(c.get("matrix") for c in components)
     if has_matrices:
         out += [
             "## Assessment matrices", "",
-            "For every component, the matrix shows which learning outcomes it assesses, how much "
-            "each one counts (as a percentage of the component), at which levels of "
+            "For every component, the matrix shows which [learning outcomes](#learning-outcomes) it "
+            "assesses, how much each one counts (as a percentage of the component), at which levels of "
             "[Bloom's taxonomy](#blooms-taxonomy), and whether it is graded individually or as a group.", "",
-            "Learning outcomes:", "",
         ]
-        out += [f"- **{lo['id']}** – {lo['text']}" for lo in los]
-        out.append("")
     for c in components:
         if c.get("description") or c.get("matrix") or c.get("rubric"):
             weight = c.get("weight")
@@ -382,9 +387,11 @@ def _component_rubric(component: dict, los: list[dict]) -> list[str]:
             _warn(f"assessment.yaml: {name}: rubric learning outcome {lo} is not in the matrix of this component")
 
     heading = "Grading criteria" + (f" ({', '.join(covered)})" if covered else "")
-    out = [f"#### {heading}", "",
-           "| Criterion | Points | Description |",
-           _separator([("l", 24), ("c", 12), ("l", 64)])]
+    out = [f"#### {heading}", ""]
+    if rubric.get("description"):
+        out += [str(rubric["description"]).strip(), ""]
+    out += ["| Criterion | Points | Description |",
+            _separator([("l", 24), ("c", 12), ("l", 64)])]
     for i, criterion in enumerate(rubric["criteria"], start=1):
         if not isinstance(criterion, dict) or not criterion.get("name"):
             _warn(f"assessment.yaml: {name}: rubric criterion {i} needs a `name`")
