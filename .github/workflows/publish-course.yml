@@ -1,0 +1,117 @@
+# Reusable workflow: build a course repository and publish it to GitHub Pages.
+#
+# Call it from a course repository, e.g. .github/workflows/publish.yml:
+#
+#   permissions:
+#     contents: read
+#     pages: write
+#     id-token: write
+#   jobs:
+#     publish:
+#       uses: SaxionACS/course-tools/.github/workflows/publish-course.yml@v1
+#
+# The course repository must have Settings > Pages > Source set to
+# "GitHub Actions".
+
+name: Publish course
+
+on:
+  workflow_call:
+    inputs:
+      tools-ref:
+        description: Version of course-tools to build with (keep equal to the @ref of this workflow).
+        type: string
+        default: v1
+      quarto-version:
+        type: string
+        default: "1.10.18"
+      plantuml-version:
+        type: string
+        default: "1.2026.8"
+      deploy:
+        description: Publish to GitHub Pages (false = only check that the course builds).
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the course
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Check out course-tools
+        uses: actions/checkout@v7
+        with:
+          repository: SaxionACS/course-tools
+          ref: ${{ inputs.tools-ref }}
+          path: .course-tools
+
+      - name: Install Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: ${{ inputs.quarto-version }}
+
+      - name: Install Chrome Headless Shell (Mermaid diagrams in PDFs)
+        run: quarto install chrome-headless-shell --no-prompt
+
+      - name: Install the Lato font
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-lato
+
+      - name: Cache PlantUML
+        id: plantuml-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/plantuml
+          key: plantuml-${{ inputs.plantuml-version }}
+
+      - name: Download PlantUML
+        if: steps.plantuml-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/plantuml
+          curl -fsSL -o ~/plantuml/plantuml.jar \
+            "https://github.com/plantuml/plantuml/releases/download/v${{ inputs.plantuml-version }}/plantuml-${{ inputs.plantuml-version }}.jar"
+
+      - name: Install course-tools
+        run: |
+          pipx install ./.course-tools
+          echo "PLANTUML_JAR=$HOME/plantuml/plantuml.jar" >> "$GITHUB_ENV"
+
+      - name: Check tools
+        run: course doctor
+
+      - name: Configure GitHub Pages
+        id: pages
+        if: inputs.deploy
+        uses: actions/configure-pages@v6
+
+      - name: Build the course
+        run: course build --site-url "${{ steps.pages.outputs.base_url }}"
+
+      - name: Upload the website
+        if: inputs.deploy
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    if: inputs.deploy
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

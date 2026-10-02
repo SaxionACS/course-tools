@@ -1,0 +1,164 @@
+/*-- scss:defaults --*/
+
+// Colours taken from the Brightspace content template used at Saxion.
+$saxion-green: #009c82;
+$saxion-green-dark: #007a66;
+$saxion-green-light: #ecf6ee;
+$saxion-grey: #494c4e;
+$saxion-grey-light: #cdd5dc;
+$saxion-blue: #006fbf;
+$saxion-orange: #e87511;
+
+$web-font-path: "https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;1,400;1,700&display=swap";
+$font-family-sans-serif: Lato, "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+
+$body-color: $saxion-grey;
+$primary: $saxion-green;
+$link-color: $saxion-blue;
+$headings-color: $saxion-grey;
+$headings-font-weight: 700;
+$border-color: $saxion-grey-light;
+
+$callout-color-note: $saxion-blue;
+$callout-color-tip: $saxion-green;
+$callout-color-important: $saxion-green-dark;
+$callout-color-warning: $saxion-orange;
+
+/*-- scss:rules --*/
+
+body {
+  border-top: 5px solid $saxion-green;
+}
+
+h2 {
+  color: $saxion-green;
+}
+
+// Links in running text: dotted underline, as in the Brightspace template.
+main.content :is(p, li, td, dd) a:not(.btn):not(.nav-link) {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  &:hover { text-decoration-style: solid; }
+}
+
+.sidebar-title a {
+  color: $saxion-green;
+  font-weight: 700;
+}
+
+.sidebar-navigation .sidebar-item .active,
+.sidebar-navigation .sidebar-item-section .active {
+  color: $saxion-green;
+  font-weight: 700;
+}
+
+// PDF download button: next to the title (moved there by head.html), or
+// right-aligned above the content when scripts do not run.
+.course-pdf {
+  text-align: right;
+  margin-bottom: .5rem;
+
+  &.in-title {
+    float: right;
+    margin: .6rem 0 .5rem 1rem;
+  }
+}
+
+table {
+  margin-bottom: 1.5rem;
+}
+
+// Course information tables from the YAML files.
+.table > :not(caption) > * > * {
+  padding: .4rem .6rem;
+}
+
+// Course level in the Saxion level model (info page): one column of tiles
+// (high, middle, low) per pillar; the course's level is highlighted.
+.course-levels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  max-width: 36rem;
+  margin: 1rem auto 1.5rem;
+}
+
+.course-levels-pillar {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.course-levels-name {
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: .25rem;
+  overflow-wrap: anywhere;
+}
+
+.course-levels-tile {
+  text-align: center;
+  padding: .45rem .25rem;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  color: #8a9095;
+  font-size: .9rem;
+
+  &.selected {
+    border-color: $saxion-grey;
+    color: #262829;
+    font-weight: 700;
+  }
+}
+
+// Assessment matrices: many columns, so a slightly smaller font; the Total
+// column is shaded.
+.assessment-matrix table {
+  font-size: .85rem;
+
+  th {
+    hyphens: auto;
+  }
+
+  td:nth-last-child(2),
+  th:nth-last-child(2) {
+    background: $saxion-green-light;
+  }
+}
+
+// ------------------------------------------------------------------------
+// Embedded in an LMS (see head.html): content only.
+// ------------------------------------------------------------------------
+
+html.embedded {
+  body {
+    border-top: none;
+  }
+
+  #quarto-header,
+  #quarto-sidebar,
+  #quarto-margin-sidebar,
+  .quarto-secondary-nav,
+  #quarto-sidebar-glass,
+  nav.page-navigation,
+  footer.footer {
+    display: none !important;
+  }
+
+  #quarto-content,
+  main.content,
+  #title-block-header {
+    display: block !important;
+  }
+
+  #quarto-content {
+    padding: 0 1rem 2rem;
+    margin-top: 0 !important;
+  }
+
+  main.content {
+    max-width: 56rem;
+    margin: 0 auto !important;
+    padding-top: 1rem;
+  }
+}

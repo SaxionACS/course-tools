@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "saxion-course-tools"
+version = "0.1.0"
+description = "Build Saxion ACS course content (Markdown) into a website, LMS-embeddable pages and PDFs."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6"]
+
+[project.scripts]
+course = "course_tools.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+course_tools = ["assets/**/*", "assets/**/.*"]

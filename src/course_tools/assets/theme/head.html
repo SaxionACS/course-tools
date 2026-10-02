@@ -1,0 +1,22 @@
+<script>
+  // Embedded mode: when a page is shown inside another site (Brightspace
+  // embeds web links in an iframe), hide the website chrome so only the
+  // content remains. `?embed=1` / `?embed=0` force the mode for testing.
+  (function () {
+    var embedded;
+    try { embedded = window.self !== window.top; } catch (e) { embedded = true; }
+    var params = new URLSearchParams(window.location.search);
+    if (params.has('embed')) embedded = params.get('embed') !== '0';
+    if (embedded) document.documentElement.classList.add('embedded');
+  })();
+
+  // Move the PDF button (added by filters/course.lua) next to the page title.
+  document.addEventListener('DOMContentLoaded', function () {
+    var button = document.querySelector('.course-pdf');
+    var title = document.querySelector('#title-block-header .quarto-title');
+    if (button && title) {
+      title.insertBefore(button, title.firstChild);
+      button.classList.add('in-title');
+    }
+  });
+</script>
