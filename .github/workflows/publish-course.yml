@@ -39,6 +39,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      pages: read        # configure-pages reads the site URL
     steps:
       - name: Check out the course
         uses: actions/checkout@v7
