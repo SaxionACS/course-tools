@@ -12,6 +12,8 @@ Expected layout (all parts optional except ``info/general.yaml``)::
     assignments/week_NN/*.md          single-page assignments
     assignments/week_NN/<name>/index.md (or README.md)
     assignments/week_NN/<name>/starter/   zipped and attached to the assignment
+    (a Markdown file named in an assignment's `logbook` front matter is that
+    assignment's logbook: downloadable and previewed, not an assignment itself)
     slides/week_NN/<lecture>.pdf      slides exported from PowerPoint
     exams/*.md
     references/*.md, references/*.pdf
@@ -54,7 +56,7 @@ def is_ignored(path: Path, root: Path) -> bool:
 class Page:
     src: Path | None             # source file (None for generated pages)
     rel: PurePosixPath           # staged path, relative to the stage root (.qmd)
-    kind: str                    # home, info, week, lecture, assignments, assignment, exam, reference, section
+    kind: str                    # home, info, week, lecture, assignments, assignment, logbook, exam, reference, section
     meta: dict
     body: str
     title: str
@@ -62,6 +64,8 @@ class Page:
     slides: PurePosixPath | None = None     # staged path of the slides PDF
     slides_expected: bool = False           # show "No presentation yet" when missing
     starter_dir: Path | None = None         # source dir zipped as starter files
+    logbooks: list["Page"] = field(default_factory=list)   # logbooks of an assignment
+    assignment: "Page | None" = None        # the assignment of a logbook
 
     @property
     def order(self):
@@ -76,6 +80,7 @@ class Week:
     lectures: list[Page] = field(default_factory=list)
     assignments_overview: Page | None = None
     assignments: list[Page] = field(default_factory=list)
+    logbooks: list[Page] = field(default_factory=list)
     slides: list[PurePosixPath] = field(default_factory=list)
 
 
@@ -102,7 +107,7 @@ class Course:
         result = [p for p in [self.home] if p] + list(self.info_pages)
         for w in self.weeks:
             result += [p for p in [w.overview] if p] + w.lectures
-            result += [p for p in [w.assignments_overview] if p] + w.assignments
+            result += [p for p in [w.assignments_overview] if p] + w.assignments + w.logbooks
         result += [p for p in [self.exams_overview] if p] + self.exams
         result += [p for p in [self.references_overview] if p] + self.references
         return result
@@ -173,6 +178,43 @@ def _load_yaml(path: Path) -> dict | None:
     if not isinstance(data, dict):
         raise CourseError(f"{path} must contain a YAML mapping")
     return data
+
+
+def _attach_logbooks(assignments: list[Page], root: Path, week: int) -> list[Page]:
+    """Turn the files named in the assignments' `logbook` front matter into logbooks.
+
+    A logbook is a Markdown file that students download and fill in. It is
+    removed from `assignments` (it is not an assignment itself) and returned
+    as a page of kind "logbook", attached to its assignment.
+    """
+    by_src = {p.src.resolve(): p for p in assignments if p.src is not None}
+    logbooks: dict[Path, Page] = {}
+    for page in list(assignments):
+        refs = page.meta.get("logbook")
+        if refs is None:
+            continue
+        for ref in refs if isinstance(refs, list) else [refs]:
+            path = (page.src.parent / str(ref)).resolve()
+            where = page.src.relative_to(root)
+            if not path.is_file() or path.suffix.lower() != ".md":
+                print(f"warning: {where}: logbook {ref} is not a Markdown file next to the assignment",
+                      file=sys.stderr)
+                continue
+            if not path.is_relative_to(root) or is_ignored(path, root):
+                print(f"warning: {where}: logbook {ref} is outside the course or in a private directory",
+                      file=sys.stderr)
+                continue
+            if path not in logbooks:
+                logbook = by_src.get(path)
+                if logbook is not None and logbook is not page:
+                    assignments.remove(logbook)
+                else:
+                    logbook = read_page(path, _qmd(_rel(path, root)), "logbook", week)
+                logbook.kind = "logbook"
+                logbook.assignment = page
+                logbooks[path] = logbook
+            page.logbooks.append(logbooks[path])
+    return list(logbooks.values())
 
 
 def _week_label(n: int, title: str | None) -> str:
@@ -252,10 +294,11 @@ def scan(root: Path) -> Course:
                     if starter.is_dir():
                         page.starter_dir = starter
                     week.assignments.append(page)
+            week.logbooks = _attach_logbooks(week.assignments, root, n)
 
         week.lectures.sort(key=lambda p: p.order)
         week.assignments.sort(key=lambda p: p.order)
-        for p in [week.overview, week.assignments_overview, *week.lectures, *week.assignments]:
+        for p in [week.overview, week.assignments_overview, *week.lectures, *week.assignments, *week.logbooks]:
             if p:
                 p.meta.setdefault("course-week", week.label)
         weeks.append(week)

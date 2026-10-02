@@ -5,6 +5,8 @@ Course page decorations and link handling.
 * Lectures: a "Slides" box with the slides PDF, or "No presentation yet".
 * Assignments: whether generative AI is allowed (from the course's GenAI
   policy), and a box with the starter-files zip if there are starter files.
+* Logbooks (Markdown files students fill in): a download/preview box on the
+  assignment, and a note on the preview page.
 * Links to other course pages may be written as `page.md` / `README.md`.
 * PDF (Typst): relative links become absolute links to the published site,
   and every page gets a running header and footer.
@@ -64,6 +66,29 @@ end
 
 -- Decorations -----------------------------------------------------------
 
+-- Link to a file to download as-is (not rewritten to a page link).
+local function download_link(href)
+  local name = href:match('([^/]+)$')
+  return pandoc.Link(pandoc.Code(name), href, '', pandoc.Attr('', {'course-download'}, {{'download', ''}}))
+end
+
+-- Box at the top of an assignment with its logbook(s).
+local function logbooks_box(logbooks)
+  local T = pandoc.Inlines
+  local lines = pandoc.List()
+  for _, lb in ipairs(logbooks) do
+    lines:insert(T('Download ') .. {download_link(str(lb.download))}
+      .. T(' and fill it in, or ') .. {pandoc.Link('preview it online', str(lb.preview))} .. T('.'))
+  end
+  local content
+  if #lines == 1 then
+    content = {pandoc.Para(lines[1])}
+  else
+    content = {pandoc.BulletList(lines:map(function(l) return {pandoc.Plain(l)} end))}
+  end
+  return callout('note', #lines == 1 and 'Logbook' or 'Logbooks', content)
+end
+
 -- Box at the top of an assignment: is generative AI allowed in it?
 local function genai_box(rule)
   local T = pandoc.Inlines
@@ -104,7 +129,7 @@ local function decorate(doc)
   page = doc.meta['course-page'] or {}
   local top = pandoc.List()
 
-  if is_html and site.pdf == true then
+  if is_html and site.pdf == true and str(page.kind) ~= 'logbook' then
     top:insert(pandoc.RawBlock('html',
       '<div class="course-pdf"><a class="btn btn-sm btn-outline-primary" href="'
       .. input_stem() .. '.pdf" download><i class="bi bi-file-earmark-pdf"></i> PDF</a></div>'))
@@ -122,6 +147,18 @@ local function decorate(doc)
 
   if page.genai ~= nil then
     top:insert(genai_box(page.genai))
+  end
+
+  if page.logbooks ~= nil then
+    top:insert(logbooks_box(page.logbooks))
+  end
+
+  if str(page.kind) == 'logbook' then
+    top:insert(callout('note', 'Logbook', {pandoc.Para(
+      pandoc.Inlines('This is a preview of the logbook for ')
+      .. {pandoc.Link(str(page.assignment.title), str(page.assignment.href))}
+      .. pandoc.Inlines('. Download ') .. {download_link(str(page.download))}
+      .. pandoc.Inlines(' and fill it in.'))}))
   end
 
   if page.starter ~= nil then
@@ -188,6 +225,12 @@ end
 
 local function link(l)
   if not is_relative(l.target) then return nil end
+  if l.classes:includes('course-download') then
+    -- Files to download keep their name; in a PDF they link to the website.
+    local url = not is_html and site_url(l.target)
+    if url then l.target = url; return l end
+    return nil
+  end
   local path, frag = l.target:match('^([^#]*)(#?.*)$')
   local dir, name = path:match('^(.-)([^/]*)$')
   if not (name:match('%.q?md$') or generated(name)) and not is_typst then return nil end

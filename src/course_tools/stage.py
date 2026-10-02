@@ -25,13 +25,15 @@ import yaml
 
 from . import genai, info
 from .course import Course, Page, Week, is_ignored
-from .markdown import join_front_matter, natural_key, rewrite_fences, split_front_matter
+from .markdown import join_front_matter, natural_key, rewrite_fences, separate_thematic_breaks, split_front_matter
 
 ASSETS_DIR = "_course"            # theme, filters and Typst includes inside the stage
 MANIFEST = ".course-stage.json"   # files written by the stager (for cleanup)
 COPIED_DIRS = ("info", "lessons", "assignments", "exams", "references", "assets", "images")
 ROOT_FILE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".pdf"}
 ZIP_SKIP = {".git", ".DS_Store", "__pycache__", ".idea", ".vscode", "private"}
+# Pandoc Markdown, plus what GitHub allows too: a list directly after a line of text.
+MARKDOWN_READER = "markdown+lists_without_preceding_blankline"
 
 
 @dataclass
@@ -69,7 +71,7 @@ def _zip_bytes(directory: Path, top: str) -> bytes:
 
 def _page_meta(page: Page, course: Course, extra: dict) -> dict:
     meta = dict(page.meta)
-    for key in ("slides", "order", "genai"):
+    for key in ("slides", "order", "genai", "logbook"):
         meta.pop(key, None)
     meta["title"] = page.title
     meta["engine"] = "markdown"   # never execute code; diagrams still work
@@ -139,16 +141,31 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
             zip_rel = page.rel.parent / zip_name
             files[str(zip_rel)] = _zip_bytes(page.starter_dir, zip_name[:-4])
             extra["starter"] = zip_name
+        if page.logbooks:
+            extra["logbooks"] = [
+                {"title": lb.title,
+                 "download": _rel_link(page.rel, PurePosixPath(lb.src.relative_to(root).as_posix())),
+                 "preview": _rel_link(page.rel, lb.rel)}
+                for lb in page.logbooks
+            ]
+        if page.kind == "logbook":
+            # The original Markdown file is published unchanged, for download.
+            files[page.src.relative_to(root).as_posix()] = page.src
+            extra["download"] = page.src.name
+            extra["assignment"] = {"title": page.assignment.title,
+                                   "href": _rel_link(page.rel, page.assignment.rel)}
         if page.kind == "assignment":
             rule = genai.assignment_rule(genai_level, page.meta.get("genai"), str(page.src.relative_to(root)))
             if rule is not None:
                 extra["genai"] = {**rule, "policy": _rel_link(page.rel, PurePosixPath("info/genai.qmd"))}
-        body = rewrite_fences(page.body)
+        body = separate_thematic_breaks(rewrite_fences(page.body))
         if page.kind == "week" and page.meta.get("materials", True) is not False:
             week = next(w for w in course.weeks if w.overview is page)
             body = body.rstrip() + "\n" + _week_materials(week, page)
         meta = _page_meta(page, course, extra)
         meta.pop("materials", None)
+        if page.kind == "logbook":
+            meta["format"] = "html"   # a preview only; students hand in their own PDF
         files[str(page.rel)] = join_front_matter(meta, body).encode("utf-8")
 
     # 3. Generated pages.
@@ -265,6 +282,7 @@ def quarto_config(course: Course, opts: Options) -> dict:
 
     formats = {
         "html": {
+            "from": MARKDOWN_READER,
             "theme": ["cosmo", f"{ASSETS_DIR}/theme/saxion.scss"],
             "include-in-header": [f"{ASSETS_DIR}/theme/head.html"],
             "toc": True,
@@ -277,6 +295,7 @@ def quarto_config(course: Course, opts: Options) -> dict:
     }
     if opts.pdf:
         formats["typst"] = {
+            "from": MARKDOWN_READER,
             "papersize": "a4",
             "mainfont": "Lato",
             "fontsize": "10.5pt",
@@ -286,6 +305,7 @@ def quarto_config(course: Course, opts: Options) -> dict:
         }
 
     resources_globs = ["assignments/**/*.zip", "slides/**/*.pdf", "references/**/*.pdf"]
+    resources_globs += sorted(lb.src.relative_to(course.root).as_posix() for w in course.weeks for lb in w.logbooks)
     pages = sorted((str(p.rel) for p in course.pages()), key=natural_key)
     pages += [p for p in generated_pages(course) if p not in pages]
 

@@ -87,6 +87,36 @@ def rewrite_fences(body: str) -> str:
     return "".join(out)
 
 
+def separate_thematic_breaks(body: str) -> str:
+    """Put a blank line after a `---` horizontal rule that is followed by text.
+
+    GitHub shows `---` followed by e.g. `## Heading` as a horizontal rule, but
+    Pandoc/Quarto read it as the start of a YAML metadata block (and fail).
+    A `---` directly below a line of text is a heading underline; it is left
+    alone.
+    """
+    lines = body.splitlines(keepends=True)
+    out = []
+    open_fence = None
+    for i, line in enumerate(lines):
+        content = line.rstrip("\r\n")
+        m = _FENCE.match(content)
+        if open_fence is None and m:
+            open_fence = m.group("fence")
+        elif open_fence is not None:
+            if m and not m.group("info") and m.group("fence")[0] == open_fence[0] \
+                    and len(m.group("fence")) >= len(open_fence):
+                open_fence = None
+        elif (content.strip() == "---"
+              and (i == 0 or not lines[i - 1].strip())
+              and i + 1 < len(lines) and lines[i + 1].strip()):
+            out.append(line if line.endswith("\n") else line + "\n")
+            out.append("\n")
+            continue
+        out.append(line)
+    return "".join(out)
+
+
 def pop_leading_h1(body: str) -> tuple[str | None, str]:
     """If the body starts with a level-1 ATX heading, remove it and return its text."""
     lines = body.splitlines(keepends=True)

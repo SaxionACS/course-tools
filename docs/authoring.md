@@ -22,6 +22,7 @@ assignments/
   week_01/
     README.md                     optional: introduction to the week's assignments
     assignment1.md                a single-page assignment
+    es_w1_session1.md             a logbook, named in an assignment's front matter
     assignment2/                  an assignment with files
       index.md                    the assignment (README.md also works)
       starter/                    zipped as week_01-assignment2.zip and linked
@@ -109,6 +110,24 @@ genai:
   note: Use it for the tests only; write `is_balanced` yourself.
 ---
 ```
+
+## Logbooks
+
+A logbook is a Markdown file that students download, fill in (code,
+answers, names) and hand in, for example as a PDF. Name it in the front
+matter of its assignment, with a path relative to the assignment:
+
+```yaml
+---
+logbook: es_w1_session1.md         # several: [session1.md, session2.md]
+---
+```
+
+The assignment page then gets a *Logbook* box with a link to **download** the
+file, published unchanged, and a link to a **preview** on the website. The
+preview page links back to the assignment and has no PDF. A file named as a
+logbook is not an assignment of its own, so it does not appear in the
+sidebar.
 
 ## Links
 
