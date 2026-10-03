@@ -20,10 +20,60 @@ a complete example.
 | `lecturers` | List of `{name, email, role}`. |
 | `description` | Course description (Markdown). |
 | `prerequisites` | Required prior knowledge (Markdown). |
-| `learning_outcomes` | List of `{id, text}`. The `id` (e.g. `LO1`) is used in the assessment matrices. |
+| `learning_outcomes` | List of `{id, text}`. The `id` (e.g. `LO1`) is used in the assessment matrices. Optionally with an introduction (see below). |
 | `levels` | Level of the course in the Saxion level model (see below). |
-| `literature` | List of strings (Markdown). |
-| `links` | List of `{title, url}`, e.g. the module manual. |
+| `literature` | Mandatory and/or optional literature (Markdown), optionally with an introduction (see below). |
+| `links` | List of `{title, url}`, e.g. the module manual. Optionally with an introduction (see below). |
+
+### Introductions
+
+`learning_outcomes`, `levels`, `literature` and `links` can have an
+`introduction` (Markdown), shown before the list. Without one, a default text
+is shown (none for `links`). The lists are then written under `items`:
+
+```yaml
+learning_outcomes:
+  introduction: |
+    After this course, you can:
+  items:
+    - id: LO1
+      text: ...
+
+links:
+  introduction: The module manual is the official description of this course.
+  items:
+    - title: Module manual
+      url: https://...
+
+levels:
+  introduction: The level of this course in the Saxion level model.
+  independence: low
+  complexity: middle
+  interdisciplinarity: low
+```
+
+Without an introduction, a plain list (as in earlier versions) also works for
+`learning_outcomes`, `literature` and `links`.
+
+### Literature
+
+Literature can be split into `mandatory` and `optional` literature, shown
+under two subheadings:
+
+```yaml
+literature:
+  introduction: |          # optional
+    ...
+  mandatory:
+    - T. H. Cormen et al., *Introduction to Algorithms*, 4th ed., MIT Press, 2022.
+  optional:
+    - A. Bhargava, *Grokking Algorithms*, 2nd ed., Manning, 2024.
+```
+
+Use `items` (or a plain list) for literature without that distinction. The
+default introduction depends on which lists there are, e.g. "The mandatory
+literature is needed to complete this course; the optional literature is for
+further reading."
 
 ### Course level (Saxion level model)
 

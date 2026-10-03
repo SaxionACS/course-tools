@@ -43,9 +43,44 @@ def _warn(msg: str) -> None:
     print(f"warning: {msg}", file=sys.stderr)
 
 
+def _list_section(value, name: str, list_keys=("items",), warn: bool = True):
+    """A list in general.yaml, written as a plain list or as a mapping with an
+    `introduction` and one or more lists (`list_keys`).
+
+    Returns (introduction or None, {list key: list}); a plain list is the
+    first list key.
+    """
+    if value is None:
+        return None, {}
+    if isinstance(value, list):
+        return None, {list_keys[0]: value}
+    if not isinstance(value, dict):
+        if warn:
+            _warn(f"general.yaml: `{name}` must be a list, or a mapping with `introduction` and "
+                  f"{' / '.join(f'`{k}`' for k in list_keys)}")
+        return None, {}
+    if warn:
+        for key in value:
+            if key not in ("introduction", *list_keys):
+                _warn(f"general.yaml: unknown key `{key}` in `{name}` "
+                      f"(use introduction, {', '.join(list_keys)})")
+    lists = {}
+    for key in list_keys:
+        items = value.get(key)
+        if items is None:
+            continue
+        if isinstance(items, list):
+            lists[key] = items
+        elif warn:
+            _warn(f"general.yaml: `{name}.{key}` must be a list")
+    intro = str(value["introduction"]).strip() if value.get("introduction") else None
+    return intro, lists
+
+
 def learning_outcomes(general: dict) -> list[dict]:
     result = []
-    for i, lo in enumerate(general.get("learning_outcomes") or [], start=1):
+    _, lists = _list_section(general.get("learning_outcomes"), "learning_outcomes", warn=False)
+    for i, lo in enumerate(lists.get("items", []), start=1):
         if isinstance(lo, str):
             lo = {"id": f"LO{i}", "text": lo}
         result.append({"id": str(lo.get("id", f"LO{i}")), "text": str(lo.get("text", "")).strip()})
@@ -79,22 +114,23 @@ def general_page(general: dict, has_assessment: bool, has_genai: bool = False) -
         if general.get(key):
             out += [f"## {heading}", "", str(general[key]).strip(), ""]
 
+    lo_intro, _ = _list_section(general.get("learning_outcomes"), "learning_outcomes")
     los = learning_outcomes(general)
     if los:
-        out += ["## Learning outcomes", "", "After successfully completing this course, you can:", ""]
+        out += ["## Learning outcomes", "",
+                lo_intro or "After successfully completing this course, you can:", ""]
         out += [f"- **{lo['id']}** – {lo['text']}" for lo in los]
         out.append("")
 
     out += _levels_section(general.get("levels"))
+    out += _literature_section(general.get("literature"))
 
-    if general.get("literature"):
-        out += ["## Literature", ""]
-        out += [f"- {item}" for item in general["literature"]]
-        out.append("")
-
-    links = general.get("links") or []
+    links_intro, link_lists = _list_section(general.get("links"), "links")
+    links = link_lists.get("items", [])
     if links or has_assessment or has_genai:
         out += ["## More information", ""]
+        if links_intro:
+            out += [links_intro, ""]
         if has_assessment:
             out.append("- [Assessment](assessment.qmd)")
         if has_genai:
@@ -123,7 +159,7 @@ def parse_levels(raw) -> tuple[dict[str, int], dict[str, str]]:
         return levels, notes
     keys = {p["key"] for p in PILLARS}
     for key in raw:
-        if key not in keys:
+        if key not in keys and key != "introduction":
             _warn(f"general.yaml: unknown pillar `{key}` in `levels` (use {', '.join(sorted(keys))})")
     for pillar in PILLARS:
         value = raw.get(pillar["key"])
@@ -196,9 +232,11 @@ def _levels_section(raw) -> list[str]:
     levels, notes = parse_levels(raw)
     if not levels:
         return []
+    intro = str(raw.get("introduction") or "").strip() or \
+        "The level of this course in the three pillars of the Saxion level model (ZelCom-i model):"
     out = [
         "## Course level", "",
-        "The level of this course in the three pillars of the Saxion level model (ZelCom-i model):", "",
+        intro, "",
         "```{=html}", _levels_html(levels), "```", "",
         "```{=typst}", _levels_typst(levels), "```", "",
     ]
@@ -422,6 +460,31 @@ def _bloom_legend(custom_verbs: dict) -> list[str]:
             example = [example]
         out.append(f"| **{b['name']}** | {b['description']} | {_cell(', '.join(str(v) for v in example))} |")
     out.append("")
+    return out
+
+
+def _literature_section(value) -> list[str]:
+    """Literature: one list, or mandatory and optional literature."""
+    intro, lists = _list_section(value, "literature", ("items", "mandatory", "optional"))
+    if not any(lists.values()):
+        return []
+    if intro is None:
+        if lists.get("mandatory") and lists.get("optional"):
+            intro = ("The mandatory literature is needed to complete this course; the optional "
+                     "literature is for further reading.")
+        elif lists.get("mandatory"):
+            intro = "The mandatory literature is needed to complete this course."
+        elif lists.get("optional"):
+            intro = "The optional literature is for further reading."
+        else:
+            intro = "This course uses the following literature."
+    out = ["## Literature", "", intro, ""]
+    out += [f"- {item}" for item in lists.get("items", [])]
+    if lists.get("items"):
+        out.append("")
+    for key, heading in (("mandatory", "Mandatory"), ("optional", "Optional")):
+        if lists.get(key):
+            out += [f"### {heading}", ""] + [f"- {item}" for item in lists[key]] + [""]
     return out
 
 
