@@ -108,10 +108,23 @@ interdisciplinarity requires at least middle independence.
 
 | Field | Description |
 |:--|:--|
-| `introduction` | Text at the top of the page. |
-| `components` | List of assessment components (see below). |
+| `introduction` | Text at the top of the page. Default: a sentence saying what the page contains. |
+| `components` | List of assessment components (see below), optionally with an introduction. |
 | `final_grade` | How the final grade is determined. |
 | `bloom_verbs` | Optional: other example verbs for the Bloom legend (see below). |
+
+The table of components has a default introduction ("The course is assessed
+with the components below. The weight is the share of a component in the final
+grade."). To replace it, write `components` like the lists in `general.yaml`:
+
+```yaml
+components:
+  introduction: |
+    The course has two components: a written exam and a portfolio.
+  items:
+    - id: EXAM
+      ...
+```
 
 Each component has:
 

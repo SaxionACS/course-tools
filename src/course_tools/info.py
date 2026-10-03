@@ -39,13 +39,19 @@ def _separator(spec: list[tuple[str, int]]) -> str:
     return "|" + "|".join(cells) + "|"
 
 
+DEFAULT_COMPONENTS_INTRO = (
+    "The course is assessed with the components below. The weight is the share of a component "
+    "in the final grade."
+)
+
+
 def _warn(msg: str) -> None:
     print(f"warning: {msg}", file=sys.stderr)
 
 
-def _list_section(value, name: str, list_keys=("items",), warn: bool = True):
-    """A list in general.yaml, written as a plain list or as a mapping with an
-    `introduction` and one or more lists (`list_keys`).
+def _list_section(value, name: str, list_keys=("items",), warn: bool = True, source: str = "general.yaml"):
+    """A list in a course YAML file, written as a plain list or as a mapping
+    with an `introduction` and one or more lists (`list_keys`).
 
     Returns (introduction or None, {list key: list}); a plain list is the
     first list key.
@@ -56,13 +62,13 @@ def _list_section(value, name: str, list_keys=("items",), warn: bool = True):
         return None, {list_keys[0]: value}
     if not isinstance(value, dict):
         if warn:
-            _warn(f"general.yaml: `{name}` must be a list, or a mapping with `introduction` and "
+            _warn(f"{source}: `{name}` must be a list, or a mapping with `introduction` and "
                   f"{' / '.join(f'`{k}`' for k in list_keys)}")
         return None, {}
     if warn:
         for key in value:
             if key not in ("introduction", *list_keys):
-                _warn(f"general.yaml: unknown key `{key}` in `{name}` "
+                _warn(f"{source}: unknown key `{key}` in `{name}` "
                       f"(use introduction, {', '.join(list_keys)})")
     lists = {}
     for key in list_keys:
@@ -72,7 +78,7 @@ def _list_section(value, name: str, list_keys=("items",), warn: bool = True):
         if isinstance(items, list):
             lists[key] = items
         elif warn:
-            _warn(f"general.yaml: `{name}.{key}` must be a list")
+            _warn(f"{source}: `{name}.{key}` must be a list")
     intro = str(value["introduction"]).strip() if value.get("introduction") else None
     return intro, lists
 
@@ -263,12 +269,29 @@ def _component_title(c: dict) -> str:
     return str(c.get("name") or c.get("id") or "Component")
 
 
+def _default_assessment_intro(components: list[dict], assessment: dict) -> str:
+    """'This page describes how the course is assessed: ...', listing what the page contains."""
+    parts = []
+    if components:
+        parts.append("the assessment components")
+    if assessment.get("final_grade"):
+        parts.append("how the final grade is determined")
+    if any(c.get("matrix") for c in components):
+        parts.append("which learning outcomes each component assesses")
+    text = "This page describes how the course is assessed"
+    if not parts:
+        return text + "."
+    listed = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    return f"{text}: {listed}."
+
+
 def assessment_page(assessment: dict, general: dict) -> str:
-    components = assessment.get("components") or []
+    components_intro, lists = _list_section(assessment.get("components"), "components", source="assessment.yaml")
+    components = lists.get("items", [])
     los = learning_outcomes(general)
     out = ["---", "title: Assessment", "---", ""]
-    if assessment.get("introduction"):
-        out += [str(assessment["introduction"]).strip(), ""]
+    out += [str(assessment.get("introduction") or "").strip()
+            or _default_assessment_intro(components, assessment), ""]
 
     has_matrices = any(c.get("matrix") for c in components)
     if los and (has_matrices or any(c.get("rubric") for c in components)):
@@ -281,7 +304,7 @@ def assessment_page(assessment: dict, general: dict) -> str:
         out += ["", ":::", ""]
 
     if components:
-        out += ["## Components", ""]
+        out += ["## Components", "", components_intro or DEFAULT_COMPONENTS_INTRO, ""]
         out += ["| Component | Form | Weight | When |",
                 _separator([("l", 24), ("l", 50), ("r", 10), ("l", 16)])]
         total = 0
