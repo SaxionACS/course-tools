@@ -9,6 +9,7 @@ Course page decorations and link handling.
   assignment, and a note on the preview page.
 * Every page: a footer with the dates from version control (added, last
   changed and by whom).
+* Diagrams (Mermaid, PlantUML) are centred unless they set `fig-align`.
 * Links to other course pages may be written as `page.md` / `README.md`.
 * PDF (Typst): relative links become absolute links to the published site,
   and every page gets a running header and footer.
@@ -281,6 +282,40 @@ local function link(l)
   end
 end
 
+-- Diagrams -----------------------------------------------------------------
+-- Diagrams are centred unless they say otherwise (`fig-align: left`).
+-- Mermaid: the stager adds `%%| fig-align: center`; Quarto turns it into the
+-- `layout-align` attribute of the cell and centres it on the website, but not
+-- in the PDF. PlantUML: the diagram filter (which runs after this one) drops
+-- the alignment, so the code block is wrapped here.
+
+-- Typst: `#align(...)[ <blocks> ]`, around the diagram (a Div would become a
+-- `#block`, which is only as wide as its content, so centring inside it has
+-- no effect).
+local function typst_aligned(blocks, align)
+  local result = pandoc.Blocks({pandoc.RawBlock('typst', '#align(' .. align .. ')[')})
+  result:extend(blocks)
+  result:insert(pandoc.RawBlock('typst', ']'))
+  return result
+end
+
+local function align_cell(div)
+  local align = div.attributes['layout-align']
+  if is_typst and div.classes:includes('cell') and (align == 'center' or align == 'right') then
+    return typst_aligned({div}, align)
+  end
+end
+
+local function align_plantuml(cb)
+  if not cb.classes:includes('plantuml') then return nil end
+  local align = cb.attributes['fig-align'] or cb.text:match("'|%s*fig%-align:%s*(%a+)") or 'center'
+  if align ~= 'center' and align ~= 'right' then return nil end
+  if is_typst then
+    return typst_aligned({cb}, align)
+  end
+  return pandoc.Div({cb}, pandoc.Attr('', {'course-diagram'}, {{'style', 'text-align: ' .. align}}))
+end
+
 -- Images (PDF) ------------------------------------------------------------
 
 -- Width of the text area of an A4 page with the margins from _quarto.yml.
@@ -299,6 +334,7 @@ local function fit_image(img)
 end
 
 return {
+  {Div = align_cell, CodeBlock = align_plantuml},
   {Pandoc = decorate},
   {Link = link},
   is_typst and {Image = fit_image} or {},

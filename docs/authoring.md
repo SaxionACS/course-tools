@@ -210,6 +210,26 @@ Alice -> Bob: hello
 ```
 ````
 
+Diagrams are **centred** on the website and in the PDF. To align one on the
+left (or right) instead, start it with a `fig-align` comment line. The comment
+marker is `%%` in Mermaid and `'` in PlantUML, so GitHub and the diagram tools
+ignore the line:
+
+````markdown
+```mermaid
+%%| fig-align: left
+flowchart LR
+  A --> B
+```
+
+```plantuml
+@startuml
+'| fig-align: left
+Alice -> Bob: hello
+@enduml
+```
+````
+
 ### Images
 
 ```markdown

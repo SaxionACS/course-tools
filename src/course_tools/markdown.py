@@ -3,7 +3,8 @@
 Authors write plain (GitHub-flavoured) Markdown. Before Quarto sees a page, it
 is adjusted so that GitHub conventions map onto Quarto features:
 
-* a ```` ```mermaid ```` block becomes a Quarto ``{mermaid}`` diagram cell;
+* a ```` ```mermaid ```` block becomes a Quarto ``{mermaid}`` diagram cell,
+  centred unless it sets ``%%| fig-align:`` itself;
 * a ```` ```plantuml ```` block becomes a ``{.plantuml}`` block for the
   diagram filter;
 * executable-cell syntax such as ```` ```{python} ```` is turned into a plain
@@ -25,6 +26,7 @@ _FENCE = re.compile(r"^(?P<indent>[ \t]{0,3})(?P<fence>`{3,}|~{3,})[ \t]*(?P<inf
 _CELL = re.compile(r"\{\s*([A-Za-z][\w+-]*)(.*)\}")
 _ATX_H1 = re.compile(r"^#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 _HEADING_ATTRS = re.compile(r"[ \t]*\{[^}]*\}$")
+_MERMAID_ALIGN = re.compile(r"^\s*%%\|\s*fig-align\s*:")
 
 # Diagram cells that Quarto renders itself.
 QUARTO_DIAGRAMS = {"mermaid", "dot"}
@@ -67,7 +69,8 @@ def rewrite_fences(body: str) -> str:
     """Rewrite the info strings of opening code fences (see module docstring)."""
     out = []
     open_fence = None
-    for line in body.splitlines(keepends=True):
+    lines = body.splitlines(keepends=True)
+    for i, line in enumerate(lines):
         content = line.rstrip("\r\n")
         m = _FENCE.match(content)
         if open_fence is None:
@@ -76,6 +79,9 @@ def rewrite_fences(body: str) -> str:
                 info = _rewrite_info(m.group("info"))
                 if info != m.group("info"):
                     line = f"{m.group('indent')}{open_fence}{info}{line[len(content):]}"
+                if info == "{mermaid}" and not _sets_alignment(lines, i + 1):
+                    # Diagrams are centred by default (opt out: %%| fig-align: left).
+                    line = line.rstrip("\r\n") + "\n" + f"{m.group('indent')}%%| fig-align: center\n"
         elif (
             m
             and not m.group("info")
@@ -85,6 +91,16 @@ def rewrite_fences(body: str) -> str:
             open_fence = None
         out.append(line)
     return "".join(out)
+
+
+def _sets_alignment(lines: list[str], start: int) -> bool:
+    """Whether the `%%|` cell options at the start of a Mermaid block set fig-align."""
+    for line in lines[start:]:
+        if not line.lstrip().startswith("%%|"):
+            return False
+        if _MERMAID_ALIGN.match(line):
+            return True
+    return False
 
 
 def separate_thematic_breaks(body: str) -> str:
