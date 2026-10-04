@@ -7,6 +7,8 @@ Course page decorations and link handling.
   policy), and a box with the starter-files zip if there are starter files.
 * Logbooks (Markdown files students fill in): a download/preview box on the
   assignment, and a note on the preview page.
+* Every page: a footer with the dates from version control (added, last
+  changed and by whom).
 * Links to other course pages may be written as `page.md` / `README.md`.
 * PDF (Typst): relative links become absolute links to the published site,
   and every page gets a running header and footer.
@@ -89,6 +91,26 @@ local function logbooks_box(logbooks)
   return callout('note', #lines == 1 and 'Logbook' or 'Logbooks', content)
 end
 
+-- Footer: when the source was added and last changed (from git).
+local function history_footer(h)
+  local lines = {}
+  if h.added ~= nil then
+    table.insert(lines, 'Added on ' .. str(h.added) .. '.')
+  end
+  if h.changed ~= nil then
+    table.insert(lines, 'Last changed on ' .. str(h.changed) .. ' by ' .. str(h.author) .. '.')
+  end
+  if is_typst then
+    local text = {}
+    for _, line in ipairs(lines) do table.insert(text, '#' .. typst_string(line)) end
+    return pandoc.RawBlock('typst', '#v(1.5em)\n#line(length: 100%, stroke: 0.5pt + luma(190))\n'
+      .. '#text(size: 8.5pt, fill: luma(110))[' .. table.concat(text, ' \\ ') .. ']')
+  end
+  local blocks = {pandoc.HorizontalRule()}
+  for _, line in ipairs(lines) do table.insert(blocks, pandoc.Para(pandoc.Inlines(line))) end
+  return pandoc.Div(blocks, pandoc.Attr('', {'course-history'}))
+end
+
 -- Box at the top of an assignment: is generative AI allowed in it?
 local function genai_box(rule)
   local T = pandoc.Inlines
@@ -169,6 +191,9 @@ local function decorate(doc)
   end
 
   doc.blocks = top .. doc.blocks
+  if page.history ~= nil then
+    doc.blocks:insert(history_footer(page.history))
+  end
 
   if is_typst then
     local url = site_url(input_stem() .. '.html') or ''

@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from . import genai, info
+from . import genai, history, info
 from .course import Course, Page, Week, is_ignored
 from .markdown import join_front_matter, natural_key, rewrite_fences, separate_thematic_breaks, split_front_matter
 
@@ -129,10 +129,18 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
     if course.genai is None:
         print("warning: no info/genAI.yaml: the course has no generative-AI policy "
               "(Saxion's default applies: allowed, with citation)", file=sys.stderr)
+    dates = history.file_history(root)
+
+    def page_history(source: Path | None) -> dict | None:
+        """Footer data (added / last changed / author) of a source file, from git."""
+        return history.footer(dates.get(source.relative_to(root).as_posix())) if source else None
+
     for page in course.pages():
         if page.src is not None:
             files.pop(page.src.relative_to(root).as_posix(), None)
         extra: dict = {}
+        if found := page_history(page.src):
+            extra["history"] = found
         if page.kind == "lecture" and page.slides_expected:
             extra["slides"] = _rel_link(page.rel, page.slides) if page.slides else False
         if page.starter_dir is not None:
@@ -170,14 +178,18 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
 
     # 3. Generated pages.
     generated = generated_pages(course)
+    general_yaml = root / "info" / "general.yaml"
     if "index.qmd" in generated:
-        files["index.qmd"] = info.default_home(course.general).encode("utf-8")
+        files["index.qmd"] = _generated(info.default_home(course.general), "", page_history(general_yaml))
     files["info/index.qmd"] = _generated(
-        info.general_page(course.general, "info/assessment.qmd" in generated, "info/genai.qmd" in generated), "info")
+        info.general_page(course.general, "info/assessment.qmd" in generated, "info/genai.qmd" in generated),
+        "info", page_history(general_yaml))
     if "info/assessment.qmd" in generated:
-        files["info/assessment.qmd"] = _generated(info.assessment_page(course.assessment, course.general), "info")
+        files["info/assessment.qmd"] = _generated(info.assessment_page(course.assessment, course.general),
+                                                  "info", page_history(root / "info" / "assessment.yaml"))
     if "info/genai.qmd" in generated:
-        files["info/genai.qmd"] = _generated(genai.policy_page(course.genai, genai_level), "info")
+        files["info/genai.qmd"] = _generated(genai.policy_page(course.genai, genai_level),
+                                             "info", page_history(course.genai_file))
 
     # 4. Theme, filters, extensions.
     assets = resources.files("course_tools") / "assets"
@@ -206,10 +218,12 @@ def generated_pages(course: Course) -> list[str]:
     return pages
 
 
-def _generated(text: str, directory: str) -> bytes:
+def _generated(text: str, directory: str, page_history: dict | None = None) -> bytes:
     meta, body = split_front_matter(text)
     meta["engine"] = "markdown"
     meta["course-page"] = {"kind": "info", "dir": directory}
+    if page_history:
+        meta["course-page"]["history"] = page_history
     return join_front_matter(meta, body).encode("utf-8")
 
 

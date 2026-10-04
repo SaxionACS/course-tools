@@ -219,6 +219,21 @@ Alice -> Bob: hello
 Use paths relative to the page. SVG gives the sharpest result on screen and in
 PDFs.
 
+## Page footer: dates from git
+
+Every page ends with a footer that says when its source file was added to the
+repository and when, and by whom, it was last changed:
+
+> Added on 23 February 2026.
+> Last changed on 5 September 2026 at 14:32 by Robert Changeling.
+
+The dates and the name come from the git history of the page's source file
+(for the course information pages: the YAML file). Times are shown in Dutch
+time. Renamed or moved files keep their original date. The name is the
+author name of the commit, so set it properly once:
+`git config --global user.name "Your Name"`. Files that are not committed yet
+have no footer.
+
 ## Previewing
 
 Run `course preview` in the course repository. It shows the website on

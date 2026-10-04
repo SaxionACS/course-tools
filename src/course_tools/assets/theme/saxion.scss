@@ -111,6 +111,21 @@ table {
   }
 }
 
+// Page footer with the dates from version control.
+.course-history {
+  margin-top: 2.5rem;
+  color: $text-muted;
+  font-size: .85rem;
+
+  hr {
+    margin: 0 0 .75rem;
+  }
+
+  p {
+    margin: 0;
+  }
+}
+
 // Learning outcomes on the Assessment page: the ids stand out.
 .learning-outcomes table td:first-child {
   color: $saxion-green;

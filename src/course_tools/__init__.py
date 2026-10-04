@@ -1,3 +1,3 @@
 """Build Saxion ACS course content into a website, LMS-embeddable pages and PDFs."""
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"

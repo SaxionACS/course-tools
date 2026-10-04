@@ -45,6 +45,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           lfs: true
+          fetch-depth: 0      # full history: pages show when they were added and last changed
 
       - name: Check out course-tools
         uses: actions/checkout@v7

@@ -90,6 +90,7 @@ class Course:
     general: dict
     assessment: dict | None
     genai: dict | None
+    genai_file: Path | None
     home: Page | None
     info_pages: list[Page]
     weeks: list[Week]
@@ -231,11 +232,11 @@ def scan(root: Path) -> Course:
     if general is None:
         raise CourseError(f"{root / 'info' / 'general.yaml'} not found - is this a course repository?")
     assessment = _load_yaml(root / "info" / "assessment.yaml")
-    genai = None
+    genai = genai_file = None
     if (root / "info").is_dir():
         for p in sorted((root / "info").iterdir()):
             if p.name.lower() in ("genai.yaml", "genai.yml"):
-                genai = _load_yaml(p)
+                genai, genai_file = _load_yaml(p), p
 
     home = None
     readme = _find_readme(root)
@@ -324,7 +325,7 @@ def scan(root: Path) -> Course:
         ]
 
     return Course(
-        root=root, general=general, assessment=assessment, genai=genai, home=home, info_pages=info_pages,
+        root=root, general=general, assessment=assessment, genai=genai, genai_file=genai_file, home=home, info_pages=info_pages,
         weeks=weeks, exams_overview=exams_overview, exams=exams,
         references_overview=references_overview, references=references,
         reference_files=reference_files,
