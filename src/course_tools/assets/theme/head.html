@@ -10,13 +10,24 @@
     if (embedded) document.documentElement.classList.add('embedded');
   })();
 
-  // Move the PDF button (added by filters/course.lua) next to the page title.
   document.addEventListener('DOMContentLoaded', function () {
+    // Move the PDF button (added by filters/course.lua) next to the page title.
     var button = document.querySelector('.course-pdf');
     var title = document.querySelector('#title-block-header .quarto-title');
     if (button && title) {
       title.insertBefore(button, title.firstChild);
       button.classList.add('in-title');
     }
+
+    // PDF files open in a new tab, in the browser's PDF viewer. The filter does
+    // this for links in the content; this covers links that Quarto makes, such
+    // as PDFs in the sidebar.
+    document.querySelectorAll('a[href]').forEach(function (a) {
+      if (/\.pdf$/i.test(a.pathname)) {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener');
+        a.removeAttribute('download');
+      }
+    });
   });
 </script>

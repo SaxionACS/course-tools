@@ -141,7 +141,11 @@ and [GenAI policy](info/genAI.yaml).
 ```
 
 On the website these become links to the pages. In PDFs they become links to
-the published website. Links to `info/general.yaml`, `info/assessment.yaml`
+the published website.
+
+Links to PDF files (slides, references, the PDF version of a page, or any PDF
+you link to) open in a new tab, in the browser's PDF viewer, also when the page
+is embedded in Brightspace. Links to `info/general.yaml`, `info/assessment.yaml`
 and `info/genAI.yaml` lead to the generated pages.
 
 ## Markdown features

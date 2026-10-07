@@ -155,7 +155,7 @@ local function decorate(doc)
   if is_html and site.pdf == true and str(page.kind) ~= 'logbook' then
     top:insert(pandoc.RawBlock('html',
       '<div class="course-pdf"><a class="btn btn-sm btn-outline-primary" href="'
-      .. input_stem() .. '.pdf" download><i class="bi bi-file-earmark-pdf"></i> PDF</a></div>'))
+      .. input_stem() .. '.pdf" target="_blank" rel="noopener"><i class="bi bi-file-earmark-pdf"></i> PDF</a></div>'))
   end
 
   if page.slides ~= nil then
@@ -163,7 +163,7 @@ local function decorate(doc)
     if page.slides == false then
       content = pandoc.Para(pandoc.Inlines('No presentation yet.'))
     else
-      content = pandoc.Para({pandoc.Link('Download the slides (PDF)', str(page.slides))})
+      content = pandoc.Para({pandoc.Link('Open the slides (PDF)', str(page.slides))})
     end
     top:insert(callout('note', 'Slides', {content}))
   end
@@ -249,7 +249,18 @@ local function staged_name(name)
   return (name:gsub('%.md$', '.qmd'))
 end
 
+-- PDF files open in a new tab, in the browser's PDF viewer (also when the page
+-- is embedded in Brightspace). See also head.html, for links Quarto makes.
+local function is_pdf(target)
+  return (target:match('^([^#?]*)') or ''):lower():match('%.pdf$') ~= nil
+end
+
 local function link(l)
+  if is_html and is_pdf(l.target) then
+    l.attributes['target'] = '_blank'
+    l.attributes['rel'] = 'noopener'
+    return l
+  end
   if not is_relative(l.target) then return nil end
   if l.classes:includes('course-download') then
     -- Files to download keep their name; in a PDF they link to the website.
