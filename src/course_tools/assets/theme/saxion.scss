@@ -126,6 +126,25 @@ table {
   }
 }
 
+// Code annotations: Quarto floats the numbers to the right edge of the code
+// block; head.html moves them next to the code, aligned in one column. The
+// number is drawn by CSS, so that copying the code does not include it.
+code.sourceCode .code-annotation-anchor.course-inline {
+  float: none;
+  display: inline-block;
+  vertical-align: text-bottom;
+
+  &::after {
+    content: attr(data-target-annotation);
+  }
+}
+
+// The gutter on the right that held the numbers.
+.code-annotation-gutter-bg,
+.code-annotation-gutter {
+  display: none;
+}
+
 // Learning outcomes on the Assessment page: the ids stand out.
 .learning-outcomes table td:first-child {
   color: $saxion-green;

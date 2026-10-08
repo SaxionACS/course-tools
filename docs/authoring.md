@@ -214,8 +214,8 @@ for (size_t i = 1; i < n; i++) {       // <2>
 Use the comment syntax of the language: `// <1>` in C, C++, Java, JavaScript,
 `# <1>` in Python, Bash, YAML, and so on. (Quarto itself only accepts
 `/* <1> */` in C; course-tools converts `// <1>` for you.) On the website the
-markers become clickable numbers; in the PDF they become circled numbers
-(`// ①`) that match the list below the code.
+markers become numbers right after the code, aligned in one column; in the PDF
+they become circled numbers (`// ①`). Both match the list below the code.
 
 ### Diagrams
 

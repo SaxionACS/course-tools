@@ -29,5 +29,29 @@
         a.removeAttribute('download');
       }
     });
+
+    // Code annotations: Quarto floats the numbers to the right edge of the
+    // code block. Put each number after the code of its line instead, aligned
+    // in one column two characters after the longest annotated line (margins
+    // in `ch`, the width of a code character). The number is shown by CSS
+    // (saxion.scss), so copying the code does not include it.
+    document.querySelectorAll('code.sourceCode').forEach(function (code) {
+      var marked = [];
+      code.querySelectorAll(':scope > a.code-annotation-anchor').forEach(function (anchor) {
+        var line = anchor.nextElementSibling;
+        if (line && line.classList.contains('code-annotation-target')) marked.push([anchor, line]);
+      });
+      var length = function (line) { return line.textContent.replace(/\s+$/, '').length; };
+      var longest = 0;
+      marked.forEach(function (m) { longest = Math.max(longest, length(m[1])); });
+      marked.forEach(function (m) {
+        var pad = document.createElement('span');
+        pad.style.marginLeft = (longest - length(m[1]) + 2) + 'ch';
+        m[0].textContent = '';
+        m[0].classList.add('course-inline');
+        pad.appendChild(m[0]);
+        m[1].appendChild(pad);
+      });
+    });
   });
 </script>
