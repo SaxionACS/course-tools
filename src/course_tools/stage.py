@@ -316,6 +316,8 @@ def quarto_config(course: Course, opts: Options) -> dict:
             "margin": {"x": "2.2cm", "y": "2.5cm"},
             "include-in-header": [f"{ASSETS_DIR}/typst/header.typ"],
             "mermaid-format": "png",
+            # Code annotations are rendered by filters/course.lua for Typst.
+            "code-annotations": False,
         }
 
     resources_globs = ["assignments/**/*.zip", "slides/**/*.pdf", "references/**/*.pdf"]

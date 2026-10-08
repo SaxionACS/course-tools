@@ -196,6 +196,27 @@ Fenced code blocks with a language get syntax highlighting and, on the
 website, a copy button. Code is only displayed, never run: even
 ```` ```{python} ```` is shown as a normal code block.
 
+### Code annotations
+
+Explain lines of code with a numbered comment marker at the end of the line
+and a numbered list *directly* after the code block
+([Quarto code annotations](https://quarto.org/docs/authoring/code-annotation.html)):
+
+````markdown
+```c
+int best = values[0];                  // <1>
+for (size_t i = 1; i < n; i++) {       // <2>
+```
+1. Start with the first value as the best so far.
+2. Compare every other value with it.
+````
+
+Use the comment syntax of the language: `// <1>` in C, C++, Java, JavaScript,
+`# <1>` in Python, Bash, YAML, and so on. (Quarto itself only accepts
+`/* <1> */` in C; course-tools converts `// <1>` for you.) On the website the
+markers become clickable numbers; in the PDF they become circled numbers
+(`// ①`) that match the list below the code.
+
 ### Diagrams
 
 Mermaid and PlantUML are written in fenced blocks. GitHub shows Mermaid

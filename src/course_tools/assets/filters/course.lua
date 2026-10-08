@@ -10,6 +10,9 @@ Course page decorations and link handling.
 * Every page: a footer with the dates from version control (added, last
   changed and by whom).
 * Diagrams (Mermaid, PlantUML) are centred unless they set `fig-align`.
+* Code annotations (`// <1>` + a numbered list after the code block): C
+  markers are converted to the form Quarto expects; in PDFs the markers become
+  circled numbers.
 * Links to other course pages may be written as `page.md` / `README.md`.
 * PDF (Typst): relative links become absolute links to the published site,
   and every page gets a running header and footer.
@@ -327,6 +330,73 @@ local function align_plantuml(cb)
   return pandoc.Div({cb}, pandoc.Attr('', {'course-diagram'}, {{'style', 'text-align: ' .. align}}))
 end
 
+-- Code annotations -------------------------------------------------------
+-- A code block whose lines end with comment markers such as `// <1>`, directly
+-- followed by a numbered list, is annotated (Quarto feature).
+-- * Website: Quarto expects `/* <1> */` in C, while `// <1>` is the usual way
+--   to write it; C markers are converted.
+-- * PDF: Quarto's Typst output lists "Line N" without showing line numbers,
+--   so annotations are switched off for Typst (_quarto.yml) and done here: the
+--   markers become circled numbers (`// ①`) and the list uses the same numbers.
+
+-- Comment styles that can carry a marker: {start, end} as Lua patterns.
+local MARKER_STYLES = {
+  {'//', ''}, {'/%*', '%*/'}, {'#', ''}, {'%-%-', ''}, {'%%', ''}, {';', ''},
+}
+
+-- For a line ending in an annotation marker: the code before it, the number,
+-- and the comment style. nil otherwise.
+local function find_marker(line)
+  for _, style in ipairs(MARKER_STYLES) do
+    local code, n = line:match('^(.-)' .. style[1] .. '%s*<(%d+)>%s*' .. style[2] .. '%s*$')
+    if code then return code, tonumber(n), style end
+  end
+end
+
+local function circled(n)
+  if n >= 1 and n <= 20 then
+    return utf8.char(0x2460 + n - 1)
+  end
+  return '(' .. n .. ')'
+end
+
+-- Rewrite the markers of an annotated code block; nil if it has none.
+local function rewrite_markers(cb)
+  local lines, found = {}, false
+  for line in (cb.text .. '\n'):gmatch('(.-)\n') do
+    local code, n, style = find_marker(line)
+    if code and is_typst then
+      local start = (style[1]:gsub('%%(.)', '%1'))     -- pattern -> literal text
+      local finish = (style[2]:gsub('%%(.)', '%1'))
+      line = code .. start .. ' ' .. circled(n) .. (finish ~= '' and ' ' .. finish or '')
+      found = true
+    elseif code and is_html and cb.classes:includes('c') and style[1] == '//' then
+      line = code .. '/* <' .. n .. '> */'
+      found = true
+    end
+    table.insert(lines, line)
+  end
+  if not found then return nil end
+  cb.text = table.concat(lines, '\n')
+  return cb
+end
+
+local function annotations(blocks)
+  local changed = false
+  for i = 1, #blocks - 1 do
+    if blocks[i].t == 'CodeBlock' and blocks[i + 1].t == 'OrderedList' and rewrite_markers(blocks[i]) then
+      changed = true
+      if is_typst then
+        -- Number the explanations like the markers (①, ②, ...); the Div is a
+        -- Typst block, which scopes the `set` rule to this list.
+        blocks[i + 1] = pandoc.Div({pandoc.RawBlock('typst', '#set enum(numbering: "①")'), blocks[i + 1]},
+                                   pandoc.Attr('', {'course-annotations'}))
+      end
+    end
+  end
+  if changed then return blocks end
+end
+
 -- Images (PDF) ------------------------------------------------------------
 
 -- Width of the text area of an A4 page with the margins from _quarto.yml.
@@ -345,6 +415,7 @@ local function fit_image(img)
 end
 
 return {
+  {Blocks = annotations},
   {Div = align_cell, CodeBlock = align_plantuml},
   {Pandoc = decorate},
   {Link = link},
