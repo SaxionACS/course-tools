@@ -39,6 +39,6 @@ On macOS:
 - If Homebrew's own `plantuml` is installed, it comes first on `PATH`;
   `install.sh` warns about it. Uninstall it (`brew uninstall plantuml`) to use
   the pinned version.
-- Homebrew's Graphviz is much newer than Ubuntu's (2.42), which CI uses. PlantUML
+- Homebrew's Graphviz is much newer than Ubuntu's (2.43), which CI uses. PlantUML
   diagrams other than sequence diagrams may be laid out slightly differently in
   a local build than on the published site.
