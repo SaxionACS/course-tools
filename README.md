@@ -44,7 +44,8 @@ course repository ──► course stage ──► .build/ (Quarto project) ─�
 
 ## Local use
 
-Install the tools once (see [requirements](requirements.md)):
+Install the tools once, on Ubuntu 24.04 (also in WSL) or on macOS with
+[Homebrew](https://brew.sh) (see [requirements](requirements.md)):
 
 ```bash
 git clone https://github.com/SaxionACS/course-tools.git

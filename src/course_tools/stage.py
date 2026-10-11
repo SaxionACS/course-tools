@@ -364,6 +364,15 @@ def sync(stage: Path, files: dict[str, bytes | Path]) -> list[str]:
     if manifest_path.is_file():
         previous = set(json.loads(manifest_path.read_text()))
 
+    # Remove stale files first: on a case-insensitive file system (macOS), a
+    # file renamed only in case (Lecture1 -> lecture1) is the same file as its
+    # new name, which would otherwise be deleted right after it is written.
+    for rel in sorted(previous - set(files)):
+        target = stage / rel
+        if target.is_file():
+            target.unlink()
+            changed.append(rel)
+
     for rel, content in files.items():
         target = stage / rel
         if isinstance(content, Path):
@@ -381,10 +390,5 @@ def sync(stage: Path, files: dict[str, bytes | Path]) -> list[str]:
             target.write_bytes(content)
         changed.append(rel)
 
-    for rel in sorted(previous - set(files)):
-        target = stage / rel
-        if target.is_file():
-            target.unlink()
-            changed.append(rel)
     manifest_path.write_text(json.dumps(sorted(files)))
     return changed

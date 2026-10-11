@@ -50,6 +50,30 @@ def _version(cmd: list[str], require_success: bool = True) -> str | None:
     return text[0]
 
 
+def _has_font(quarto: str | None, family: str) -> bool:
+    """Whether Typst (which renders the PDFs) finds the font; else ask fontconfig."""
+    if quarto:
+        try:
+            out = subprocess.run([quarto, "typst", "fonts"], capture_output=True, text=True, timeout=60)
+            if out.returncode == 0:
+                # Quarto passes the list on stderr.
+                return family in (out.stdout + out.stderr).splitlines()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if shutil.which("fc-list"):
+        return bool(subprocess.run(["fc-list", family], capture_output=True, text=True).stdout.strip())
+    return False
+
+
+# How to install what `course doctor` finds missing (see install.sh).
+HINTS = {
+    "graphviz": "brew install graphviz" if sys.platform == "darwin" else "sudo apt install graphviz",
+    "java": "brew install openjdk, then run install.sh" if sys.platform == "darwin"
+            else "sudo apt install default-jre-headless",
+    "lato": "brew install --cask font-lato" if sys.platform == "darwin" else "sudo apt install fonts-lato",
+}
+
+
 # --------------------------------------------------------------------------
 # Commands
 # --------------------------------------------------------------------------
@@ -167,16 +191,19 @@ def cmd_doctor(args) -> int:
     # `plantuml -version` also checks Graphviz and fails without it, although
     # PlantUML itself works; Graphviz is checked separately below.
     version = plantuml and _version(plantuml + ["-version"], require_success=False)
-    report("PlantUML", version if version and "PlantUML" in version else None,
+    plantuml_ok = bool(version and "PlantUML" in version)
+    report("PlantUML", version if plantuml_ok else None,
            hint="needs Java; set PLANTUML_JAR or put plantuml on PATH")
     report("Graphviz (PlantUML diagrams other than sequence diagrams)", _version(["dot", "-V"]),
-           hint="sudo apt install graphviz")
-    report("Java", _version(["java", "-version"]) or (shutil.which("java") and "installed"))
+           hint=HINTS["graphviz"])
+    # On macOS, `java` on PATH may be a stub that only says Java is missing;
+    # install.sh then lets the plantuml wrapper run Homebrew's Java directly.
+    java = _version(["java", "-version"]) or (plantuml_ok and "used by plantuml (not on PATH)")
+    report("Java", java, hint=HINTS["java"])
     chrome = os.environ.get("QUARTO_CHROMIUM")
     report("Chrome for Mermaid in PDFs", chrome or "managed by Quarto (run: quarto install chrome-headless-shell)",
            required=False)
-    lato = shutil.which("fc-list") and subprocess.run(["fc-list", "Lato"], capture_output=True, text=True).stdout.strip()
-    report("Lato font (PDF)", "installed" if lato else None, hint="sudo apt install fonts-lato")
+    report("Lato font (PDF)", "installed" if _has_font(quarto, "Lato") else None, hint=HINTS["lato"])
     return 0 if ok else 1
 
 
