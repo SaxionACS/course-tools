@@ -23,6 +23,7 @@ a complete example.
 | `learning_outcomes` | List of `{id, text}`. The `id` (e.g. `LO1`) is used in the assessment matrices. Optionally with an introduction (see below). |
 | `levels` | Level of the course in the Saxion level model (see below). |
 | `literature` | Mandatory and/or optional literature (Markdown), optionally with an introduction (see below). |
+| `compiler_explorer` | Compiler for the Compiler Explorer links on code blocks (see below). Not shown on the page. |
 | `links` | List of `{title, url}`, e.g. the module manual. Optionally with an introduction (see below). |
 
 ### Introductions
@@ -103,6 +104,34 @@ levels:
 The build warns about combinations that don't occur in the model. Middle or
 high interdisciplinarity requires at least middle complexity. High
 interdisciplinarity requires at least middle independence.
+
+### Compiler Explorer
+
+The compiler for the Compiler Explorer links on code blocks (```` ```{c ce=asm} ````,
+see [authoring.md](authoring.md#compiler-explorer)):
+
+```yaml
+compiler_explorer:
+  target: ARM Cortex-M0+                # label shown next to the link
+  compiler: carmug1520                  # Compiler Explorer id: ARM GCC 15.2 (unknown-eabi)
+  options: -O2 -mcpu=cortex-m0plus -mthumb
+  run:                                  # optional: for ce=run and ce=exe
+    target: x86-64
+    compiler: cg152                     # x86-64 gcc 15.2
+    options: -O2
+```
+
+- `compiler` is the id that Compiler Explorer uses; the lists are at
+  <https://godbolt.org/api/compilers/c> and
+  <https://godbolt.org/api/compilers/c++>. Use a C compiler for C code and a
+  C++ compiler for C++ code.
+- `run`: Compiler Explorer can only run x86-64 programs. When the main
+  compiler is for a microcontroller, set an x86-64 compiler here, so that
+  `ce=run` and `ce=exe` work. Without `run`, the main compiler is used for
+  everything.
+- A page can change these settings in its front matter, with the same keys,
+  and a code block with the attributes `ce-compiler`, `ce-options` and
+  `ce-target`.
 
 ## `info/assessment.yaml`
 

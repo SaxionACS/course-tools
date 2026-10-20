@@ -1,0 +1,183 @@
+<script>
+  // Self-checks, predictions and comparisons; the HTML comes from
+  // filters/practice.lua, the styles from saxion.scss.
+  (function () {
+    'use strict';
+    function one(selector, root) { return (root || document).querySelector(selector); }
+    function all(selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); }
+
+    // Fill-in answers ----------------------------------------------------
+    // Spaces and underscores between digits are allowed (1 000, 0b1010_0101).
+    var FORMATS = {
+      int: 'a whole number, such as 42', hex: 'a hexadecimal number, such as 0x2A',
+      bin: 'a binary number, such as 0b101010', float: 'a number, such as 3.14',
+    };
+
+    // int, hex and bin as a BigInt; null if the text is not of that form.
+    function parseInteger(text, kind) {
+      var s = text.replace(/[\s_]/g, '');
+      var m = kind === 'int' ? /^([+-]?)(\d+)$/.exec(s)
+        : kind === 'hex' ? /^([+-]?)(?:0x)?([0-9a-f]+)h?$/i.exec(s)
+        : /^([+-]?)(?:0b)?([01]+)$/i.exec(s);
+      if (!m) return null;
+      var value = BigInt((kind === 'hex' ? '0x' : kind === 'bin' ? '0b' : '') + m[2]);
+      return m[1] === '-' ? -value : value;
+    }
+
+    // A decimal comma is fine too (3,14).
+    function parseNumber(text) {
+      var s = text.replace(/[\s_]/g, '');
+      if (s.indexOf('.') < 0) s = s.replace(',', '.');
+      return /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(s) ? Number(s) : null;
+    }
+
+    function normalize(text, input) {
+      var s = text.trim().replace(/\s+/g, input.dataset.spaces === 'ignore' ? '' : ' ');
+      return input.dataset.case === 'sensitive' ? s : s.toLowerCase();
+    }
+
+    // 'right', 'wrong', 'invalid' (not a number of the right kind) or 'empty'.
+    function grade(input) {
+      var kind = input.dataset.type, given = input.value;
+      if (!given.trim()) return 'empty';
+      var answers = [input.dataset.answer].concat(input.dataset.accept ? input.dataset.accept.split('|') : []);
+      if (kind === 'text') {
+        var text = normalize(given, input);
+        return answers.some(function (a) { return normalize(a, input) === text; }) ? 'right' : 'wrong';
+      }
+      if (kind === 'float') {
+        var x = parseNumber(given);
+        if (x === null) return 'invalid';
+        var p = input.dataset.precision || '';
+        return answers.some(function (a) {
+          var y = parseNumber(a);
+          if (y === null) return false;
+          var tolerance = /%$/.test(p) ? Math.abs(y) * parseFloat(p) / 100 : p ? parseFloat(p) : Math.abs(y) * 1e-9;
+          return Math.abs(x - y) <= tolerance + 1e-12;
+        }) ? 'right' : 'wrong';
+      }
+      var value = parseInteger(given, kind);
+      if (value === null) return 'invalid';
+      return answers.some(function (a) { return parseInteger(a, kind) === value; }) ? 'right' : 'wrong';
+    }
+
+    // Self-checks ------------------------------------------------------------
+    all('.course-check').forEach(function (box) {
+      var choice = box.dataset.kind === 'choice';
+      var result = one('.course-result', box);
+      var reveal = one('.course-show-answer', box);
+      var explanation = one('.course-explanation', box);
+
+      function right() {
+        box.classList.add('solved');
+        result.textContent = '✓ Right';
+        reveal.hidden = true;
+        if (explanation) explanation.hidden = false;
+      }
+      function notYet(message) {
+        box.classList.remove('solved');
+        result.textContent = message;
+        reveal.hidden = false;
+      }
+
+      function checkChoice() {
+        var chosen = 0, wrong = 0, missed = 0;
+        all('.course-option', box).forEach(function (option) {
+          var on = one('input', option).checked, correct = option.dataset.correct === '1';
+          var feedback = one('.course-feedback', option);
+          option.classList.toggle('right', on && correct);
+          option.classList.toggle('wrong', on && !correct);
+          if (feedback && !box.classList.contains('revealed')) feedback.hidden = !on;
+          if (on) chosen++;
+          if (on && !correct) wrong++;
+          if (!on && correct) missed++;
+        });
+        if (!chosen) { result.textContent = 'Choose an answer first.'; return; }
+        if (!wrong && !missed) right();
+        else if (wrong) notYet('Not yet: read the feedback and try again.');
+        else notYet(missed === 1 ? 'Almost: one more option is right.' : 'Almost: ' + missed + ' more options are right.');
+      }
+
+      function checkFill() {
+        var inputs = all('input.course-blank', box);
+        var states = inputs.map(grade);
+        inputs.forEach(function (input, i) {
+          input.classList.toggle('right', states[i] === 'right');
+          input.classList.toggle('wrong', states[i] === 'wrong' || states[i] === 'invalid');
+          input.title = states[i] === 'invalid' ? 'Enter ' + FORMATS[input.dataset.type] + '.' : '';
+        });
+        if (states.every(function (s) { return s === 'empty'; })) { result.textContent = 'Fill in an answer first.'; return; }
+        var invalid = inputs.filter(function (input, i) { return states[i] === 'invalid'; });
+        var good = states.filter(function (s) { return s === 'right'; }).length;
+        if (good === inputs.length) right();
+        else if (invalid.length) notYet('Enter ' + FORMATS[invalid[0].dataset.type] + '.');
+        else if (inputs.length > 1) notYet('Not yet: ' + good + ' of ' + inputs.length + ' are right.');
+        else notYet('Not yet. Try again.');
+      }
+
+      one('.course-check-button', box).addEventListener('click', choice ? checkChoice : checkFill);
+      all('input.course-blank', box).forEach(function (input) {
+        input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); checkFill(); } });
+        input.addEventListener('input', function () { input.classList.remove('right', 'wrong'); });
+      });
+      reveal.addEventListener('click', function () {
+        box.classList.add('revealed');
+        all('.course-option', box).forEach(function (option) {
+          option.classList.toggle('answer', option.dataset.correct === '1');
+          var feedback = one('.course-feedback', option);
+          if (feedback) feedback.hidden = false;
+        });
+        all('.course-blank-answer', box).forEach(function (answer) { answer.hidden = false; });
+        if (explanation) explanation.hidden = false;
+        reveal.hidden = true;
+        result.textContent = 'The right answer is marked.';
+      });
+    });
+
+    // Predictions --------------------------------------------------------------
+    all('.course-predict').forEach(function (box) {
+      var text = one('textarea', box), button = one('.course-reveal', box), selfgrade = one('.course-selfgrade', box);
+      if (!text || !button) return;
+      text.addEventListener('input', function () { button.disabled = text.value.trim().length < 3; });
+      button.addEventListener('click', function () {
+        box.classList.add('revealed');   // also shows Compiler Explorer links (saxion.scss)
+        one('.course-answer', box).hidden = false;
+        selfgrade.hidden = false;
+        button.hidden = true;
+        text.readOnly = true;
+      });
+      all('button', selfgrade).forEach(function (b) {
+        b.addEventListener('click', function () {
+          selfgrade.textContent = b.dataset.grade === 'yes'
+            ? 'Well done: your mental model of this code is right.'
+            : 'Find the line where your prediction went wrong: that is where there is something to learn.';
+        });
+      });
+    });
+
+    // Comparisons: mark the lines that differ (longest common subsequence) ---
+    all('.course-compare').forEach(function (box) {
+      var sides = all('.course-compare-column', box).map(function (column) {
+        var code = one('code.sourceCode', column);
+        return code ? all(':scope > span', code) : [];
+      });
+      if (sides.length !== 2) return;
+      var a = sides[0].map(function (s) { return s.textContent; });
+      var b = sides[1].map(function (s) { return s.textContent; });
+      var L = [];
+      for (var i = a.length; i >= 0; i--) {
+        L[i] = [];
+        for (var j = b.length; j >= 0; j--) {
+          L[i][j] = i === a.length || j === b.length ? 0
+            : a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+        }
+      }
+      i = 0; j = 0;
+      while (i < a.length || j < b.length) {
+        if (i < a.length && j < b.length && a[i] === b[j]) { i++; j++; }
+        else if (j < b.length && (i === a.length || L[i][j + 1] >= L[i + 1][j])) sides[1][j++].classList.add('course-diff');
+        else sides[0][i++].classList.add('course-diff');
+      }
+    });
+  })();
+</script>

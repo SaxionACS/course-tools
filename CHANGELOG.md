@@ -13,6 +13,43 @@ Every release from 1.11.1 on has **platform notes**:
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 
+## 1.12.0 (2026-10-20)
+
+Practice in the lessons, and Compiler Explorer links. See
+[docs/authoring.md](docs/authoring.md).
+
+- **Self-checks** (`::: {.check}`): multiple choice with one or several right
+  answers and feedback per option, or fill-in blanks (`[42]{.blank}`) for
+  whole, hexadecimal, binary and decimal numbers (with a tolerance) and text
+  (case-sensitive or not, other accepted answers, spaces ignored for code). An
+  optional explanation appears when the answer is right; "Show answer"
+  appears after a wrong attempt.
+- **Predict** (`::: {.predict}`): code with a box for the student's
+  prediction; the answer is revealed after writing one. Compiler Explorer links
+  in the block appear only then.
+- **Compare** (`::: {.compare}`): two code blocks side by side with labels;
+  the lines that differ are marked.
+- **Compiler Explorer links** on code blocks (`{c ce=asm}`, `ce=run`,
+  `ce=exe`). The compiler, its options and a target label are set for the
+  course (`compiler_explorer` in `info/general.yaml`), can be changed per page
+  in the front matter and per code block. Compiler Explorer can only run
+  x86-64 programs, so a course can set a separate compiler for `run` and `exe`.
+- PDFs: questions without the answers; answers, feedback and explanations in
+  an "Answers" section at the end of the page. Compiler Explorer links are
+  clickable.
+
+Platform notes:
+
+- **Dependencies:** none. The links lead to <https://godbolt.org>; the code of
+  the block is sent there when a student opens a link.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), with new
+  checks for the self-checks, predictions, comparisons and the Compiler
+  Explorer links. The answer checking in the browser was tested with a browser
+  script (not part of CI): all question types, tolerances, decimal commas,
+  case, accepted answers, "Show answer", predictions and the marked lines.
+- **macOS:** untested. Nothing platform-specific changed; to do: run
+  `scripts/check.py`.
+
 ## 1.11.1 (2026-10-20)
 
 Groundwork for developing course-tools. Nothing changes for courses.

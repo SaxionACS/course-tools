@@ -167,6 +167,209 @@ code.sourceCode .code-annotation-anchor.course-inline {
 }
 
 // ------------------------------------------------------------------------
+// Practice blocks (filters/practice.lua, theme/practice.html) and
+// Compiler Explorer links (filters/compiler-explorer.lua).
+// ------------------------------------------------------------------------
+
+$course-right: $saxion-green;
+$course-right-light: $saxion-green-light;
+$course-wrong: #c0392b;
+$course-wrong-light: #fbeaea;
+
+.course-check,
+.course-predict {
+  border: 1px solid $saxion-grey-light;
+  border-left: 4px solid $saxion-green;
+  border-radius: .35rem;
+  padding: .75rem 1rem;
+  margin: 1.25rem 0;
+
+  > :last-child {
+    margin-bottom: 0;
+  }
+
+  &.solved {
+    border-color: $course-right;
+  }
+}
+
+.course-practice-label {
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: $saxion-green;
+  margin-bottom: .35rem;
+}
+
+.course-options {
+  margin: .5rem 0;
+}
+
+.course-option {
+  label {
+    display: flex;
+    gap: .5rem;
+    align-items: baseline;
+    padding: .15rem .4rem;
+    border-radius: .3rem;
+    cursor: pointer;
+  }
+
+  &.right label { background: $course-right-light; }
+  &.wrong label { background: $course-wrong-light; }
+  &.answer label { box-shadow: inset 3px 0 0 $course-right; }
+}
+
+.course-feedback {
+  margin: .1rem 0 .4rem 1.9rem;
+  font-size: .92em;
+  color: $text-muted;
+
+  p:last-child { margin-bottom: 0; }
+}
+
+.course-blank-wrap {
+  white-space: nowrap;
+}
+
+.course-blank {
+  display: inline-block;
+  max-width: 100%;
+  padding: .05rem .35rem;
+  margin: 0 .15rem;
+  border: 1px solid $saxion-grey-light;
+  border-bottom: 2px solid $saxion-grey;
+  border-radius: .2rem;
+  font: inherit;
+  line-height: 1.3;
+
+  &.course-blank-code {
+    font-family: $font-family-monospace;
+    font-size: .9em;
+  }
+
+  &.right { border-color: $course-right; background: $course-right-light; }
+  &.wrong { border-color: $course-wrong; background: $course-wrong-light; }
+}
+
+.course-blank-unit {
+  margin-right: .25rem;
+}
+
+.course-blank-answer {
+  margin: 0 .35rem 0 .1rem;
+  padding: 0 .3rem;
+  border-radius: .2rem;
+  background: $course-right-light;
+  color: $saxion-green-dark;
+  font-weight: 700;
+}
+
+.course-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  margin-top: .5rem;
+}
+
+.course-result {
+  font-weight: 700;
+}
+
+.course-explanation,
+.course-answer {
+  margin-top: .6rem;
+  padding: .5rem .75rem;
+  background: $saxion-green-light;
+  border-radius: .3rem;
+
+  > :last-child { margin-bottom: 0; }
+}
+
+.course-predict {
+  textarea {
+    margin-top: .5rem;
+  }
+
+  // Run the code after predicting, not before.
+  &:not(.revealed) .course-ce {
+    display: none;
+  }
+}
+
+.course-selfgrade {
+  margin-top: .5rem;
+  font-size: .92em;
+}
+
+// Two code blocks side by side, each under its label.
+.course-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .75rem;
+  margin: 1rem 0;
+
+  @media (max-width: 767.98px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  div.sourceCode {
+    margin-top: 0;
+  }
+
+  &.wrong-right {
+    .course-compare-column:first-child .course-compare-label { background: $course-wrong; }
+    .course-compare-column:last-child .course-compare-label { background: $course-right; }
+  }
+}
+
+.course-compare-label {
+  display: inline-block;
+  padding: .1rem .55rem;
+  border-radius: .3rem .3rem 0 0;
+  background: $saxion-grey;
+  color: #fff;
+  font-size: .8rem;
+  font-weight: 700;
+}
+
+// Lines that differ between the two blocks (marked by practice.html).
+code.sourceCode > span.course-diff {
+  display: inline-block;
+  min-width: 100%;
+  background: rgba($saxion-orange, .14);
+  box-shadow: -.6rem 0 0 rgba($saxion-orange, .14), -.75rem 0 0 $saxion-orange;
+}
+
+.course-ce {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .25rem .75rem;
+  margin: -.4rem 0 1rem;
+  font-size: .85rem;
+
+  a {
+    text-decoration: none;
+    border: 1px solid $saxion-grey-light;
+    border-radius: 1rem;
+    padding: .1rem .65rem;
+
+    &:hover { border-color: $saxion-green; }
+  }
+}
+
+.course-ce-details {
+  color: $text-muted;
+  font-family: $font-family-monospace;
+  font-size: .8rem;
+
+  span { white-space: nowrap; }
+}
+
+// ------------------------------------------------------------------------
 // Embedded in an LMS (see head.html): content only.
 // ------------------------------------------------------------------------
 

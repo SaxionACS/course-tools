@@ -26,6 +26,8 @@ here.
 from __future__ import annotations
 
 import argparse
+import base64
+import html as htmllib
 import json
 import os
 import re
@@ -45,10 +47,14 @@ AUTHOR = "Check Author"
 DATE = "2026-01-05T10:00:00+01:00"
 FOOTER = ("Added on 5 January 2026.", "Last changed on 5 January 2026 at 10:00 by Check Author.")
 
-# Build messages that are expected. Any other line that looks like a warning
-# or an error fails the check.
-EXPECTED_MESSAGES = (
+# Build messages caused on purpose by the test course: they must appear.
+REQUIRED_MESSAGES = (
     "warning: ignoring lessons/week1: week directories are named week_01, week_02, ...",
+    'warning: lessons/week_02/lesson1.md: ce="asm exe": exe (output only) cannot be combined '
+    "with asm or run; using run",
+)
+# Other lines that look like a warning or an error fail the check, except these.
+ALLOWED_MESSAGES = REQUIRED_MESSAGES + (
     # Quarto, for tabsets in Typst (shown one after the other in the PDF).
     "Warning: couldn't recognize format, using default tabset rendering",
 )
@@ -60,7 +66,7 @@ PAGES = [
     "info/index.html", "info/assessment.html", "info/genai.html", "info/rules.html",
     "lessons/week_01/index.html", "lessons/week_01/lesson1.html",
     "lessons/week_01/lesson2.html", "lessons/week_01/lesson10.html",
-    "lessons/week_02/index.html", "lessons/week_02/lesson1.html",
+    "lessons/week_02/index.html", "lessons/week_02/lesson1.html", "lessons/week_02/lesson2.html",
     "assignments/week_01/index.html", "assignments/week_01/assignment1.html",
     "assignments/week_01/assignment2/index.html",
     "exams/index.html", "exams/exam1.html",
@@ -147,15 +153,84 @@ def check_build(c: Checks, course_cmd: list[str], course: Path, html_only: bool)
         return False
     lines = [line.strip() for line in log.splitlines()]
     unexpected = [line for line in lines
-                  if PROBLEM.search(line) and not any(e in line for e in EXPECTED_MESSAGES)]
+                  if PROBLEM.search(line) and not any(e in line for e in ALLOWED_MESSAGES)]
     c.ok(not unexpected, "no unexpected warnings or errors in the build output", "\n        ".join(unexpected))
-    c.ok(EXPECTED_MESSAGES[0] in lines, "a wrongly named week directory is reported")
+    c.ok(REQUIRED_MESSAGES[0] in lines, "a wrongly named week directory is reported")
+    c.ok(REQUIRED_MESSAGES[1] in lines, "a wrong Compiler Explorer mode is reported")
 
     # A second stage with the same options must not change any file.
     stage = run(course_cmd + ["stage", "--source", str(course), "--site-url", SITE_URL] + extra, cwd=course)
     c.ok(stage.returncode == 0 and "(0 files updated)" in stage.stdout,
          "staging again changes nothing", stage.stdout.strip())
     return True
+
+
+def compiler_explorer_links(html: str) -> list[tuple[str, dict]]:
+    """(mode, first session of the client state) of every Compiler Explorer link."""
+    links = []
+    for mode, state in re.findall(r'<div class="course-ce" data-ce-mode="(\w+)">'
+                                  r'<a href="https://godbolt.org/clientstate/([^"]+)"', html):
+        data = json.loads(base64.urlsafe_b64decode(state + "=" * (-len(state) % 4)))
+        links.append((mode, data["sessions"][0]))
+    return links
+
+
+def check_practice(c: Checks, read) -> None:
+    c.section("Self-checks, predictions and comparisons (lessons/week_02/lesson1)")
+    p = main_content(read("lessons/week_02/lesson1.html"))
+    kinds = re.findall(r'class="course-check" data-kind="(\w+)"', p)
+    c.ok(kinds == ["choice"] * 3 + ["fill"] * 3, "three multiple-choice and three fill-in checks", f"found: {kinds}")
+    inputs = re.findall(r'<input type="(radio|checkbox)" name="check-(\d+)"', p)
+    c.ok(inputs == [("radio", "1")] * 3 + [("checkbox", "2")] * 2 + [("checkbox", "3")] * 3,
+         "radio buttons for one right option; checkboxes for several, or with type=multiple", f"found: {inputs}")
+    c.ok(p.count('class="course-feedback" hidden') == 2 and 'class="course-explanation" hidden' in p,
+         "feedback per option and an explanation, hidden until checked")
+    blanks = [(kind, htmllib.unescape(answer))
+              for kind, answer in re.findall(r'class="course-blank[^"]*" data-type="(\w+)" data-answer="([^"]*)"', p)]
+    c.ok(blanks == [("int", "42"), ("hex", "0x2A"), ("bin", "101010"), ("float", "0.1"), ("float", "100"),
+                    ("text", "volatile"), ("text", "ISR"), ("text", "PORTB |= (1 << 5);")],
+         "blanks with their types, guessed or set", f"found: {blanks}")
+    c.ok(all(a in p for a in ('data-precision="0.001"', 'data-precision="1%"', 'data-case="sensitive"',
+                              'data-spaces="ignore"', 'data-accept="interrupt service routine|interrupt handler"',
+                              '<span class="course-blank-unit">ms</span>')),
+         "blank options: precision, case, spaces, other accepted answers, unit")
+    c.ok('class="course-predict"' in p and "<textarea" in p and 'class="course-answer" hidden' in p
+         and "PREDICT-ANSWER" in p, "prediction with a hidden answer")
+    c.ok('class="course-compare wrong-right"' in p and p.count('class="course-compare-column"') == 2
+         and "Without volatile" in p, "comparison of two code blocks, with labels")
+
+    c.section("Compiler Explorer links")
+    links = compiler_explorer_links(p) + compiler_explorer_links(main_content(read("lessons/week_02/lesson2.html")))
+    modes = [mode for mode, _ in links]
+    c.ok(modes == ["run", "asm", "asm", "asm", "exe", "asm", "run", "asm"], "a link for every code block with ce",
+         f"modes: {modes}")
+    if len(links) != 8:
+        return
+    s = [session for _, session in links]
+
+    def compiler(session):
+        first = (session.get("compilers") or [{}])[0]
+        return first.get("id"), first.get("options")
+
+    arm, x86 = ("carmug1520", "-O2 -mcpu=cortex-m0plus -mthumb"), ("cg152", "-O2")
+    c.ok(compiler(s[1]) == arm and compiler(s[2]) == arm, "asm: the course compiler (general.yaml)")
+    first = s[0]["compilers"][0]
+    c.ok(compiler(s[0]) == x86 and first.get("filters") == {"execute": True}
+         and first.get("specialoutputs") == ["compilerOutput"],
+         "run: the course's run compiler, assembly and the program's output")
+    executor = (s[4].get("executors") or [{}])[0]
+    c.ok(not s[4].get("compilers") and executor.get("compiler") == {"id": "cg152", "options": "-O2"}
+         and executor.get("stdin") == "Q\nR" and executor.get("arguments") == "-v",
+         "exe: only the program's output, with input and arguments")
+    c.ok(compiler(s[5]) == ("cavrg1520", "-Os -mmcu=atmega328p") and "ATmega328P" in p,
+         "a code block overrides compiler, options and target")
+    c.ok(compiler(s[6]) == x86, "ce=\"asm exe\" becomes run")
+    c.ok(compiler(s[7]) == ("rv32-cgcc1520", "-O2 -march=rv32imac -mabi=ilp32 --param=max-inline-insns-single=10"),
+         "front matter overrides the course settings (and -- in flags stays intact)")
+    c.ok("<1>" not in s[3]["source"] and "return x * x;" in s[3]["source"], "annotation markers are left out of the code")
+    c.ok(all(session["language"] == "c" for session in s), "the language comes from the code block")
+    annotated = p.find('class="code-annotation-container-grid"')
+    c.ok(0 < annotated < p.find('class="course-ce"', p.find("square")), "the link comes after the annotations")
 
 
 def check_site(c: Checks, dist: Path, html_only: bool) -> None:
@@ -257,6 +332,8 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("Generative AI and academic integrity" in read("info/genai.html"), "GenAI policy page")
     c.ok("House rules" in read("info/rules.html"), "extra page in info/")
 
+    check_practice(c, read)
+
     if html_only:
         c.skip("PDFs", "--html-only")
         return
@@ -268,6 +345,9 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok(not (dist / "assignments/week_01/logbook1.pdf").exists(), "a logbook preview has no PDF")
     pdf = (dist / "lessons/week_01/lesson1.pdf").read_bytes() if (dist / "lessons/week_01/lesson1.pdf").is_file() else b""
     c.ok(f"{SITE_URL}lessons/week_01/lesson2.html".encode() in pdf, "links in PDFs point to the website")
+    practice_pdf = dist / "lessons/week_02/lesson1.pdf"
+    c.ok(practice_pdf.is_file() and b"https://godbolt.org/clientstate/" in practice_pdf.read_bytes(),
+         "Compiler Explorer links in PDFs")
     if not shutil.which("pdftotext"):
         c.skip("text of the PDFs", "pdftotext not installed")
         return
@@ -281,6 +361,13 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("// ①" in t and "① Configure the hardware once." in t, "lesson PDF: code annotations as circled numbers")
     c.ok(all(line in t for line in FOOTER), "lesson PDF: footer from git")
     c.ok("GENAI-NOTE-TEXT" in text("assignments/week_01/assignment1.pdf"), "assignment PDF: GenAI box")
+    t = text("lessons/week_02/lesson1.pdf")
+    questions, _, key = t.partition(" Answers ")
+    c.ok("Question 6." in questions and "Prediction 1." in questions and "PREDICT-ANSWER" not in questions
+         and "EXPLANATION-SINGLE" not in questions, "practice PDF: questions without the answers")
+    c.ok(all(a in key for a in ("Correct: volatile", "0.1 ms (± 0.001)", "ISR (also right: interrupt service routine",
+                                "EXPLANATION-SINGLE", "PREDICT-ANSWER")),
+         "practice PDF: answers, feedback and explanations at the end")
 
 
 def main() -> int:

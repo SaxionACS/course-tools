@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from . import genai, history, info
+from . import compiler_explorer, genai, history, info
 from .course import Course, Page, Week, is_ignored
 from .markdown import join_front_matter, natural_key, rewrite_fences, separate_thematic_breaks, split_front_matter
 
@@ -71,7 +71,7 @@ def _zip_bytes(directory: Path, top: str) -> bytes:
 
 def _page_meta(page: Page, course: Course, extra: dict) -> dict:
     meta = dict(page.meta)
-    for key in ("slides", "order", "genai", "logbook"):
+    for key in ("slides", "order", "genai", "logbook", "compiler_explorer"):
         meta.pop(key, None)
     meta["title"] = page.title
     meta["engine"] = "markdown"   # never execute code; diagrams still work
@@ -162,6 +162,9 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
             extra["download"] = page.src.name
             extra["assignment"] = {"title": page.assignment.title,
                                    "href": _rel_link(page.rel, page.assignment.rel)}
+        ce = compiler_explorer.settings(page.meta.get("compiler_explorer"), str(page.src.relative_to(root)))
+        if ce:
+            extra["compiler-explorer"] = compiler_explorer.encode(ce)
         if page.kind == "assignment":
             rule = genai.assignment_rule(genai_level, page.meta.get("genai"), str(page.src.relative_to(root)))
             if rule is not None:
@@ -299,6 +302,8 @@ def quarto_config(course: Course, opts: Options) -> dict:
             "from": MARKDOWN_READER,
             "theme": ["cosmo", f"{ASSETS_DIR}/theme/saxion.scss"],
             "include-in-header": [f"{ASSETS_DIR}/theme/head.html"],
+            # Behaviour of self-checks, predictions and comparisons (filters/practice.lua).
+            "include-after-body": [f"{ASSETS_DIR}/theme/practice.html"],
             "toc": True,
             "toc-depth": 3,
             "code-copy": True,
@@ -325,6 +330,11 @@ def quarto_config(course: Course, opts: Options) -> dict:
     pages = sorted((str(p.rel) for p in course.pages()), key=natural_key)
     pages += [p for p in generated_pages(course) if p not in pages]
 
+    course_site = {"title": course.title, "pdf": opts.pdf, "url": (opts.site_url or "").rstrip("/")}
+    ce = compiler_explorer.settings(general.get("compiler_explorer"), "general.yaml")
+    if ce:
+        course_site["compiler-explorer"] = compiler_explorer.encode(ce)
+
     engines = {name: False for name in ("asymptote", "cetz", "d2", "dot", "mermaid", "tikz")}
     engines["plantuml"] = {"execpath": opts.plantuml} if opts.plantuml else True
 
@@ -338,13 +348,15 @@ def quarto_config(course: Course, opts: Options) -> dict:
         "website": website,
         "lang": general.get("lang", "en"),
         "format": formats,
-        "filters": [f"{ASSETS_DIR}/filters/course.lua", "diagram", f"{ASSETS_DIR}/filters/inline-mediabag.lua"],
+        "filters": [
+            f"{ASSETS_DIR}/filters/practice.lua",
+            f"{ASSETS_DIR}/filters/compiler-explorer.lua",
+            f"{ASSETS_DIR}/filters/course.lua",
+            "diagram",
+            f"{ASSETS_DIR}/filters/inline-mediabag.lua",
+        ],
         "diagram": {"engine": engines},
-        "course-site": {
-            "title": course.title,
-            "pdf": opts.pdf,
-            "url": (opts.site_url or "").rstrip("/"),
-        },
+        "course-site": course_site,
     }
 
 

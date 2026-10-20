@@ -264,6 +264,210 @@ Alice -> Bob: hello
 Use paths relative to the page. SVG gives the sharpest result on screen and in
 PDFs.
 
+## Self-checks
+
+A self-check is a short question in a lesson that students answer on the
+page, as often as they like. Nothing is graded or stored: the checks are for
+practice. Use Brightspace quizzes for graded tests.
+
+On the website, students click *Check*. After a wrong attempt, *Show answer*
+appears. In the PDF, the question is printed without the answer; the answers,
+feedback and explanations are in an *Answers* section at the end of the
+page.
+
+### Multiple choice
+
+Write the options as a task list and mark the right ones with `[x]`. Feedback
+for an option goes in an indented paragraph under it; students see it after
+choosing that option.
+
+```markdown
+::: {.check}
+Which statements about `volatile` are true?
+
+- [x] Every read of the variable really reads memory.
+
+  Right: the compiler may not keep the value in a register.
+
+- [ ] Accesses to the variable become atomic.
+
+  No. On an 8-bit AVR, reading a 16-bit variable takes two instructions,
+  and an interrupt can come in between.
+
+::: {.explanation}
+`volatile` is about what the compiler does; atomicity is about the hardware.
+:::
+:::
+```
+
+- One right option gives radio buttons (choose one); more right options give
+  checkboxes and the text "Select all that apply". To get checkboxes with one
+  right option, so that the question does not give that away, write
+  `::: {.check type="multiple"}`.
+- The optional `::: {.explanation}` is shown when the answer is right, or
+  after *Show answer*. It works for fill-in questions too.
+
+### Fill in the blanks
+
+Put the answer in square brackets with `{.blank}` after it. A check can have
+several blanks.
+
+```markdown
+::: {.check}
+`0x2A` is [42]{.blank} in decimal and [101010]{.blank type=bin} in binary.
+:::
+
+::: {.check}
+A 10 kHz PWM signal has a period of [0.1]{.blank type=float precision=0.001 unit=ms}.
+:::
+
+::: {.check}
+The keyword is [`volatile`]{.blank case=sensitive}; an interrupt handler is
+also called an [ISR]{.blank accept="interrupt service routine|interrupt handler"}.
+:::
+```
+
+`type` sets what the student must enter:
+
+| `type` | Answer | Accepted input |
+|:--|:--|:--|
+| `int` | a whole number | `42`, `-7`, `1 000` |
+| `hex` | a hexadecimal number | `2A`, `0x2a`, `2Ah` |
+| `bin` | a binary number | `101010`, `0b10_1010` |
+| `float` | a number | `0.1`, `0,1`, `1e-1` |
+| `text` | text | see `case`, `spaces` and `accept` |
+
+Without `type`, the type follows from the answer: `42` is `int`, `0x2A`
+`hex`, `0b1010` `bin`, `3.3` `float`, anything else `text`. Set the type for
+a hexadecimal answer without `0x`, and for a decimal number with a tolerance.
+Numbers are compared by value, so `0X2A` is right for `0x2A`. A student who
+types a hexadecimal number into an `int` blank is told what to enter.
+
+More options for a blank:
+
+- `precision` (`float`): the tolerance, as an amount (`precision=0.001`) or a
+  percentage of the answer (`precision=1%`). Without it, the number must be
+  exact.
+- `case` (`text`): `ignore` (default) or `sensitive`.
+- `spaces` (`text`): `normalize` (default: extra spaces don't matter) or
+  `ignore` (no spaces matter, useful for code such as `PORTB |= (1 << 5);`).
+- `accept` (`text`): other right answers, separated by `|`.
+- `unit`: shown after the blank, for example `unit=ms`.
+- `width`: the width of the blank in characters.
+
+An answer written as code (`` [`volatile`]{.blank} ``) gets a blank in a code
+font.
+
+## Predict
+
+Students predict what code does before they see the answer: the *Reveal*
+button only works after they wrote a prediction. Afterwards they mark whether
+their prediction was right.
+
+````markdown
+::: {.predict}
+What does this program print?
+
+```{c ce=run}
+#include <stdio.h>
+#include <stdint.h>
+
+int main(void) {
+    uint8_t x = 200;
+    x += 100;
+    printf("%u\n", x);
+}
+```
+
+::: {.answer}
+`44`: a `uint8_t` wraps around at 256.
+:::
+:::
+````
+
+Compiler Explorer links (see below) inside a prediction appear only after the
+answer is revealed, so that students can run the code to check their
+prediction, but not before they made one. In the PDF, the answer is in the
+*Answers* section.
+
+## Compare
+
+Two code blocks side by side, each with a label. The lines that differ are
+marked. Add `.wrong-right` to show the first label in red and the second in
+green.
+
+````markdown
+::: {.compare .wrong-right labels="Without volatile|With volatile"}
+```c
+uint8_t tick;
+```
+
+```c
+volatile uint8_t tick;
+```
+:::
+````
+
+Text before the first code block appears above the comparison. On a phone,
+and in the PDF, the blocks are shown one below the other.
+
+## Compiler Explorer
+
+A link under a code block opens the code in
+[Compiler Explorer](https://godbolt.org), compiled with the course's compiler.
+Add `ce` to the code block:
+
+````markdown
+```{c ce=asm}
+int square(int x) {
+    return x * x;
+}
+```
+````
+
+| `ce` | Compiler Explorer shows |
+|:--|:--|
+| `asm` | the assembly |
+| `run` | the assembly and the output of the program (`asm run` means the same) |
+| `exe` | only the output of the program |
+
+The compiler, its options and the target (a label shown next to the link) are
+set for the course in `info/general.yaml` (see
+[course-info.md](course-info.md#compiler-explorer)). A page can change them
+in its front matter, with the same keys:
+
+```yaml
+---
+compiler_explorer:
+  target: x86-64
+  compiler: cg152
+  options: -O0
+---
+```
+
+A code block can change them with attributes:
+
+````markdown
+```{c ce=asm ce-compiler=cavrg1520 ce-options="-Os -mmcu=atmega328p" ce-target="ATmega328P"}
+````
+
+For `ce=exe`, `ce-stdin` gives the program input (`\n` for a new line) and
+`ce-args` its arguments: `` ```{c ce=exe ce-stdin="3\n4"} ``.
+
+Notes:
+
+- Compiler Explorer can only **run** programs for x86-64 (a PC), not for
+  ARM, AVR or RISC-V. For `run` and `exe`, the `run` settings are used (see
+  course-info.md), so the assembly can be for the microcontroller while the
+  program runs on a PC.
+- The code of the block is the whole program Compiler Explorer gets, so add
+  the `#include`s it needs. Code annotation markers (`// <1>`) are left out.
+- The link contains the code itself: it needs no account and does not expire.
+  Opening it sends the code to godbolt.org.
+- Compiler ids: open the compiler list in Compiler Explorer, or see
+  <https://godbolt.org/api/compilers/c> (C) and
+  <https://godbolt.org/api/compilers/c++> (C++).
+
 ## Page footer: dates from git
 
 Every page ends with a footer that says when its source file was added to the

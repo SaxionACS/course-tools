@@ -42,6 +42,16 @@ literature:
   optional:
     - E. White, *Making Embedded Systems*, 2nd ed., O'Reilly, 2024.
 
+# Compiler Explorer links on code blocks (```{c ce=asm}).
+compiler_explorer:
+  target: ARM Cortex-M0+
+  compiler: carmug1520
+  options: -O2 -mcpu=cortex-m0plus -mthumb
+  run:
+    target: x86-64
+    compiler: cg152
+    options: -O2
+
 links:
   items:
     - title: Quarto

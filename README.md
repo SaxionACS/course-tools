@@ -38,7 +38,9 @@ course repository ──► course stage ──► .build/ (Quarto project) ─�
    - The sidebar is generated, organised by week.
 3. Quarto renders every page to HTML and, with Typst, to PDF. The Lua filters
    in `src/course_tools/assets/filters` add the PDF button, the slides box
-   and the starter-files box, and make links absolute in PDFs.
+   and the starter-files box, turn self-checks, predictions and comparisons
+   into interactive blocks, add Compiler Explorer links, and make links
+   absolute in PDFs.
 4. The result in `dist/` is a static website, which the workflow publishes to
    GitHub Pages.
 
