@@ -1,0 +1,48 @@
+# The test course of course-tools (see scripts/check.py).
+title: Check Course
+code: T.ACS.CHECK
+academic_year: 2026-2027
+period: Quartile 1
+credits: 5
+language: English
+programme: Applied Computer Science
+
+coordinator:
+  name: Test Coordinator
+  email: coordinator@example.org
+
+lecturers:
+  - name: Test Lecturer
+    email: lecturer@example.org
+    role: lecturer
+
+description: |
+  A small course that uses every feature of course-tools.
+
+prerequisites: |
+  None.
+
+learning_outcomes:
+  introduction: |
+    After this course, you can:
+  items:
+    - id: LO1
+      text: Write a superloop in C.
+    - id: LO2
+      text: Share data safely between an interrupt handler and the main loop.
+
+levels:
+  independence: low
+  complexity: middle
+  interdisciplinarity: low
+
+literature:
+  mandatory:
+    - B. W. Kernighan and D. M. Ritchie, *The C Programming Language*, 2nd ed., 1988.
+  optional:
+    - E. White, *Making Embedded Systems*, 2nd ed., O'Reilly, 2024.
+
+links:
+  items:
+    - title: Quarto
+      url: https://quarto.org/

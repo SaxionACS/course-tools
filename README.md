@@ -81,7 +81,8 @@ repositories.
    ```
 
    For a compatible fix, tag `v1.0.1` and move `v1` to it; for a compatible
-   new feature, `v1.1.0`. All courses pick up the change on their next build.
+   new feature, `v1.1.0`. Add the release to [CHANGELOG.md](CHANGELOG.md)
+   first. All courses pick up the change on their next build.
    For an incompatible change, release `v2`; courses switch by changing `@v1`
    (and `tools-ref`) in their workflow. Keep `version` in `pyproject.toml` and
    `__version__` in `src/course_tools/__init__.py` equal to the tag (without
@@ -116,6 +117,19 @@ To check how a page looks when embedded, add `?embed=1` to its URL.
 ## Versions
 
 The Quarto and PlantUML versions are pinned in
-[`install.sh`](install.sh) and in the workflow inputs, so local builds and CI
-builds are the same. To upgrade, change both, test with a course, and release
-a new tag.
+[`install.sh`](install.sh), in the inputs of the publish workflow and in the
+check workflow, so local builds and CI builds are the same. To upgrade, change
+all three, run the check, and release a new tag.
+
+## Developing course-tools
+
+- **Check a change** with `python3 scripts/check.py`. It builds the test
+  course in [`tests/course`](tests/course) and checks the website and the
+  PDFs. A new feature gets used in the test course and checked there.
+- **Work on a branch.** The *Check* workflow runs the same check on every push
+  to every branch, without publishing anything. Merge into `main` only when
+  it has passed.
+- **Record changes** in [CHANGELOG.md](CHANGELOG.md), with platform notes for
+  Ubuntu and macOS.
+- [CLAUDE.md](CLAUDE.md) has the rules for AI agents working on this
+  repository, including how macOS is kept up to date.

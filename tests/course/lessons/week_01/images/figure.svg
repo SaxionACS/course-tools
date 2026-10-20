@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80" viewBox="0 0 200 80">
+  <rect x="4" y="4" width="192" height="72" rx="8" fill="#ecf6ee" stroke="#009c82" stroke-width="3"/>
+  <text x="100" y="47" font-family="sans-serif" font-size="20" text-anchor="middle" fill="#494c4e">figure</text>
+</svg>

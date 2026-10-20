@@ -1,0 +1,40 @@
+introduction: |
+  The course is assessed with an exam and a practical assignment.
+
+components:
+  items:
+    - id: EXAM
+      name: Written exam
+      form: Digital exam
+      weight: 60
+      when: Week 9
+      graded: individual
+      description: |
+        The exam covers all lessons. See the [example exam](../exams/exam1.md).
+      matrix:
+        LO1: { remembering: 20, understanding: 20 }
+        LO2: { understanding: 20, applying: 40 }
+    - id: PRAC
+      name: Practical
+      form: Programming assignment in pairs
+      weight: 40
+      when: Week 8
+      graded: group
+      matrix:
+        LO2: { applying: 60, evaluating: 40, graded: individual }
+      rubric:
+        learning_outcomes: [LO2]
+        description: |
+          RUBRIC-DESCRIPTION-TEXT
+        criteria:
+          - name: Working program
+            points: 60
+            description: The program meets the requirements.
+          - name: Teamwork
+            points: [-20, 0]
+            description: Points are deducted for a student who did not contribute.
+        grading: |
+          The grade is the number of points divided by 6.
+
+final_grade: |
+  The final grade is the weighted average of the components.

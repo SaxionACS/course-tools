@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""Build the test course (tests/course) and check the result.
+
+    python3 scripts/check.py               # website and PDFs (a few minutes)
+    python3 scripts/check.py --html-only   # website only, faster
+    python3 scripts/check.py --keep        # keep the build to inspect it
+
+The test course is copied to a temporary directory and committed there with a
+fixed author and date, so that the page footers are predictable. Then `course
+doctor`, `course build` and `course stage` run, and the output in dist/ is
+checked: pages, PDFs, links, private files, zips, footers and the build log.
+
+The `course` command under test is the one on PATH; after
+`./install.sh --local` that is this checkout. To test this checkout without
+installing it:
+
+    PYTHONPATH=src python3 scripts/check.py --course "python3 -m course_tools"
+
+Only the Python standard library is used. If `pdftotext` (poppler) is
+installed, the text of the PDFs is checked too.
+
+When you add a feature to course-tools, use it in tests/course and check it
+here.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+COURSE = REPO / "tests" / "course"
+SITE_URL = "https://example.org/check/"
+SECRET = "SECRET-PRIVATE-TOKEN"     # in every private file of the test course
+AUTHOR = "Check Author"
+DATE = "2026-01-05T10:00:00+01:00"
+FOOTER = ("Added on 5 January 2026.", "Last changed on 5 January 2026 at 10:00 by Check Author.")
+
+# Build messages that are expected. Any other line that looks like a warning
+# or an error fails the check.
+EXPECTED_MESSAGES = (
+    "warning: ignoring lessons/week1: week directories are named week_01, week_02, ...",
+    # Quarto, for tabsets in Typst (shown one after the other in the PDF).
+    "Warning: couldn't recognize format, using default tabset rendering",
+)
+PROBLEM = re.compile(r"warn|error|fail|exception|traceback", re.IGNORECASE)
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+PAGES = [
+    "index.html",
+    "info/index.html", "info/assessment.html", "info/genai.html", "info/rules.html",
+    "lessons/week_01/index.html", "lessons/week_01/lesson1.html",
+    "lessons/week_01/lesson2.html", "lessons/week_01/lesson10.html",
+    "lessons/week_02/index.html", "lessons/week_02/lesson1.html",
+    "assignments/week_01/index.html", "assignments/week_01/assignment1.html",
+    "assignments/week_01/assignment2/index.html",
+    "exams/index.html", "exams/exam1.html",
+    "references/index.html", "references/cheatsheet.html",
+]
+FILES = [
+    "assignments/week_01/logbook1.html", "assignments/week_01/logbook1.md",
+    "assignments/week_01/assignment2/week_01-assignment2.zip",
+    "slides/week_01/lesson1.pdf", "references/datasheet.pdf",
+    "lessons/week_01/images/figure.svg", "search.json",
+]
+
+
+class Checks:
+    def __init__(self) -> None:
+        self.passed = 0
+        self.failed: list[str] = []
+        self.skipped: list[str] = []
+
+    def section(self, name: str) -> None:
+        print(f"\n{name}")
+
+    def ok(self, condition, what: str, detail: str = "") -> bool:
+        if condition:
+            self.passed += 1
+            print(f"  ok    {what}")
+        else:
+            self.failed.append(what)
+            print(f"  FAIL  {what}" + (f"\n        {detail}" if detail else ""))
+        return bool(condition)
+
+    def skip(self, what: str, why: str) -> None:
+        self.skipped.append(what)
+        print(f"  skip  {what} ({why})")
+
+
+def run(cmd: list[str], cwd: Path | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, encoding="utf-8", errors="replace")
+
+
+def main_content(html: str) -> str:
+    """The <main> element of a page (without the sidebar and the footer)."""
+    start, end = html.find("<main"), html.find("</main>")
+    return html[start:end] if start >= 0 and end > start else ""
+
+
+def commit(course: Path) -> None:
+    env = dict(os.environ, GIT_AUTHOR_DATE=DATE, GIT_COMMITTER_DATE=DATE)
+    git = ["git", "-c", f"user.name={AUTHOR}", "-c", "user.email=check@example.org",
+           "-c", "commit.gpgsign=false"]
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "Test course"]):
+        result = run(git + args, cwd=course, env=env)
+        if result.returncode != 0:
+            sys.exit(f"error: git {' '.join(args)} failed:\n{result.stdout}")
+
+
+def version_of_checkout() -> str | None:
+    m = re.search(r'^version\s*=\s*"([^"]+)"', (REPO / "pyproject.toml").read_text(), re.M)
+    return m.group(1) if m else None
+
+
+def check_tools(c: Checks, course_cmd: list[str]) -> bool:
+    c.section("Tools")
+    version = run(course_cmd + ["--version"])
+    expected = version_of_checkout()
+    c.ok(version.returncode == 0 and version.stdout.strip() == expected,
+         f"`course --version` is the version in pyproject.toml ({expected})",
+         f"got: {version.stdout.strip()!r}. Is the `course` under test this checkout?")
+    changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8") if (REPO / "CHANGELOG.md").is_file() else ""
+    c.ok(re.search(rf"^## {re.escape(expected or '?')}\b", changelog, re.M),
+         f"CHANGELOG.md has an entry for {expected}")
+    doctor = run(course_cmd + ["doctor"])
+    return c.ok(doctor.returncode == 0, "`course doctor` finds all tools", doctor.stdout.strip())
+
+
+def check_build(c: Checks, course_cmd: list[str], course: Path, html_only: bool) -> bool:
+    c.section("Build")
+    extra = ["--html-only"] if html_only else []
+    build = run(course_cmd + ["build", "--source", str(course), "--output", str(course / "dist"),
+                              "--site-url", SITE_URL] + extra, cwd=course)
+    log = ANSI.sub("", build.stdout)
+    if not c.ok(build.returncode == 0, "`course build` succeeds", "\n        ".join(log.splitlines()[-40:])):
+        return False
+    lines = [line.strip() for line in log.splitlines()]
+    unexpected = [line for line in lines
+                  if PROBLEM.search(line) and not any(e in line for e in EXPECTED_MESSAGES)]
+    c.ok(not unexpected, "no unexpected warnings or errors in the build output", "\n        ".join(unexpected))
+    c.ok(EXPECTED_MESSAGES[0] in lines, "a wrongly named week directory is reported")
+
+    # A second stage with the same options must not change any file.
+    stage = run(course_cmd + ["stage", "--source", str(course), "--site-url", SITE_URL] + extra, cwd=course)
+    c.ok(stage.returncode == 0 and "(0 files updated)" in stage.stdout,
+         "staging again changes nothing", stage.stdout.strip())
+    return True
+
+
+def check_site(c: Checks, dist: Path, html_only: bool) -> None:
+    def read(rel: str) -> str:
+        p = dist / rel
+        return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+
+    c.section("Pages and files")
+    missing = [rel for rel in PAGES + FILES if not (dist / rel).is_file()]
+    c.ok(not missing, "all pages and files are there", f"missing: {missing}")
+    c.ok(not (dist / "lessons" / "week1").exists(), "a wrongly named week directory is not published")
+
+    c.section("Private files")
+    private = [p.relative_to(dist).as_posix() for p in dist.rglob("*") if "private" in p.relative_to(dist).parts]
+    c.ok(not private, "no `private` directory is published", f"found: {private}")
+    leaks = [p.relative_to(dist).as_posix() for p in dist.rglob("*")
+             if p.is_file() and SECRET.encode() in p.read_bytes()]
+    c.ok(not leaks, "no private content in any published file (search index included)", f"found in: {leaks}")
+    zip_path = dist / "assignments/week_01/assignment2/week_01-assignment2.zip"
+    names = zipfile.ZipFile(zip_path).namelist() if zip_path.is_file() else []
+    c.ok(names == ["week_01-assignment2/main.c"], "the starter zip has the starter files, without private ones",
+         f"zip contains: {names}")
+
+    c.section("Navigation")
+    home = read("index.html")
+    sidebar = home[home.find('id="quarto-sidebar"'):home.find("</nav>", home.find('id="quarto-sidebar"'))]
+    c.ok("Week 1: Basics" in sidebar and "Week 2: Interrupts" in sidebar,
+         "weeks are named after the title of their README")
+    c.ok(0 <= sidebar.find("lesson2.html") < sidebar.find("lesson10.html"), "pages are in natural order (2 before 10)")
+    c.ok("logbook1" not in sidebar, "a logbook is not in the sidebar")
+    html_files = [p for p in dist.rglob("*.html")]
+    qmd = [p.relative_to(dist).as_posix() for p in html_files if re.search(r'href="[^"]*\.qmd[#"]', p.read_text(errors="replace"))]
+    c.ok(not qmd, "no links to .qmd files", f"in: {qmd}")
+    md = [p.relative_to(dist).as_posix() for p in html_files
+          if re.search(r'href="(?![^"]*logbook1\.md")[^"]*\.md[#"]', p.read_text(errors="replace"))]
+    c.ok(not md, "no links to .md files (except logbook downloads)", f"in: {md}")
+    try:
+        index = json.loads(read("search.json"))
+        c.ok(any("Superloops" in json.dumps(e) for e in index), "the search index covers the pages")
+    except json.JSONDecodeError as e:
+        c.ok(False, "the search index is valid JSON", str(e))
+
+    c.section("Lesson with all Markdown features (lessons/week_01/lesson1)")
+    html = read("lessons/week_01/lesson1.html")
+    m = main_content(html)
+    if html_only:
+        c.ok('class="course-pdf"' not in m, "no PDF button without PDFs")
+    else:
+        c.ok('class="course-pdf"' in m and 'href="lesson1.pdf" target="_blank"' in m, "PDF button, opens in a new tab")
+    c.ok("Open the slides" in m and 'href="../../slides/week_01/lesson1.pdf" target="_blank"' in m,
+         "slides box with the slides PDF")
+    for target, what in (("../../lessons/week_01/lesson2.html", "lesson2.md"),
+                         ("../../info/assessment.html", "info/assessment.yaml"),
+                         ("../../lessons/week_01/index.html", "README.md")):
+        c.ok(f'href="{target}"' in m, f"a link to {what} leads to its page")
+    c.ok('class="math inline"' in m and 'class="math display"' in m, "inline and display math")
+    c.ok("callout-tip" in m and "CALLOUT-TIP-TEXT" in m, "callout")
+    c.ok("panel-tabset" in m, "tabs")
+    c.ok(m.count('class="code-annotation-anchor') == 2 and "&lt;1&gt;" not in m,
+         "C code annotations (// <1>) become annotation numbers")
+    c.ok(m.count("SHOWN-NEVER-RUN") == 1, "an executable cell is shown, not run")
+    c.ok("mermaid-js" in m and 'data-layout-align="center"' in m, "Mermaid diagram, centred")
+    c.ok(m.count('<img src="data:image/svg+xml') == 2, "PlantUML diagrams are inline SVG")
+    c.ok(m.count('class="course-diagram" style="text-align: center"') == 1,
+         "PlantUML diagrams are centred unless they set fig-align")
+    c.ok('src="images/figure.svg"' in m, "image")
+    c.ok("<hr" in m and "<li>first item</li>" in m, "a rule followed by text, and a list right after text")
+    c.ok(all(line in m for line in FOOTER), "footer with the dates and author from git")
+    c.ok("classList.add('embedded')" in html, "embedded mode script (Brightspace)")
+
+    c.section("Other lessons")
+    lesson2, lesson10 = main_content(read("lessons/week_01/lesson2.html")), main_content(read("lessons/week_01/lesson10.html"))
+    c.ok("No presentation yet" in lesson2, "a lesson without slides says so")
+    c.ok("No presentation yet" not in lesson10 and "Open the slides" not in lesson10, "`slides: false` hides the box")
+
+    c.section("Assignments and logbooks")
+    a1 = main_content(read("assignments/week_01/assignment1.html"))
+    a2 = main_content(read("assignments/week_01/assignment2/index.html"))
+    logbook = read("assignments/week_01/logbook1.html")
+    c.ok("Generative AI: allowed, with citation" in a1 and "GENAI-NOTE-TEXT" in a1,
+         "an assignment can allow GenAI, with a note")
+    c.ok("Generative AI: not allowed" in a2, "other assignments follow the course policy")
+    c.ok('href="logbook1.md"' in a1 and "logbook1.html" in a1, "logbook box: download and preview")
+    c.ok('href="week_01-assignment2.zip"' in a2, "starter files box with the zip")
+    c.ok("assignment1.html" in main_content(logbook) and 'class="course-pdf"' not in logbook,
+         "logbook preview links back and has no PDF")
+    published = dist / "assignments/week_01/logbook1.md"
+    c.ok(published.is_file() and published.read_bytes() == (COURSE / "assignments/week_01/logbook1.md").read_bytes(),
+         "the logbook is published unchanged")
+
+    c.section("Course information pages")
+    info = main_content(read("info/index.html"))
+    c.ok("Write a superloop in C." in info and "course-levels" in info and "Kernighan" in info,
+         "course information: learning outcomes, levels, literature")
+    c.ok(all(line in info for line in FOOTER), "generated pages have a footer from their YAML file")
+    assessment = main_content(read("info/assessment.html"))
+    c.ok(assessment.count('class="assessment-matrix"') == 2, "an assessment matrix per component")
+    c.ok("RUBRIC-DESCRIPTION-TEXT" in assessment and "Bloom" in assessment, "rubric and Bloom legend")
+    c.ok("Generative AI and academic integrity" in read("info/genai.html"), "GenAI policy page")
+    c.ok("House rules" in read("info/rules.html"), "extra page in info/")
+
+    if html_only:
+        c.skip("PDFs", "--html-only")
+        return
+    c.section("PDFs")
+    expected_pdfs = [rel[:-5] + ".pdf" for rel in PAGES]
+    bad = [rel for rel in expected_pdfs
+           if not (dist / rel).is_file() or not (dist / rel).read_bytes().startswith(b"%PDF")]
+    c.ok(not bad, "every page has a PDF", f"missing or invalid: {bad}")
+    c.ok(not (dist / "assignments/week_01/logbook1.pdf").exists(), "a logbook preview has no PDF")
+    pdf = (dist / "lessons/week_01/lesson1.pdf").read_bytes() if (dist / "lessons/week_01/lesson1.pdf").is_file() else b""
+    c.ok(f"{SITE_URL}lessons/week_01/lesson2.html".encode() in pdf, "links in PDFs point to the website")
+    if not shutil.which("pdftotext"):
+        c.skip("text of the PDFs", "pdftotext not installed")
+        return
+
+    def text(rel: str) -> str:
+        out = run(["pdftotext", str(dist / rel), "-"])
+        return re.sub(r"\s+", " ", out.stdout)
+
+    t = text("lessons/week_01/lesson1.pdf")
+    c.ok("Superloops" in t and "CALLOUT-TIP-TEXT" in t and "Open the slides" in t, "lesson PDF: title, callout, slides")
+    c.ok("// ①" in t and "① Configure the hardware once." in t, "lesson PDF: code annotations as circled numbers")
+    c.ok(all(line in t for line in FOOTER), "lesson PDF: footer from git")
+    c.ok("GENAI-NOTE-TEXT" in text("assignments/week_01/assignment1.pdf"), "assignment PDF: GenAI box")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--course", default="course", help='command to run course-tools (default: "course")')
+    parser.add_argument("--html-only", action="store_true", help="skip the PDFs (faster)")
+    parser.add_argument("--keep", action="store_true", help="keep the build directory")
+    args = parser.parse_args()
+
+    course_cmd = shlex.split(args.course)
+    # The commands run in the test course; keep a relative PYTHONPATH=src working.
+    if os.environ.get("PYTHONPATH"):
+        os.environ["PYTHONPATH"] = os.pathsep.join(
+            str(Path(p).resolve()) for p in os.environ["PYTHONPATH"].split(os.pathsep) if p)
+    if not shutil.which(course_cmd[0]):
+        sys.exit(f"error: {course_cmd[0]} not found. Run ./install.sh --local, or see --help.")
+
+    tmp = Path(tempfile.mkdtemp(prefix="course-check-"))
+    course = tmp / "course"
+    shutil.copytree(COURSE, course)
+    commit(course)
+    print(f"Test course: {course}")
+
+    c = Checks()
+    if check_tools(c, course_cmd) and check_build(c, course_cmd, course, args.html_only):
+        check_site(c, course / "dist", args.html_only)
+
+    print(f"\n{c.passed} passed, {len(c.failed)} failed" + (f", {len(c.skipped)} skipped" if c.skipped else ""))
+    if c.failed or args.keep:
+        print(f"The build is kept in {course}")
+    else:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return 1 if c.failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
