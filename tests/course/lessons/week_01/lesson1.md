@@ -8,6 +8,20 @@ $$
 T(n) = \sum_{i=1}^{n} c = c \cdot n
 $$
 
+::: {.terms}
+superloop
+: An endless loop in `main` that reads inputs and updates outputs, over and
+over.
+
+[ISR]{aliases="interrupt service routine|interrupt handler"}
+: A function that the hardware calls when an interrupt occurs.
+
+    It runs in between two instructions of the main program; see
+    [lesson 2](lesson2.md).
+:::
+
+A superloop is the simplest structure for embedded software.
+
 ::: {.callout-tip}
 ## Remember
 CALLOUT-TIP-TEXT

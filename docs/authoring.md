@@ -468,6 +468,57 @@ Notes:
   <https://godbolt.org/api/compilers/c> (C) and
   <https://godbolt.org/api/compilers/c++> (C++).
 
+## Key terms
+
+List the key terms of a page in a `::: {.terms}` block, as a definition list:
+the term on one line, the definition on the next, starting with `: `.
+
+```markdown
+::: {.terms}
+superloop
+: An endless loop in `main` that reads inputs and updates outputs, over and
+  over.
+
+`volatile`
+: A qualifier that tells the compiler that a variable can change outside the
+  normal program flow.
+
+[ISR]{aliases="interrupt service routine|interrupt handler"}
+: A function that the hardware calls when an interrupt occurs.
+
+    A second paragraph is indented by four spaces.
+:::
+```
+
+From these blocks, the website gets:
+
+- **A *Key terms* box** on the page itself, where you put the block (usually
+  near the top).
+- **Definitions on first use**, on every page: the first time a key term is
+  used on a page, it is underlined; pointing at it (or tapping it) shows its
+  definition, with links to the page that introduces it and to the glossary.
+  Plurals (*ISRs*) and the other names in `aliases` count too, and so does
+  inline code that is exactly the term (`` `volatile` ``). Headings, links,
+  code blocks, self-checks and predictions are skipped: there, a definition
+  could give the answer away.
+- **The glossary** (*Key terms* in the sidebar): all terms from A to Z, each
+  linking to where it is introduced. It is also a PDF.
+- **Review key terms**: flash cards with spaced repetition. A card that a
+  student knows comes back after 1, 3, 7, 16 and 35 days; one they don't
+  know comes back the same day. Students choose the weeks to review (terms
+  from pages outside the weeks are under *Other*) and whether they are asked
+  for the definition or the term. Progress is saved in their browser only.
+
+Notes:
+
+- Define each term once, where it is introduced. If a term is defined twice,
+  the build warns and the glossary uses the first definition (in course
+  order: course information, weeks, exams, references).
+- Links in a definition can be relative to the page, as everywhere: they
+  work in the glossary too.
+- Without key terms, the course has no glossary and no review page.
+- In the PDF of a page, the key terms are a box; there are no tooltips.
+
 ## Page footer: dates from git
 
 Every page ends with a footer that says when its source file was added to the

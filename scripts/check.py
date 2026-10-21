@@ -52,6 +52,8 @@ REQUIRED_MESSAGES = (
     "warning: ignoring lessons/week1: week directories are named week_01, week_02, ...",
     'warning: lessons/week_02/lesson1.md: ce="asm exe": exe (output only) cannot be combined '
     "with asm or run; using run",
+    "warning: lessons/week_02/lesson1.md: key term `superloop` is already defined in "
+    "lessons/week_01/lesson1.md; the glossary uses that definition",
 )
 # Other lines that look like a warning or an error fail the check, except these.
 ALLOWED_MESSAGES = REQUIRED_MESSAGES + (
@@ -71,12 +73,14 @@ PAGES = [
     "assignments/week_01/assignment2/index.html",
     "exams/index.html", "exams/exam1.html",
     "references/index.html", "references/cheatsheet.html",
+    "glossary/index.html",
 ]
 FILES = [
     "assignments/week_01/logbook1.html", "assignments/week_01/logbook1.md",
     "assignments/week_01/assignment2/week_01-assignment2.zip",
     "slides/week_01/lesson1.pdf", "references/datasheet.pdf",
     "lessons/week_01/images/figure.svg", "search.json",
+    "glossary/review.html",
 ]
 
 
@@ -157,6 +161,7 @@ def check_build(c: Checks, course_cmd: list[str], course: Path, html_only: bool)
     c.ok(not unexpected, "no unexpected warnings or errors in the build output", "\n        ".join(unexpected))
     c.ok(REQUIRED_MESSAGES[0] in lines, "a wrongly named week directory is reported")
     c.ok(REQUIRED_MESSAGES[1] in lines, "a wrong Compiler Explorer mode is reported")
+    c.ok(REQUIRED_MESSAGES[2] in lines, "a key term defined twice is reported")
 
     # A second stage with the same options must not change any file.
     stage = run(course_cmd + ["stage", "--source", str(course), "--site-url", SITE_URL] + extra, cwd=course)
@@ -231,6 +236,33 @@ def check_practice(c: Checks, read) -> None:
     c.ok(all(session["language"] == "c" for session in s), "the language comes from the code block")
     annotated = p.find('class="code-annotation-container-grid"')
     c.ok(0 < annotated < p.find('class="course-ce"', p.find("square")), "the link comes after the annotations")
+
+
+def check_terms(c: Checks, read) -> None:
+    c.section("Key terms")
+    g = main_content(read("glossary/index.html"))
+    ids = re.findall(r'<dt><span id="(term-[\w-]+)" class="course-term"', g)
+    c.ok(ids == ["term-isr", "term-linker", "term-period", "term-superloop", "term-volatile"],
+         "glossary: the terms from A to Z",
+         f"found: {ids}")
+    c.ok("NOT-A-TERM" not in g, "a key-terms block in a code block is not read")
+    c.ok("DUPLICATE-DEFINITION" not in g, "of a term defined twice, the glossary has the first definition")
+    c.ok('data-aliases="interrupt service routine|interrupt handler"' in g and 'data-week="2"' in g
+         and '<span id="term-linker" class="course-term">' in g,
+         "aliases and weeks; no week for a term defined outside the weeks")
+    c.ok('Introduced in <a href="../lessons/week_01/lesson1.html#term-isr">' in g
+         and 'href="../references/cheatsheet.html#term-linker"' in g, "each term links to where it is introduced")
+    c.ok('href="../lessons/week_01/lesson2.html"' in g, "links in definitions work from the glossary")
+    lesson = main_content(read("lessons/week_01/lesson1.html"))
+    c.ok('class="course-terms"' in lesson and '<span id="term-isr" class="course-term-name">' in lesson,
+         "the key-terms box of a lesson, with the ids the glossary links to")
+    review = read("glossary/review.html")
+    c.ok('class="course-review"' in main_content(review) and 'class="course-pdf"' not in review,
+         "the review page, without a PDF button")
+    home = read("index.html")
+    c.ok('href="./glossary/index.html"' in home and 'href="./glossary/review.html"' in home,
+         "a Key terms section in the sidebar")
+    c.ok("course-term-ref" in read("lessons/week_02/lesson1.html"), "the definitions-on-first-use script is on the pages")
 
 
 def check_site(c: Checks, dist: Path, html_only: bool) -> None:
@@ -333,6 +365,7 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("House rules" in read("info/rules.html"), "extra page in info/")
 
     check_practice(c, read)
+    check_terms(c, read)
 
     if html_only:
         c.skip("PDFs", "--html-only")
@@ -343,6 +376,7 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
            if not (dist / rel).is_file() or not (dist / rel).read_bytes().startswith(b"%PDF")]
     c.ok(not bad, "every page has a PDF", f"missing or invalid: {bad}")
     c.ok(not (dist / "assignments/week_01/logbook1.pdf").exists(), "a logbook preview has no PDF")
+    c.ok(not (dist / "glossary/review.pdf").exists(), "the review page has no PDF")
     pdf = (dist / "lessons/week_01/lesson1.pdf").read_bytes() if (dist / "lessons/week_01/lesson1.pdf").is_file() else b""
     c.ok(f"{SITE_URL}lessons/week_01/lesson2.html".encode() in pdf, "links in PDFs point to the website")
     practice_pdf = dist / "lessons/week_02/lesson1.pdf"
@@ -354,7 +388,8 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
 
     def text(rel: str) -> str:
         out = run(["pdftotext", str(dist / rel), "-"])
-        return re.sub(r"\s+", " ", out.stdout)
+        # Typst puts a zero-width space before an element with an id.
+        return re.sub(r"[\s\u200b]+", " ", out.stdout)
 
     t = text("lessons/week_01/lesson1.pdf")
     c.ok("Superloops" in t and "CALLOUT-TIP-TEXT" in t and "Open the slides" in t, "lesson PDF: title, callout, slides")
@@ -368,6 +403,9 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok(all(a in key for a in ("Correct: volatile", "0.1 ms (± 0.001)", "ISR (also right: interrupt service routine",
                                 "EXPLANATION-SINGLE", "PREDICT-ANSWER")),
          "practice PDF: answers, feedback and explanations at the end")
+    g = text("glossary/index.pdf")
+    c.ok("Glossary" in g and "linker" in g and "Introduced in Superloops (Week 1: Basics)" in g, "glossary PDF")
+    c.ok("Key terms superloop" in text("lessons/week_01/lesson1.pdf"), "lesson PDF: the key-terms box")
 
 
 def main() -> int:

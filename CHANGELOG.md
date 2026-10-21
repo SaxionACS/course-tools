@@ -13,6 +13,37 @@ Every release from 1.11.1 on has **platform notes**:
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 
+## 1.13.0 (2026-10-21)
+
+Key terms. See [docs/authoring.md](docs/authoring.md#key-terms).
+
+- `::: {.terms}` in a page: a definition list of the page's key terms, shown
+  as a *Key terms* box. A term can have other names (`aliases`).
+- **Definitions on first use:** on every page, the first use of a key term
+  (or one of its other names, also in the plural) is underlined; pointing at
+  it, or tapping it, shows the definition, with links to where the term is
+  introduced and to the glossary. Not in self-checks and predictions, where
+  the definition could give the answer away.
+- **Glossary:** a generated page with all key terms from A to Z, each linking
+  to the page that introduces it. In the sidebar under *Key terms*, also as
+  PDF.
+- **Review key terms:** a deck of flash cards with spaced repetition (Leitner
+  boxes: again after 1, 3, 7, 16 and 35 days), filtered by week, asking for
+  the definition or the term. Progress is saved in the student's browser
+  only. No PDF.
+- A term defined twice gives a warning; the glossary uses the first
+  definition.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), with new
+  checks for the glossary, the key-terms box, the review page and their PDFs.
+  The browser part (definitions on first use, the review deck) was tested with
+  a browser script, not part of CI.
+- **macOS:** untested. Nothing platform-specific changed; to do: run
+  `scripts/check.py`.
+
 ## 1.12.0 (2026-10-20)
 
 Practice in the lessons, and Compiler Explorer links. See

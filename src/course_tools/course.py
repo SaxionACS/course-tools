@@ -33,6 +33,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
+from . import terms
 from .markdown import natural_key, pop_leading_h1, split_front_matter, title_from_name
 
 WEEK_DIR = re.compile(r"^week_(\d{2,})$")
@@ -99,6 +100,7 @@ class Course:
     references_overview: Page | None
     references: list[Page]
     reference_files: list[PurePosixPath]
+    terms: list = field(default_factory=list)    # key terms of all pages (terms.Term)
 
     @property
     def title(self) -> str:
@@ -324,9 +326,11 @@ def scan(root: Path) -> Course:
             if p.is_file() and p.suffix.lower() == ".pdf" and not is_ignored(p, root)
         ]
 
-    return Course(
+    course = Course(
         root=root, general=general, assessment=assessment, genai=genai, genai_file=genai_file, home=home, info_pages=info_pages,
         weeks=weeks, exams_overview=exams_overview, exams=exams,
         references_overview=references_overview, references=references,
         reference_files=reference_files,
     )
+    course.terms = terms.collect((p, _rel(p.src, root)) for p in course.pages() if p.src is not None)
+    return course

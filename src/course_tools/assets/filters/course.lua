@@ -155,7 +155,8 @@ local function decorate(doc)
   page = doc.meta['course-page'] or {}
   local top = pandoc.List()
 
-  if is_html and site.pdf == true and str(page.kind) ~= 'logbook' then
+  -- Logbook previews and the review deck are web pages only.
+  if is_html and site.pdf == true and str(page.kind) ~= 'logbook' and str(page.kind) ~= 'review' then
     top:insert(pandoc.RawBlock('html',
       '<div class="course-pdf"><a class="btn btn-sm btn-outline-primary" href="'
       .. input_stem() .. '.pdf" target="_blank" rel="noopener"><i class="bi bi-file-earmark-pdf"></i> PDF</a></div>'))

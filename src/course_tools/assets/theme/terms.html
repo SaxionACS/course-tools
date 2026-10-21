@@ -1,0 +1,363 @@
+<script>
+  // Key terms (terms.py): the definition of a term where it is first used on
+  // a page, and the review deck (glossary/review). Both read the glossary page,
+  // so definitions look the same everywhere; styles are in saxion.scss.
+  (function () {
+    'use strict';
+    function one(selector, root) { return (root || document).querySelector(selector); }
+    function all(selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); }
+    function element(tag, className, text) {
+      var e = document.createElement(tag);
+      if (className) e.className = className;
+      if (text !== undefined) e.textContent = text;
+      return e;
+    }
+    var store = {
+      get: function (key, fallback) {
+        try { var v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; }
+      },
+      set: function (key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ } },
+    };
+
+    var offset = (one('meta[name="quarto:offset"]') || {}).content || './';
+    var root = new URL(offset, location.href);
+    var glossary = new URL('glossary/index.html', root);
+
+    // The terms of the glossary page: name, aliases, week, definition (HTML)
+    // and the page where the term is introduced.
+    function load() {
+      return fetch(glossary).then(function (response) {
+        if (!response.ok) throw new Error(response.status);
+        return response.text();
+      }).then(function (html) {
+        var page = new DOMParser().parseFromString(html, 'text/html');
+        return all('.course-glossary dt', page).map(function (dt) {
+          var name = one('.course-term', dt), dd = dt.nextElementSibling;
+          if (!name || !dd || dd.tagName !== 'DD') return null;
+          var body = dd.cloneNode(true);
+          var line = one('.course-term-source', body);       // "Introduced in <link>"
+          var source = line && one('a', line);
+          if (line) (line.parentElement.tagName === 'P' ? line.parentElement : line).remove();
+          // Links and images are relative to the glossary page.
+          all('[href]', body).forEach(function (a) { a.setAttribute('href', new URL(a.getAttribute('href'), glossary).href); });
+          all('[src]', body).forEach(function (img) { img.setAttribute('src', new URL(img.getAttribute('src'), glossary).href); });
+          return {
+            id: name.id,
+            name: name.textContent.trim(),
+            code: !!one('code', name),
+            nameHtml: name.innerHTML,
+            aliases: (name.dataset.aliases || '').split('|').map(function (a) { return a.trim(); }).filter(Boolean),
+            week: name.dataset.week ? Number(name.dataset.week) : null,
+            html: body.innerHTML.trim(),
+            source: source && { href: new URL(source.getAttribute('href'), glossary).href, text: source.textContent.trim() },
+          };
+        }).filter(Boolean);
+      });
+    }
+
+    // Quarto loads MathJax only on pages with math, but a definition can have
+    // math too: then the same MathJax is loaded when it is shown.
+    var MATHJAX = 'https://cdn.jsdelivr.net/npm/mathjax@4/tex-chtml.js';
+    var mathjax = null;
+    function typeset(node) {
+      if (!one('.math', node)) return;
+      if (!mathjax) {
+        mathjax = new Promise(function (resolve, reject) {
+          if (window.MathJax && MathJax.typesetPromise) { resolve(); return; }
+          var script = one('script[src*="mathjax"]');
+          if (!script) {
+            script = element('script');
+            script.src = MATHJAX;
+            document.head.appendChild(script);
+          }
+          script.addEventListener('load', resolve);
+          script.addEventListener('error', reject);
+        }).then(function () { return MathJax.startup.promise; });
+      }
+      mathjax.then(function () { return MathJax.typesetPromise([node]); }).catch(function () {});
+    }
+
+    // Definitions on first use ------------------------------------------------
+    // Not in code blocks, headings, links, the key-terms box, and not in
+    // self-checks and predictions (a definition could give the answer away).
+    var SKIP = 'pre, a, button, label, input, textarea, select, h1, h2, h3, h4, h5, h6, nav, .math, '
+      + '.course-terms, .course-check, .course-predict, .course-glossary, .course-review, .course-ce, '
+      + '.course-history, .callout-header, #title-block-header, .quarto-title-block, .tippy-box';
+
+    function tip(entry) {
+      var box = element('div', 'course-term-tip');
+      var name = element('div', 'course-term-tip-name');
+      name.innerHTML = entry.nameHtml;
+      box.appendChild(name);
+      var body = element('div', 'course-term-tip-body');
+      body.innerHTML = entry.html;
+      box.appendChild(body);
+      var links = element('div', 'course-term-tip-links');
+      if (entry.source) {
+        var a = element('a', '', entry.source.text);
+        a.href = entry.source.href;
+        links.appendChild(a);
+        links.appendChild(document.createTextNode(' · '));
+      }
+      var g = element('a', '', 'Glossary');
+      g.href = glossary.href + '#' + entry.id;
+      links.appendChild(g);
+      box.appendChild(links);
+      return box;
+    }
+
+    function attach(node, entry) {
+      node.classList.add('course-term-ref');
+      node.tabIndex = 0;
+      if (window.tippy) {
+        window.tippy(node, {
+          content: tip(entry), allowHTML: true, interactive: true, interactiveBorder: 10, theme: 'quarto',
+          maxWidth: 420, delay: 100, arrow: false, placement: 'bottom-start',
+          appendTo: function () { return document.body; },
+          onMount: function (instance) { typeset(instance.popper); },
+        });
+      } else {
+        node.title = entry.name + ': ' + element('div').appendChild(tip(entry)).textContent;
+      }
+    }
+
+    function markFirstUses(entries) {
+      var main = one('main.content') || one('main');
+      if (!main || one('.course-glossary, .course-review', main) || !entries.length) return;
+      var byWord = {}, words = [];
+      entries.forEach(function (entry) {
+        [entry.name].concat(entry.aliases).forEach(function (word) {
+          var key = word.toLowerCase();
+          if (!byWord[key]) { byWord[key] = entry; words.push(word); }
+        });
+      });
+      words.sort(function (a, b) { return b.length - a.length; });
+      var escaped = words.map(function (w) { return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); });
+      // Whole words, also in the plural (ISRs, processes).
+      var pattern = new RegExp('(?<![\\p{L}\\p{N}_])(' + escaped.join('|') + ')(?:e?s)?(?![\\p{L}\\p{N}_])', 'giu');
+
+      // Inline code (`volatile`) and text, in document order.
+      var nodes = [];
+      var walker = document.createTreeWalker(main, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+        acceptNode: function (node) {
+          if (node.nodeType === 1) return node.matches(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+          return node.parentNode.closest('code') ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      while (walker.nextNode()) {
+        var node = walker.currentNode;
+        if (node.nodeType === 1 ? node.tagName === 'CODE' : node.data.trim()) nodes.push(node);
+      }
+
+      var done = {};
+      nodes.forEach(function (node) {
+        if (node.nodeType === 1) {
+          var entry = byWord[node.textContent.trim().toLowerCase()];
+          if (entry && !done[entry.id]) { done[entry.id] = true; attach(node, entry); }
+          return;
+        }
+        var text = node;
+        while (text) {
+          pattern.lastIndex = 0;
+          var match = null, found;
+          while ((found = pattern.exec(text.data))) {
+            var candidate = byWord[found[1].toLowerCase()];
+            if (candidate && !done[candidate.id]) { match = found; break; }
+          }
+          if (!match) break;
+          var entry = byWord[match[1].toLowerCase()];
+          var word = text.splitText(match.index);
+          var after = word.splitText(match[0].length);
+          var span = element('span');
+          word.parentNode.replaceChild(span, word);
+          span.appendChild(word);
+          done[entry.id] = true;
+          attach(span, entry);
+          text = after;
+        }
+      });
+    }
+
+    // Review deck: Leitner boxes ----------------------------------------------
+    // A card you know moves up a box and comes back after DAYS[box] days; a
+    // card you don't know goes back to box 1 and comes back today.
+    var DAYS = [0, 1, 3, 7, 16, 35];
+
+    function today() {
+      var now = new Date();
+      return Math.floor((now.getTime() - now.getTimezoneOffset() * 60000) / 864e5);
+    }
+
+    function reviewDeck(entries) {
+      var box = one('.course-review');
+      if (!box) return;
+      var stateKey = 'course-review:' + root.pathname, settingsKey = 'course-review-settings:' + root.pathname;
+      var state = store.get(stateKey, {});
+      var weeks = [];
+      entries.forEach(function (e) { var w = e.week === null ? 'other' : e.week; if (weeks.indexOf(w) < 0) weeks.push(w); });
+      weeks.sort(function (a, b) { return a === 'other' ? 1 : b === 'other' ? -1 : a - b; });
+      var settings = store.get(settingsKey, {});
+      var chosen = Array.isArray(settings.weeks) ? settings.weeks.filter(function (w) { return weeks.indexOf(w) >= 0; }) : weeks.slice();
+      if (!chosen.length) chosen = weeks.slice();
+      var askTerm = settings.ask === 'term';     // show the definition, ask for the term
+      var queue = [], current = null, shown = false;
+
+      box.textContent = '';
+      var controls = element('div', 'course-review-controls');
+      var weekButtons = element('div', 'course-review-weeks');
+      weekButtons.setAttribute('role', 'group');
+      weekButtons.setAttribute('aria-label', 'Weeks');
+      weeks.forEach(function (w) {
+        var b = element('button', 'btn btn-sm', w === 'other' ? 'Other' : 'Week ' + w);
+        b.type = 'button';
+        b.dataset.week = w;
+        b.addEventListener('click', function () {
+          var i = chosen.indexOf(w);
+          if (i >= 0 && chosen.length > 1) chosen.splice(i, 1); else if (i < 0) chosen.push(w);
+          save();
+          start();
+        });
+        weekButtons.appendChild(b);
+      });
+      var direction = element('button', 'btn btn-sm btn-outline-secondary course-review-direction');
+      direction.type = 'button';
+      direction.addEventListener('click', function () { askTerm = !askTerm; save(); start(); });
+      controls.appendChild(weekButtons);
+      controls.appendChild(direction);
+      var stats = element('div', 'course-review-stats');
+      var card = element('div', 'course-review-card');
+      card.setAttribute('aria-live', 'polite');
+      var actions = element('div', 'course-review-actions');
+      var boxes = element('div', 'course-review-boxes');
+      var footer = element('div', 'course-review-footer');
+      [controls, stats, card, actions, boxes, footer].forEach(function (e) { box.appendChild(e); });
+
+      function save() { store.set(settingsKey, { weeks: chosen, ask: askTerm ? 'term' : 'definition' }); }
+      function cards() {
+        return entries.filter(function (e) { return chosen.indexOf(e.week === null ? 'other' : e.week) >= 0; });
+      }
+      function status(e) { return state[e.id] || { box: 0, due: 0 }; }
+
+      function start() {
+        all('button', weekButtons).forEach(function (b) {
+          var on = chosen.indexOf(b.dataset.week === 'other' ? 'other' : Number(b.dataset.week)) >= 0;
+          b.classList.toggle('btn-primary', on);
+          b.classList.toggle('btn-outline-primary', !on);
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        direction.textContent = askTerm ? 'Asking for the term' : 'Asking for the definition';
+        var day = today();
+        queue = cards().filter(function (e) { return status(e).due <= day; });
+        queue.sort(function (a, b) { return status(a).box - status(b).box || (a.week || 99) - (b.week || 99) || a.name.localeCompare(b.name); });
+        next();
+      }
+
+      function face(e, front) {
+        var f = element('div', front ? 'course-review-front' : 'course-review-back');
+        var showName = askTerm ? !front : front;
+        if (showName) {
+          f.classList.add('course-review-name');
+          f.innerHTML = e.nameHtml;
+        } else {
+          f.innerHTML = e.html;
+        }
+        return f;
+      }
+
+      function next() {
+        var all_ = cards(), counts = [0, 0, 0, 0, 0, 0];
+        all_.forEach(function (e) { counts[status(e).box]++; });
+        stats.textContent = all_.length + (all_.length === 1 ? ' card' : ' cards') + ' · ' + queue.length + ' to review now';
+        boxes.innerHTML = counts.map(function (n, i) {
+          return '<span><small>' + (i === 0 ? 'New' : 'Box ' + i) + '</small><b>' + n + '</b></span>';
+        }).join('');
+        actions.textContent = '';
+        card.textContent = '';
+        current = queue[0] || null;
+        shown = false;
+        if (!current) {
+          var tomorrow = today() + 1;
+          var soon = all_.filter(function (e) { return status(e).due <= tomorrow; }).length;
+          card.appendChild(element('div', 'course-review-done', 'All done for now.'));
+          card.appendChild(element('p', '', soon ? soon + (soon === 1 ? ' card is' : ' cards are') + ' due tomorrow. Spacing is what makes it stick.'
+            : 'Nothing is due tomorrow. Choose more weeks to review more terms.'));
+          return;
+        }
+        card.appendChild(face(current, true));
+        var show = element('button', 'btn btn-primary', 'Show the answer');
+        show.type = 'button';
+        show.addEventListener('click', reveal);
+        actions.appendChild(show);
+        typeset(card);
+      }
+
+      function reveal() {
+        if (!current || shown) return;
+        shown = true;
+        card.appendChild(face(current, false));
+        if (current.source) {
+          var from = element('div', 'course-review-source');
+          var a = element('a', '', current.source.text);
+          a.href = current.source.href;
+          from.appendChild(document.createTextNode('From '));
+          from.appendChild(a);
+          card.appendChild(from);
+        }
+        typeset(card);
+        actions.textContent = '';
+        var again = element('button', 'btn btn-outline-secondary', 'Again');
+        var knew = element('button', 'btn btn-primary', 'I knew it');
+        again.type = knew.type = 'button';
+        again.title = 'Key 1';
+        knew.title = 'Key 2';
+        again.addEventListener('click', function () { grade(false); });
+        knew.addEventListener('click', function () { grade(true); });
+        actions.appendChild(again);
+        actions.appendChild(knew);
+        knew.focus();
+      }
+
+      function grade(knew) {
+        var s = status(current);
+        s = { box: knew ? Math.min(5, s.box + 1) : 1, due: 0 };
+        s.due = knew ? today() + DAYS[s.box] : today();
+        state[current.id] = s;
+        store.set(stateKey, state);
+        queue.shift();
+        if (!knew) queue.push(current);
+        next();
+      }
+
+      var reset = element('button', 'btn btn-link btn-sm course-review-reset', 'Start over');
+      reset.type = 'button';
+      reset.addEventListener('click', function () {
+        footer.textContent = '';
+        footer.appendChild(element('span', '', 'Forget your progress with all cards? '));
+        var yes = element('button', 'btn btn-sm btn-outline-danger', 'Yes, start over');
+        var no = element('button', 'btn btn-sm btn-link', 'Cancel');
+        yes.type = no.type = 'button';
+        yes.addEventListener('click', function () { state = {}; store.set(stateKey, state); footer.textContent = ''; footer.appendChild(reset); start(); });
+        no.addEventListener('click', function () { footer.textContent = ''; footer.appendChild(reset); });
+        footer.appendChild(yes);
+        footer.appendChild(no);
+      });
+      footer.appendChild(reset);
+
+      document.addEventListener('keydown', function (e) {
+        if (e.target.closest('input, textarea, select, button') && e.key !== '1' && e.key !== '2') return;
+        if ((e.key === ' ' || e.key === 'Enter') && current && !shown) { e.preventDefault(); reveal(); }
+        else if (e.key === '1' && shown) grade(false);
+        else if (e.key === '2' && shown) grade(true);
+      });
+      start();
+    }
+
+    load().then(function (entries) {
+      markFirstUses(entries);
+      reviewDeck(entries);
+    }).catch(function () {
+      var review = one('.course-review');
+      if (review) review.textContent = 'The glossary could not be loaded.';
+    });
+  })();
+</script>

@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from . import compiler_explorer, genai, history, info
+from . import compiler_explorer, genai, history, info, terms
 from .course import Course, Page, Week, is_ignored
 from .markdown import join_front_matter, natural_key, rewrite_fences, separate_thematic_breaks, split_front_matter
 
@@ -162,6 +162,8 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
             extra["download"] = page.src.name
             extra["assignment"] = {"title": page.assignment.title,
                                    "href": _rel_link(page.rel, page.assignment.rel)}
+        if ids := terms.page_ids(course.terms, str(page.rel)):
+            extra["terms"] = ids
         ce = compiler_explorer.settings(page.meta.get("compiler_explorer"), str(page.src.relative_to(root)))
         if ce:
             extra["compiler-explorer"] = compiler_explorer.encode(ce)
@@ -193,6 +195,10 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
     if "info/genai.qmd" in generated:
         files["info/genai.qmd"] = _generated(genai.policy_page(course.genai, genai_level),
                                              "info", page_history(course.genai_file))
+    if terms.GLOSSARY in generated:
+        files[terms.GLOSSARY] = _generated(terms.glossary_page(course.terms), "glossary", kind="glossary")
+        # The review deck works in the browser only: no PDF.
+        files[terms.REVIEW] = _generated(terms.review_page(), "glossary", kind="review", html_only=True)
 
     # 4. Theme, filters, extensions.
     assets = resources.files("course_tools") / "assets"
@@ -210,7 +216,7 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
 
 
 def generated_pages(course: Course) -> list[str]:
-    """Pages generated from the YAML files (stage paths)."""
+    """Generated pages (stage paths): from the YAML files, and the glossary."""
     pages = ["info/index.qmd"]
     if course.home is None:
         pages.append("index.qmd")
@@ -218,15 +224,20 @@ def generated_pages(course: Course) -> list[str]:
         pages.append("info/assessment.qmd")
     if course.genai is not None:
         pages.append("info/genai.qmd")
+    if course.terms:
+        pages += [terms.GLOSSARY, terms.REVIEW]
     return pages
 
 
-def _generated(text: str, directory: str, page_history: dict | None = None) -> bytes:
+def _generated(text: str, directory: str, page_history: dict | None = None,
+               kind: str = "info", html_only: bool = False) -> bytes:
     meta, body = split_front_matter(text)
     meta["engine"] = "markdown"
-    meta["course-page"] = {"kind": "info", "dir": directory}
+    meta["course-page"] = {"kind": kind, "dir": directory}
     if page_history:
         meta["course-page"]["history"] = page_history
+    if html_only:
+        meta["format"] = "html"
     return join_front_matter(meta, body).encode("utf-8")
 
 
@@ -278,6 +289,9 @@ def sidebar(course: Course) -> list:
             section["href"] = str(overview.rel)
         contents.append(section)
 
+    if course.terms:
+        contents.append({"section": "Key terms", "href": terms.GLOSSARY,
+                         "contents": [{"href": terms.REVIEW, "text": "Review key terms"}]})
     add_section("Exams", course.exams_overview, course.exams)
     add_section("References", course.references_overview, course.references, course.reference_files)
     return contents
@@ -330,6 +344,9 @@ def quarto_config(course: Course, opts: Options) -> dict:
     pages = sorted((str(p.rel) for p in course.pages()), key=natural_key)
     pages += [p for p in generated_pages(course) if p not in pages]
 
+    if course.terms:
+        # Definitions on first use, and the review deck (glossary/).
+        formats["html"]["include-after-body"].append(f"{ASSETS_DIR}/theme/terms.html")
     course_site = {"title": course.title, "pdf": opts.pdf, "url": (opts.site_url or "").rstrip("/")}
     ce = compiler_explorer.settings(general.get("compiler_explorer"), "general.yaml")
     if ce:
@@ -351,6 +368,7 @@ def quarto_config(course: Course, opts: Options) -> dict:
         "filters": [
             f"{ASSETS_DIR}/filters/practice.lua",
             f"{ASSETS_DIR}/filters/compiler-explorer.lua",
+            f"{ASSETS_DIR}/filters/terms.lua",
             f"{ASSETS_DIR}/filters/course.lua",
             "diagram",
             f"{ASSETS_DIR}/filters/inline-mediabag.lua",

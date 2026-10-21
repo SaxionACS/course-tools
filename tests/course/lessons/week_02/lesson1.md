@@ -1,7 +1,20 @@
 # Interrupt handlers
 
 A lesson with self-checks, a prediction, a comparison and Compiler Explorer
-links.
+links. The keyword `volatile` matters when an interrupt service routine
+shares data with the superloop.
+
+::: {.terms}
+`volatile`
+: A qualifier that tells the compiler that a variable can change outside the
+  normal program flow, so every access must really read or write memory.
+
+superloop
+: DUPLICATE-DEFINITION
+
+period
+: The time of one cycle of a periodic signal: $T = 1/f$.
+:::
 
 ## Self-checks
 

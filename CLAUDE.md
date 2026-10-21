@@ -17,10 +17,12 @@ what changed recently.
 | `src/course_tools/info.py`, `models.py`, `genai.py` | pages generated from `info/general.yaml`, `assessment.yaml`, `genAI.yaml` |
 | `src/course_tools/history.py` | page footer dates, from one `git log` |
 | `src/course_tools/compiler_explorer.py` | course and page settings for Compiler Explorer links (validated, passed to the filter) |
+| `src/course_tools/terms.py` | key terms: reads `{.terms}` blocks from the Markdown, generates the glossary and review pages |
 | `src/course_tools/assets/filters/practice.lua` | Lua filter: self-checks, predictions, comparisons; the "Answers" section of PDFs |
 | `src/course_tools/assets/filters/compiler-explorer.lua` | Lua filter: Compiler Explorer links on code blocks with `ce` |
+| `src/course_tools/assets/filters/terms.lua` | Lua filter: the key-terms box, with the ids the glossary links to |
 | `src/course_tools/assets/filters/course.lua` | Lua filter: PDF button, slides/GenAI/logbook/starter boxes, links, code annotations, diagram alignment, footer, PDF header |
-| `src/course_tools/assets/theme/` | `head.html` (browser script), `practice.html` (behaviour of self-checks, predictions, comparisons) and `saxion.scss` (theme) |
+| `src/course_tools/assets/theme/` | `head.html` (browser script), `practice.html` (self-checks, predictions, comparisons), `terms.html` (definitions on first use, review deck; reads the glossary page) and `saxion.scss` (theme) |
 | `src/course_tools/assets/typst/header.typ` | PDF styling |
 | `src/course_tools/assets/texts/genai/` | texts of the GenAI policy page |
 | `src/course_tools/assets/_extensions/pandoc-ext/diagram` | vendored PlantUML filter (don't edit) |

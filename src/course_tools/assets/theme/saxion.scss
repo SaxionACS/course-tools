@@ -370,6 +370,184 @@ code.sourceCode > span.course-diff {
 }
 
 // ------------------------------------------------------------------------
+// Key terms (filters/terms.lua, theme/terms.html, the glossary pages).
+// ------------------------------------------------------------------------
+
+.course-terms {
+  border: 1px solid $saxion-grey-light;
+  border-left: 4px solid $saxion-green;
+  border-radius: .35rem;
+  padding: .75rem 1rem;
+  margin: 1.25rem 0;
+  background: $saxion-green-light;
+
+  dl {
+    display: grid;
+    grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr);
+    gap: .3rem 1rem;
+    margin: 0;
+
+    @media (max-width: 575.98px) {
+      grid-template-columns: minmax(0, 1fr);
+      dd { margin-bottom: .4rem; }
+    }
+  }
+
+  dt { font-weight: 700; }
+  dd { margin: 0; }
+  dd p:last-child { margin-bottom: 0; }
+}
+
+// The first use of a term on a page: its definition appears on hover or tap.
+.course-term-ref {
+  text-decoration: underline dotted $saxion-green;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  cursor: help;
+
+  &:focus-visible {
+    outline: 2px solid $saxion-green;
+    outline-offset: 1px;
+  }
+}
+
+.course-term-tip {
+  padding: .25rem .1rem;
+  font-size: .9rem;
+
+  p:last-child { margin-bottom: .3rem; }
+}
+
+.course-term-tip-name {
+  font-weight: 700;
+  color: $saxion-green-dark;
+  margin-bottom: .2rem;
+}
+
+.course-term-tip-links {
+  font-size: .8rem;
+  color: $text-muted;
+}
+
+// The glossary page.
+.course-glossary {
+  h2 {
+    font-size: 1.35rem;
+    margin-top: 1.75rem;
+  }
+
+  dt {
+    margin-top: .9rem;
+    font-weight: 700;
+    color: $saxion-green-dark;
+  }
+
+  dd {
+    margin-left: 0;
+    padding-left: 1rem;
+    border-left: 2px solid $saxion-green-light;
+  }
+
+  dd p:last-child { margin-bottom: 0; }
+}
+
+.course-term-source {
+  font-size: .85rem;
+  color: $text-muted;
+}
+
+// The review deck.
+.course-review {
+  margin: 1.5rem 0;
+}
+
+.course-review-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-bottom: .75rem;
+}
+
+.course-review-weeks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+
+.course-review-stats {
+  font-size: .9rem;
+  color: $text-muted;
+  margin-bottom: .5rem;
+}
+
+.course-review-card {
+  border: 1px solid $saxion-grey-light;
+  border-radius: .5rem;
+  padding: 1.5rem;
+  min-height: 9rem;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .06);
+
+  p:last-child { margin-bottom: 0; }
+}
+
+.course-review-name {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: $saxion-green-dark;
+}
+
+.course-review-back {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed $saxion-grey-light;
+}
+
+.course-review-source,
+.course-review-done + p {
+  margin-top: .75rem;
+  font-size: .85rem;
+  color: $text-muted;
+}
+
+.course-review-done {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.course-review-actions {
+  display: flex;
+  justify-content: center;
+  gap: .5rem;
+  margin: .9rem 0;
+}
+
+.course-review-boxes {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+
+  span {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: .25rem;
+    background: $saxion-green-light;
+    border-radius: .25rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  small { color: $text-muted; }
+}
+
+.course-review-footer {
+  margin-top: .5rem;
+  text-align: right;
+  font-size: .85rem;
+}
+
+// ------------------------------------------------------------------------
 // Embedded in an LMS (see head.html): content only.
 // ------------------------------------------------------------------------
 
