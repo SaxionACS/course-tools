@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from . import compiler_explorer, genai, history, info, terms
+from . import compiler_explorer, genai, history, info, outcomes, terms
 from .course import Course, Page, Week, is_ignored
 from .markdown import join_front_matter, natural_key, rewrite_fences, separate_thematic_breaks, split_front_matter
 
@@ -71,7 +71,7 @@ def _zip_bytes(directory: Path, top: str) -> bytes:
 
 def _page_meta(page: Page, course: Course, extra: dict) -> dict:
     meta = dict(page.meta)
-    for key in ("slides", "order", "genai", "logbook", "compiler_explorer"):
+    for key in ("slides", "order", "genai", "logbook", "compiler_explorer", "outcomes"):
         meta.pop(key, None)
     meta["title"] = page.title
     meta["engine"] = "markdown"   # never execute code; diagrams still work
@@ -135,10 +135,15 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
         """Footer data (added / last changed / author) of a source file, from git."""
         return history.footer(dates.get(source.relative_to(root).as_posix())) if source else None
 
+    los = info.learning_outcomes(course.general)
+    covered = []   # (page, its learning outcomes), for the outcome map
     for page in course.pages():
         if page.src is not None:
             files.pop(page.src.relative_to(root).as_posix(), None)
         extra: dict = {}
+        if found := outcomes.of_page(page.meta.get("outcomes"), los, str(page.src.relative_to(root))):
+            extra["outcomes"] = outcomes.badges(page.rel, found)
+            covered.append((page, found))
         if found := page_history(page.src):
             extra["history"] = found
         if page.kind == "lecture" and page.slides_expected:
@@ -187,8 +192,12 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
     if "index.qmd" in generated:
         files["index.qmd"] = _generated(info.default_home(course.general), "", page_history(general_yaml))
     files["info/index.qmd"] = _generated(
-        info.general_page(course.general, "info/assessment.qmd" in generated, "info/genai.qmd" in generated),
+        info.general_page(course.general, "info/assessment.qmd" in generated, "info/genai.qmd" in generated,
+                          outcomes.MAP in generated),
         "info", page_history(general_yaml))
+    if outcomes.MAP in generated:
+        files[outcomes.MAP] = _generated(
+            outcomes.map_page(los, covered, [(w.number, w.label) for w in course.weeks], course.assessment), "info")
     if "info/assessment.qmd" in generated:
         files["info/assessment.qmd"] = _generated(info.assessment_page(course.assessment, course.general),
                                                   "info", page_history(root / "info" / "assessment.yaml"))
@@ -224,6 +233,8 @@ def generated_pages(course: Course) -> list[str]:
         pages.append("info/assessment.qmd")
     if course.genai is not None:
         pages.append("info/genai.qmd")
+    if info.learning_outcomes(course.general) and any(p.meta.get("outcomes") for p in course.pages()):
+        pages.append(outcomes.MAP)
     if course.terms:
         pages += [terms.GLOSSARY, terms.REVIEW]
     return pages
@@ -267,6 +278,8 @@ def sidebar(course: Course) -> list:
         info_section["contents"].append({"href": "info/assessment.qmd", "text": "Assessment"})
     if "info/genai.qmd" in generated:
         info_section["contents"].append({"href": "info/genai.qmd", "text": "Generative AI"})
+    if outcomes.MAP in generated:
+        info_section["contents"].append({"href": outcomes.MAP, "text": "Outcome map"})
     info_section["contents"] += [_nav_item(p) for p in course.info_pages]
     contents.append(info_section)
 

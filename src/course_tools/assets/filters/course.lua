@@ -150,16 +150,64 @@ local function genai_box(rule)
   return callout(kind, title, blocks)
 end
 
+local function html_escape(s)
+  s = s:gsub('&', '&amp;'):gsub('<', '&lt;'):gsub('>', '&gt;')
+  return (s:gsub('"', '&quot;'))
+end
+
+-- Reading time in minutes: about 200 words and 20 lines of code a minute.
+local function reading_minutes(blocks)
+  local words, lines = 0, 0
+  blocks:walk({
+    Str = function() words = words + 1 end,
+    CodeBlock = function(cb) lines = lines + select(2, cb.text:gsub('\n', '')) + 1 end,
+  })
+  return math.max(1, math.floor(words / 200 + lines / 20 + 0.5))
+end
+
+-- The learning outcomes of the page (`outcomes` in its front matter): their
+-- titles (or ids), linking to the outcome map; the full outcome on hover
+-- (head.html). With the reading time.
+local function outcomes_banner(outcomes, minutes)
+  if is_html then
+    local badges = {}
+    for _, lo in ipairs(outcomes) do
+      local id, title = str(lo.id), str(lo.title) or ''
+      table.insert(badges, '<a class="course-outcome" href="' .. html_escape(str(lo.href)) .. '" data-text="'
+        .. html_escape(id .. ': ' .. str(lo.text)) .. '">'
+        .. (title ~= '' and ('<span class="course-outcome-id">' .. html_escape(id) .. '</span>' .. html_escape(title))
+            or html_escape(id)) .. '</a>')
+    end
+    return pandoc.RawBlock('html', '<div class="course-outcomes"><span class="course-outcomes-label">Learning outcomes</span>'
+      .. table.concat(badges) .. '<span class="course-reading-time">about ' .. minutes .. ' min read</span></div>')
+  end
+  local inlines = pandoc.Inlines({pandoc.Strong(pandoc.Inlines('Learning outcomes:')), pandoc.Space()})
+  for i, lo in ipairs(outcomes) do
+    if i > 1 then inlines:extend({pandoc.Str(','), pandoc.Space()}) end
+    local id, title = str(lo.id), str(lo.title) or ''
+    inlines:insert(pandoc.Link(pandoc.Inlines(title ~= '' and (title .. ' (' .. id .. ')') or id), str(lo.href)))
+  end
+  inlines:extend(pandoc.Inlines(' · about ' .. minutes .. ' min read'))
+  -- The Div is a Typst block, which scopes the `set` rule to this line.
+  return pandoc.Div({pandoc.RawBlock('typst', '#set text(size: 9pt)'), pandoc.Para(inlines)},
+                    pandoc.Attr('', {'course-outcomes'}))
+end
+
 local function decorate(doc)
   site = doc.meta['course-site'] or {}
   page = doc.meta['course-page'] or {}
   local top = pandoc.List()
+  local minutes = reading_minutes(doc.blocks)
 
   -- Logbook previews and the review deck are web pages only.
   if is_html and site.pdf == true and str(page.kind) ~= 'logbook' and str(page.kind) ~= 'review' then
     top:insert(pandoc.RawBlock('html',
       '<div class="course-pdf"><a class="btn btn-sm btn-outline-primary" href="'
       .. input_stem() .. '.pdf" target="_blank" rel="noopener"><i class="bi bi-file-earmark-pdf"></i> PDF</a></div>'))
+  end
+
+  if page.outcomes ~= nil then
+    top:insert(outcomes_banner(page.outcomes, minutes))
   end
 
   if page.slides ~= nil then

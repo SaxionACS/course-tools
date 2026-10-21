@@ -30,6 +30,19 @@
       }
     });
 
+    // Learning outcomes at the top of a page (filters/course.lua): the whole
+    // outcome on hover or keyboard focus; a click opens the outcome map.
+    document.querySelectorAll('.course-outcome[data-text]').forEach(function (badge) {
+      if (window.tippy) {
+        window.tippy(badge, {
+          content: badge.dataset.text, theme: 'quarto', maxWidth: 380, arrow: false,
+          placement: 'bottom-start', delay: 100,
+        });
+      } else {
+        badge.title = badge.dataset.text;
+      }
+    });
+
     // Code annotations: Quarto floats the numbers to the right edge of the
     // code block. Put each number after the code of its line instead, aligned
     // in one column two characters after the longest annotated line (margins

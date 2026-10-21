@@ -166,6 +166,66 @@ code.sourceCode .code-annotation-anchor.course-inline {
   }
 }
 
+// Learning outcomes at the top of a page (filters/course.lua).
+.course-outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem .45rem;
+  margin: .25rem 0 1.25rem;
+  font-size: .85rem;
+}
+
+.course-outcomes-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: $text-muted;
+  margin-right: .15rem;
+}
+
+a.course-outcome {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .35rem;
+  padding: .1rem .65rem;
+  border-radius: 1rem;
+  background: $saxion-green;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+
+  &:hover,
+  &:focus-visible {
+    background: $saxion-green-dark;
+    color: #fff;
+  }
+}
+
+.course-outcome-id {
+  font-weight: 400;
+  font-size: .75rem;
+  opacity: .8;
+}
+
+.course-reading-time {
+  margin-left: auto;
+  color: $text-muted;
+  white-space: nowrap;
+}
+
+// The outcome map: learning outcomes x weeks.
+.outcome-map table {
+  font-size: .9rem;
+
+  td:not(:first-child):not(:last-child),
+  th:not(:first-child):not(:last-child) {
+    text-align: center;
+    color: $saxion-green;
+  }
+}
+
 // ------------------------------------------------------------------------
 // Practice blocks (filters/practice.lua, theme/practice.html) and
 // Compiler Explorer links (filters/compiler-explorer.lua).

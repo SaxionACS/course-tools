@@ -34,7 +34,8 @@ course repository ──► course stage ──► .build/ (Quarto project) ─�
      title, and ```` ```mermaid ```` / ```` ```plantuml ```` blocks become diagrams.
    - The course information, assessment and generative-AI policy pages are
      generated from `info/*.yaml`; the glossary and the review page from the
-     key terms of all pages.
+     key terms of all pages; the outcome map from the learning outcomes that
+     pages name in their front matter.
    - Starter files are zipped.
    - The sidebar is generated, organised by week.
 3. Quarto renders every page to HTML and, with Typst, to PDF. The Lua filters

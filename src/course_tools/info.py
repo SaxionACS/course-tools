@@ -84,16 +84,24 @@ def _list_section(value, name: str, list_keys=("items",), warn: bool = True, sou
 
 
 def learning_outcomes(general: dict) -> list[dict]:
+    """[{id, title, text}]; `title` is a short name of the outcome ("" if none)."""
     result = []
     _, lists = _list_section(general.get("learning_outcomes"), "learning_outcomes", warn=False)
     for i, lo in enumerate(lists.get("items", []), start=1):
         if isinstance(lo, str):
             lo = {"id": f"LO{i}", "text": lo}
-        result.append({"id": str(lo.get("id", f"LO{i}")), "text": str(lo.get("text", "")).strip()})
+        result.append({"id": str(lo.get("id", f"LO{i}")), "title": str(lo.get("title") or "").strip(),
+                       "text": str(lo.get("text", "")).strip()})
     return result
 
 
-def general_page(general: dict, has_assessment: bool, has_genai: bool = False) -> str:
+def _lo_name(lo: dict) -> str:
+    """**LO1: Superloops**, or **LO1** without a title (Markdown)."""
+    return f"**{lo['id']}: {lo['title']}**" if lo["title"] else f"**{lo['id']}**"
+
+
+def general_page(general: dict, has_assessment: bool, has_genai: bool = False,
+                 has_outcome_map: bool = False) -> str:
     rows = [
         ("Course code", general.get("code")),
         ("Academic year", general.get("academic_year")),
@@ -125,8 +133,11 @@ def general_page(general: dict, has_assessment: bool, has_genai: bool = False) -
     if los:
         out += ["## Learning outcomes", "",
                 lo_intro or "After successfully completing this course, you can:", ""]
-        out += [f"- **{lo['id']}** – {lo['text']}" for lo in los]
+        out += [f"- {_lo_name(lo)} – {lo['text']}" for lo in los]
         out.append("")
+        if has_outcome_map:
+            out += ["The [outcome map](outcomes.qmd) shows which lessons and assignments work towards each "
+                    "learning outcome.", ""]
 
     out += _levels_section(general.get("levels"))
     out += _literature_section(general.get("literature"))
@@ -300,7 +311,8 @@ def assessment_page(assessment: dict, general: dict) -> str:
                 "::: {.learning-outcomes}", "",
                 "| | Learning outcome |",
                 _separator([("l", 8), ("l", 92)])]
-        out += [f"| **{_cell(lo['id'])}** | {_cell(lo['text'])} |" for lo in los]
+        out += [f"| **{_cell(lo['id'])}** | " + (f"**{_cell(lo['title'])}** – " if lo["title"] else "")
+                + f"{_cell(lo['text'])} |" for lo in los]
         out += ["", ":::", ""]
 
     if components:

@@ -13,6 +13,34 @@ Every release from 1.11.1 on has **platform notes**:
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 
+## 1.14.0 (2026-10-21)
+
+Learning outcomes on pages, and the outcome map. See
+[docs/authoring.md](docs/authoring.md#learning-outcomes-of-a-page).
+
+- Learning outcomes in `info/general.yaml` can have a `title`, a short name
+  (for example "Superloops"). It is shown with the id on the course
+  information and assessment pages.
+- `outcomes: [LO1, LO3]` in the front matter of a page shows the outcomes at
+  the top of the page, by title (or by id, without a title), with the whole
+  outcome on hover, and an estimate of the reading time. In the PDF, one line
+  under the title.
+- **Outcome map** (*Course information* in the sidebar): for every learning
+  outcome, the weeks and pages that work towards it, and the assessment
+  components that assess it. Generated when at least one page names
+  outcomes.
+- Warnings for an unknown outcome in the front matter, and for an outcome
+  that no page covers.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), with new
+  checks for the badges, the outcome map and their PDFs. The hover text was
+  tested with a browser script, not part of CI.
+- **macOS:** untested. Nothing platform-specific changed; to do: run
+  `scripts/check.py`.
+
 ## 1.13.0 (2026-10-21)
 
 Key terms. See [docs/authoring.md](docs/authoring.md#key-terms).

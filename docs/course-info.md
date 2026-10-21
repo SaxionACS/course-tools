@@ -20,7 +20,7 @@ a complete example.
 | `lecturers` | List of `{name, email, role}`. |
 | `description` | Course description (Markdown). |
 | `prerequisites` | Required prior knowledge (Markdown). |
-| `learning_outcomes` | List of `{id, text}`. The `id` (e.g. `LO1`) is used in the assessment matrices. Optionally with an introduction (see below). |
+| `learning_outcomes` | List of `{id, title, text}` (see below). The `id` (e.g. `LO1`) is used in the assessment matrices and in the front matter of pages. Optionally with an introduction (see below). |
 | `levels` | Level of the course in the Saxion level model (see below). |
 | `literature` | Mandatory and/or optional literature (Markdown), optionally with an introduction (see below). |
 | `compiler_explorer` | Compiler for the Compiler Explorer links on code blocks (see below). Not shown on the page. |
@@ -55,6 +55,24 @@ levels:
 
 Without an introduction, a plain list (as in earlier versions) also works for
 `learning_outcomes`, `literature` and `links`.
+
+### Learning outcomes
+
+```yaml
+learning_outcomes:
+  items:
+    - id: LO1
+      title: Superloops
+      text: Write event-driven embedded C programs with a superloop.
+```
+
+- `id`: used in the assessment matrices and in `outcomes:` in the front matter
+  of pages.
+- `title` (optional): a short name, a few words. Pages that name the outcome
+  show it at the top by this title instead of the bare id; the course
+  information, assessment and outcome-map pages show it next to the id.
+- `text`: the outcome itself, shown in full on those pages and when pointing
+  at the outcome at the top of a page.
 
 ### Literature
 

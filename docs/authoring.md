@@ -64,6 +64,32 @@ The title of a page is, in order of preference:
 
 Option 2 is recommended: it reads well on GitHub. Start sections with `##`.
 
+## Learning outcomes of a page
+
+Name the learning outcomes that a page works towards in its front matter,
+with the ids from `info/general.yaml`:
+
+```yaml
+---
+outcomes: [LO1, LO3]
+---
+```
+
+The page then shows these outcomes at the top, under the title: by their
+`title` (see [course-info.md](course-info.md#learning-outcomes)), or by their
+id if they have none. Pointing at an outcome shows the whole outcome; clicking
+it opens the outcome map. Next to them is an estimate of the reading time
+(about 200 words and 20 lines of code a minute). In the PDF, the outcomes are
+one line under the title.
+
+As soon as one page names outcomes, the course gets an **outcome map**
+(*Course information* in the sidebar). It shows, for every learning outcome,
+the weeks and pages that work towards it and the assessment components that
+assess it (from the matrices in `info/assessment.yaml`). The build warns
+about an outcome that no page covers, and about ids that are not in
+`general.yaml`. Any page can name outcomes: lessons, assignments, exams,
+week overviews.
+
 ## Slides
 
 Export the PowerPoint slides to PDF (*File → Export → PDF*) and commit the PDF

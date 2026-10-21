@@ -54,6 +54,9 @@ REQUIRED_MESSAGES = (
     "with asm or run; using run",
     "warning: lessons/week_02/lesson1.md: key term `superloop` is already defined in "
     "lessons/week_01/lesson1.md; the glossary uses that definition",
+    "warning: exams/exam1.md: outcomes: LO9 is not a learning outcome in general.yaml",
+    "warning: general.yaml: learning outcome LO3 is not covered by any page "
+    "(`outcomes` in the front matter of a page)",
 )
 # Other lines that look like a warning or an error fail the check, except these.
 ALLOWED_MESSAGES = REQUIRED_MESSAGES + (
@@ -65,7 +68,7 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 PAGES = [
     "index.html",
-    "info/index.html", "info/assessment.html", "info/genai.html", "info/rules.html",
+    "info/index.html", "info/assessment.html", "info/genai.html", "info/rules.html", "info/outcomes.html",
     "lessons/week_01/index.html", "lessons/week_01/lesson1.html",
     "lessons/week_01/lesson2.html", "lessons/week_01/lesson10.html",
     "lessons/week_02/index.html", "lessons/week_02/lesson1.html", "lessons/week_02/lesson2.html",
@@ -162,6 +165,8 @@ def check_build(c: Checks, course_cmd: list[str], course: Path, html_only: bool)
     c.ok(REQUIRED_MESSAGES[0] in lines, "a wrongly named week directory is reported")
     c.ok(REQUIRED_MESSAGES[1] in lines, "a wrong Compiler Explorer mode is reported")
     c.ok(REQUIRED_MESSAGES[2] in lines, "a key term defined twice is reported")
+    c.ok(REQUIRED_MESSAGES[3] in lines, "an unknown learning outcome in the front matter is reported")
+    c.ok(REQUIRED_MESSAGES[4] in lines, "a learning outcome that no page covers is reported")
 
     # A second stage with the same options must not change any file.
     stage = run(course_cmd + ["stage", "--source", str(course), "--site-url", SITE_URL] + extra, cwd=course)
@@ -265,6 +270,43 @@ def check_terms(c: Checks, read) -> None:
     c.ok("course-term-ref" in read("lessons/week_02/lesson1.html"), "the definitions-on-first-use script is on the pages")
 
 
+def check_outcomes(c: Checks, read) -> None:
+    c.section("Learning outcomes of pages, outcome map")
+
+    def badges(page: str) -> list[tuple[str, str, str]]:
+        """(link, id, shown name) of the learning-outcome badges of a page."""
+        banner = re.search(r'<div class="course-outcomes">(.*?)</div>', main_content(read(page)), re.S)
+        return [(href, lo_id or name, name) for href, lo_id, name in
+                re.findall(r'<a class="course-outcome" href="([^"]+)"[^>]*>(?:<span class="course-outcome-id">'
+                           r'([^<]*)</span>)?([^<]*)</a>', banner.group(1) if banner else "")]
+
+    lesson = badges("lessons/week_02/lesson1.html")
+    c.ok(lesson == [("../../info/outcomes.html#lo1", "LO1", "Superloops"), ("../../info/outcomes.html#lo2", "LO2", "LO2")],
+         "badges show the title (or the id without one) and link to the outcome map", f"found: {lesson}")
+    c.ok(badges("assignments/week_01/assignment1.html") == [("../../info/outcomes.html#lo2", "LO2", "LO2")],
+         "outcome ids in the front matter are not case-sensitive")
+    c.ok(badges("exams/exam1.html") == [("../info/outcomes.html#lo2", "LO2", "LO2")], "an unknown outcome is left out")
+    c.ok(not badges("lessons/week_01/lesson2.html"), "no badges without outcomes")
+    c.ok('data-text="LO1: Write a superloop in C."' in read("lessons/week_02/lesson1.html")
+         and re.search(r'about \d+ min read', read("lessons/week_02/lesson1.html")),
+         "the whole outcome on hover, and the reading time")
+    m = main_content(read("info/outcomes.html"))
+    rows = [re.sub(r"<[^>]+>|\s+", " ", r).split() for r in re.findall(r"<tr[^>]*>(.*?)</tr>", m, re.S)]
+    c.ok(rows[1:] == [["LO1", "Superloops", "●", "●", "Written", "exam"],
+                      ["LO2", "●", "●", "●", "Written", "exam,", "Practical"],
+                      ["LO3", "Debugging", "Written", "exam"]],
+         "outcome map: the weeks (and other pages) that cover each outcome, and where it is assessed", f"rows: {rows}")
+    c.ok('id="lo2"' in m and 'href="../assignments/week_01/assignment1.html"' in m
+         and 'href="../exams/exam1.html"' in m and "No pages work towards this outcome yet." in m,
+         "outcome map: the pages of each outcome")
+    info = main_content(read("info/index.html"))
+    c.ok("<strong>LO1: Superloops</strong>" in info and "<strong>LO2</strong>" in info
+         and 'href="../info/outcomes.html"' in info, "course information: outcome titles and a link to the map")
+    c.ok("<strong>Debugging</strong> – Find bugs" in main_content(read("info/assessment.html")),
+         "assessment page: outcome titles")
+    c.ok('href="./info/outcomes.html"' in read("index.html"), "the outcome map in the sidebar")
+
+
 def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     def read(rel: str) -> str:
         p = dist / rel
@@ -366,6 +408,7 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
 
     check_practice(c, read)
     check_terms(c, read)
+    check_outcomes(c, read)
 
     if html_only:
         c.skip("PDFs", "--html-only")
@@ -406,6 +449,9 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     g = text("glossary/index.pdf")
     c.ok("Glossary" in g and "linker" in g and "Introduced in Superloops (Week 1: Basics)" in g, "glossary PDF")
     c.ok("Key terms superloop" in text("lessons/week_01/lesson1.pdf"), "lesson PDF: the key-terms box")
+    c.ok("Learning outcomes: Superloops (LO1), LO2 · about" in text("lessons/week_02/lesson1.pdf"),
+         "lesson PDF: the learning outcomes and the reading time")
+    c.ok("LO3: Debugging" in text("info/outcomes.pdf"), "outcome map PDF")
 
 
 def main() -> int:

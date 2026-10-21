@@ -27,9 +27,13 @@ learning_outcomes:
     After this course, you can:
   items:
     - id: LO1
+      title: Superloops
       text: Write a superloop in C.
-    - id: LO2
+    - id: LO2                            # no title: the id is shown
       text: Share data safely between an interrupt handler and the main loop.
+    - id: LO3
+      title: Debugging
+      text: Find bugs in embedded programs with a debugger.
 
 levels:
   independence: low

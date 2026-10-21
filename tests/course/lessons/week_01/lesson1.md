@@ -1,3 +1,7 @@
+---
+outcomes: [LO1]
+---
+
 # Superloops
 
 A lesson that uses the Markdown features. Inline math $O(n)$, a link to

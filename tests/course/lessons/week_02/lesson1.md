@@ -1,3 +1,7 @@
+---
+outcomes: [LO1, LO2]
+---
+
 # Interrupt handlers
 
 A lesson with self-checks, a prediction, a comparison and Compiler Explorer
