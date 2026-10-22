@@ -787,8 +787,11 @@ have no footer.
 ## Previewing
 
 Run `course preview` in the course repository. It shows the website on
-<http://localhost:4200> and updates the page when you save a file. Run
-`course build` for the full output, including the PDFs, in `dist/`. Add
+<http://localhost:4200> and updates the page when you save a file. It
+renders the web pages only, so the pages have no PDF button. With
+`course preview --pdf`, the PDFs are rendered too and updated when you save
+a page (a few seconds longer per page; the first start renders every PDF).
+Run `course build` for the full output, including the PDFs, in `dist/`. Add
 `?embed=1` to a page URL to see it as it appears in Brightspace.
 
 ### Draft pages

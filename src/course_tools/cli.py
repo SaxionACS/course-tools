@@ -130,10 +130,11 @@ def _snapshot(source: Path) -> dict:
 
 def cmd_preview(args) -> int:
     source = Path(args.source).resolve()
-    opts = Options(site_url=None, pdf=False, plantuml=find_plantuml(), preview=True)
+    opts = Options(site_url=None, pdf=args.pdf, plantuml=find_plantuml(), preview=True)
     stage = _stage(source, opts)
     quarto = find_quarto()
-    cmd = [quarto, "preview", str(stage), "--render", "html", "--port", str(args.port)]
+    # --pdf: Quarto renders the PDFs too, at the start and for every page that changes
+    cmd = [quarto, "preview", str(stage), "--render", "all" if args.pdf else "html", "--port", str(args.port)]
     if args.no_browser:
         cmd.append("--no-browser")
     print("Running:", " ".join(cmd))
@@ -227,9 +228,10 @@ def main(argv=None) -> int:
                    help="URL the site is published at; used for links in PDFs (env: COURSE_SITE_URL)")
     p.add_argument("--html-only", action="store_true", help="skip the PDFs (faster)")
 
-    p = add("preview", cmd_preview, "Serve the website locally and rebuild on changes (HTML only).")
+    p = add("preview", cmd_preview, "Serve the website locally and rebuild on changes (HTML only, unless --pdf).")
     p.add_argument("--port", type=int, default=4200)
     p.add_argument("--no-browser", action="store_true")
+    p.add_argument("--pdf", action="store_true", help="also render the PDFs, with PDF buttons on the pages (slower)")
 
     p = add("stage", cmd_stage, "Only generate the Quarto project in .build/ (for debugging).")
     p.add_argument("--site-url", default=os.environ.get("COURSE_SITE_URL"))

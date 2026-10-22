@@ -13,6 +13,23 @@ Every release from 1.11.1 on has **platform notes**:
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 
+## 1.17.0 (2026-10-22)
+
+- `course preview --pdf`: the preview renders the PDFs too, and the pages
+  have their PDF buttons. Quarto renders every PDF at the start and the PDF
+  of every page you change, a few seconds after the web page. Without
+  `--pdf`, the preview is HTML only, as before.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py --html-only` passes on Ubuntu 24.04
+  (WSL); the Check workflow runs it with the PDFs. `course preview --pdf`
+  was tested by hand on the test course: PDF buttons, PDFs served, and a
+  page's PDF updated about 2 seconds after saving. The check script does not
+  run the preview.
+- **macOS:** untested. Nothing platform-specific changed.
+
 ## 1.16.0 (2026-10-22)
 
 Draft pages, and widgets whose YAML can be edited in the preview.

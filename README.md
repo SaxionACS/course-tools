@@ -61,10 +61,11 @@ course-tools/install.sh
 Then, in a course repository:
 
 ```bash
-course preview      # live preview on http://localhost:4200 (HTML only)
-course build        # website + PDFs in dist/
-course doctor       # check the installed tools
-course clean        # remove .build/ and dist/
+course preview         # live preview on http://localhost:4200 (HTML only)
+course preview --pdf   # the same, with the PDFs (slower)
+course build           # website + PDFs in dist/
+course doctor          # check the installed tools
+course clean           # remove .build/ and dist/
 ```
 
 ## One-time setup on GitHub
