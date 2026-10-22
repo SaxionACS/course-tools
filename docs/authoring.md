@@ -568,6 +568,13 @@ On the website, the block becomes the widget, labelled *Try it* (or
 *Challenge*, with a goal). In the PDF it becomes a picture; see
 [Widgets in the PDF](#widgets-in-the-pdf).
 
+**Widget gallery.** The course template has a page with every widget in its
+different configurations:
+[`references/widgets.md`](https://github.com/SaxionACS/course_template/blob/main/references/widgets.md).
+Its widgets have `editable: true`, so you can change their YAML on the page
+and see what every setting does. It is a [draft](#draft-pages): run
+`course preview` in the template and open *References → Widget gallery*.
+
 ### Settings of every widget
 
 | Setting | Meaning |
@@ -579,6 +586,7 @@ On the website, the block becomes the widget, labelled *Try it* (or
 | `controls` | what the student may change, for example `[bits, hex]`; per type below |
 | `hide` | readouts to hide (numbers), for example `[unsigned, signed]` in a challenge |
 | `goal` | makes the widget a challenge; per type below |
+| `editable` | `true`: in `course preview`, the YAML under the widget, to change and apply. Never on the published site, so a challenge's goal stays hidden |
 
 Settings that several types share:
 
@@ -782,3 +790,21 @@ Run `course preview` in the course repository. It shows the website on
 <http://localhost:4200> and updates the page when you save a file. Run
 `course build` for the full output, including the PDFs, in `dist/`. Add
 `?embed=1` to a page URL to see it as it appears in Brightspace.
+
+### Draft pages
+
+A page with `draft: true` in its front matter is shown by `course preview`
+only, with a note at the top. `course build`, and so the published site,
+leaves it out completely: no page, no PDF, no link in the sidebar, nothing in
+the search index or the glossary.
+
+```markdown
+---
+draft: true
+---
+
+# Next week's lecture
+```
+
+Lectures, assignments, exams, references and pages in `info/` can be drafts;
+`README.md` pages (the home page and the overviews) cannot.

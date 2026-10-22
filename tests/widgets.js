@@ -253,6 +253,8 @@ ok(print({type: 'shift', goal: {value: 1}}).warnings.some(m => m.startsWith('thi
 ok(print({type: 'number', signed: 'maybe'}).error?.includes('signed is true, false or both'), 'signed: true, false or both');
 ok(print({type: 'arithmetic', convention: 'x86'}).error?.includes('convention is arm or intel'), 'convention: arm or intel');
 ok(print({type: 'number', width: 65}).error?.includes('width must be 1 … 64'), 'widths up to 64 bits');
+ok(!print({type: 'number', editable: true}).warnings.length && print({type: 'number', editable: 'yes'}).warnings.includes('editable is true or false'),
+  'editable is true or false');
 
 console.log(failed.length ? failed.map(f => `FAIL ${f}`).join('\n') : '');
 console.log(`${passed} ok, ${failed.length} failed`);

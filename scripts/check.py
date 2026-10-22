@@ -187,6 +187,22 @@ def check_build(c: Checks, course_cmd: list[str], course: Path, html_only: bool)
     return True
 
 
+def check_preview_stage(c: Checks, course_cmd: list[str], course: Path) -> None:
+    """Stage as `course preview` does (after the build has been checked)."""
+    c.section("Preview only: draft pages, editable widgets (course stage --preview)")
+    stage = run(course_cmd + ["stage", "--source", str(course), "--preview"], cwd=course)
+    build = course / ".build"
+    gallery = build / "references" / "gallery.qmd"
+    text = gallery.read_text(encoding="utf-8") if gallery.is_file() else ""
+    c.ok(stage.returncode == 0 and "DRAFT-ONLY-TEXT" in text and "## Draft" in text and "\ndraft:" not in text
+         and "references/gallery.qmd" in (build / "_quarto.yml").read_text(encoding="utf-8"),
+         "a draft page is staged for the preview, in the sidebar, with a note", stage.stdout.strip())
+    data = json.loads((build / "_course" / "widgets.json").read_text(encoding="utf-8"))
+    yaml = [e["yaml"] for e in data["widgets"].values() if "yaml" in e]
+    c.ok(len(yaml) == 2 and any(y.startswith("type: number\ntitle: WIDGET-TITLE\neditable: true") for y in yaml),
+         "editable widgets have their YAML in the preview", f"found {len(yaml)}")
+
+
 def compiler_explorer_links(html: str) -> list[tuple[str, dict]]:
     """(mode, first session of the client state) of every Compiler Explorer link."""
     links = []
@@ -343,6 +359,7 @@ def check_widgets(c: Checks, read) -> None:
         c.ok(configs[3].get("value") == "16045690984503111693", "64-bit values are passed as text (no rounding in JavaScript)")
         c.ok(divs[0][0] == "widget-1" and divs[2][0] == "wheel", "every widget has an id: the block's own, or widget-<n>")
     c.ok("NOT-A-WIDGET" in p and p.count('class="cw-error"') == 1, "a widget in a code block is shown as code; unreadable YAML is reported on the page")
+    c.ok("data-yaml" not in p, "editable widgets have no YAML on the published site")
     c.ok(re.search(r'<script src="[^"]*site_libs/quarto-contrib/course-widgets-\w+/widgets\.js"', html)
          and "course-widgets" not in read("lessons/week_02/lesson1.html"), "the widget script, only on pages with widgets")
 
@@ -451,6 +468,12 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     check_outcomes(c, read)
     check_widgets(c, read)
 
+    c.section("Draft pages are not published")
+    leaks = [p.relative_to(dist).as_posix() for p in [*dist.rglob("*.html"), dist / "search.json"]
+             if p.is_file() and (b"DRAFT-ONLY-TEXT" in p.read_bytes() or b"gallery" in p.read_bytes())]
+    c.ok(not (dist / "references" / "gallery.html").exists() and not leaks,
+         "a page with draft: true is not in the site, the search index or any link", f"found in: {leaks}")
+
     if html_only:
         c.skip("PDFs", "--html-only")
         return
@@ -531,6 +554,7 @@ def main() -> int:
     check_widget_logic(c)
     if check_tools(c, course_cmd) and check_build(c, course_cmd, course, args.html_only):
         check_site(c, course / "dist", args.html_only)
+        check_preview_stage(c, course_cmd, course)
 
     print(f"\n{c.passed} passed, {len(c.failed)} failed" + (f", {len(c.skipped)} skipped" if c.skipped else ""))
     if c.failed or args.keep:

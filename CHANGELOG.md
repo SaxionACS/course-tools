@@ -13,6 +13,35 @@ Every release from 1.11.1 on has **platform notes**:
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 
+## 1.16.0 (2026-10-22)
+
+Draft pages, and widgets whose YAML can be edited in the preview.
+
+- **Draft pages:** a page with `draft: true` in its front matter is shown by
+  `course preview` only, with a note at the top. `course build` leaves it
+  out completely (page, PDF, sidebar, search index, glossary). See
+  [docs/authoring.md](docs/authoring.md#draft-pages).
+- **`editable: true`** on a widget: in `course preview`, the widget's YAML is
+  under it, to change and apply (Ctrl+Enter), and *Reset* brings back the
+  original. On the published site the setting does nothing, so a challenge's
+  goal stays hidden. The YAML reader (js-yaml) is loaded from a CDN when it
+  is first needed; 64-bit values stay exact.
+- The course template has a widget gallery: every widget in its different
+  configurations, editable, as a draft page (`references/widgets.md`).
+- `course stage --preview` stages as `course preview` does, for debugging.
+
+Platform notes:
+
+- **Dependencies:** none. Editing a widget's YAML in the preview needs an
+  internet connection the first time (js-yaml from cdnjs).
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL): 121
+  checks, with new ones for draft pages (left out of the build, staged with
+  a note for the preview) and editable widgets (YAML only in the preview).
+  The editor was tested in `course preview` of the template's gallery with
+  a browser script (11 checks), not part of CI.
+- **macOS:** untested. Nothing platform-specific changed; to do: run
+  `scripts/check.py`.
+
 ## 1.15.0 (2026-10-22)
 
 Interactive widgets for bits, numbers, registers and data on a wire. See

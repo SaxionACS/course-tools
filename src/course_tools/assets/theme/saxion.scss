@@ -848,6 +848,11 @@ svg.cw-wv { display: block; max-width: none; }
 .cw-sh-wire-label { font-family: var(--cw-mono); font-size: 11px; fill: var(--cw-fg); text-anchor: middle; font-weight: 700; }
 .cw-sh-group { font-size: .78rem; font-weight: 700; position: absolute; text-align: center; }
 
+// editable: true: the YAML under the widget
+.cw-source { margin-top: .9rem; border-top: 1px dashed $saxion-grey-light; padding-top: .5rem; display: grid; gap: .45rem; }
+.cw-source summary { cursor: pointer; font-size: .85rem; color: var(--cw-muted); }
+.cw-source .cw-error { white-space: pre-wrap; }
+
 @media (max-width: 700px) {
   .cw-wheel { grid-template-columns: minmax(0, 1fr); }
 }

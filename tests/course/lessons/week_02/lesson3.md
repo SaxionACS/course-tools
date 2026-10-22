@@ -8,6 +8,7 @@ build reports them.
 ```widget
 type: number
 title: WIDGET-TITLE
+editable: true
 width: 8
 value: 0b11010010
 controls: [bits, bin, hex, unsigned, signed, width]

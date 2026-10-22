@@ -81,7 +81,7 @@ HINTS = {
 # --------------------------------------------------------------------------
 
 def _stage(source: Path, opts: Options, verbose: bool = True) -> Path:
-    course = scan(source)
+    course = scan(source, drafts=opts.preview)
     stage = source / STAGE_DIR
     changed = sync(stage, desired_files(course, replace(opts, widget_cache=stage / WIDGET_CACHE)))
     if verbose:
@@ -130,7 +130,7 @@ def _snapshot(source: Path) -> dict:
 
 def cmd_preview(args) -> int:
     source = Path(args.source).resolve()
-    opts = Options(site_url=None, pdf=False, plantuml=find_plantuml())
+    opts = Options(site_url=None, pdf=False, plantuml=find_plantuml(), preview=True)
     stage = _stage(source, opts)
     quarto = find_quarto()
     cmd = [quarto, "preview", str(stage), "--render", "html", "--port", str(args.port)]
@@ -160,7 +160,8 @@ def cmd_preview(args) -> int:
 
 def cmd_stage(args) -> int:
     source = Path(args.source).resolve()
-    opts = Options(site_url=args.site_url, pdf=not args.html_only, plantuml=find_plantuml())
+    opts = Options(site_url=args.site_url, pdf=not (args.html_only or args.preview), plantuml=find_plantuml(),
+                   preview=args.preview)
     print(_stage(source, opts))
     return 0
 
@@ -233,6 +234,7 @@ def main(argv=None) -> int:
     p = add("stage", cmd_stage, "Only generate the Quarto project in .build/ (for debugging).")
     p.add_argument("--site-url", default=os.environ.get("COURSE_SITE_URL"))
     p.add_argument("--html-only", action="store_true")
+    p.add_argument("--preview", action="store_true", help="stage as `course preview` does (draft pages, editable widgets)")
 
     add("clean", cmd_clean, "Remove .build/ and dist/.")
     add("doctor", cmd_doctor, "Check that the required tools are installed.")

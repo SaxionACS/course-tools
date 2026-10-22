@@ -34,6 +34,9 @@ ROOT_FILE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".pdf"}
 ZIP_SKIP = {".git", ".DS_Store", "__pycache__", ".idea", ".vscode", "private"}
 # Pandoc Markdown, plus what GitHub allows too: a list directly after a line of text.
 MARKDOWN_READER = "markdown+lists_without_preceding_blankline"
+# At the top of a draft page (draft: true), which only `course preview` shows.
+DRAFT_NOTE = ("::: {.callout-note}\n## Draft\nThis page has `draft: true`: it is shown in `course preview` "
+              "only, and not published.\n:::\n\n")
 
 
 @dataclass
@@ -42,6 +45,7 @@ class Options:
     pdf: bool = True                  # also render a PDF of every page
     plantuml: list[str] | None = None  # command used to run PlantUML
     widget_cache: Path | None = None   # results of the widget checks, kept between builds
+    preview: bool = False              # course preview: draft pages, and editable widgets
 
 
 # --------------------------------------------------------------------------
@@ -72,7 +76,7 @@ def _zip_bytes(directory: Path, top: str) -> bytes:
 
 def _page_meta(page: Page, course: Course, extra: dict) -> dict:
     meta = dict(page.meta)
-    for key in ("slides", "order", "genai", "logbook", "compiler_explorer", "outcomes"):
+    for key in ("slides", "order", "genai", "logbook", "compiler_explorer", "outcomes", "draft"):
         meta.pop(key, None)
     meta["title"] = page.title
     meta["engine"] = "markdown"   # never execute code; diagrams still work
@@ -118,6 +122,8 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
     for p in root.iterdir():
         if p.is_file() and p.suffix.lower() in ROOT_FILE_EXTS:
             files[p.name] = p
+    for p in course.drafts:   # draft pages are not published, not even as Markdown
+        files.pop(p.relative_to(root).as_posix(), None)
     # Slides: only the exported PDFs are published.
     for week in course.weeks:
         for s in week.slides:
@@ -180,6 +186,8 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
                 extra["genai"] = {**rule, "policy": _rel_link(page.rel, PurePosixPath("info/genai.qmd"))}
         body = separate_thematic_breaks(rewrite_fences(page.body))
         found_widgets += widgets.find(body, page.src.relative_to(root).as_posix() if page.src else str(page.rel))
+        if page.meta.get("draft") is True:
+            body = DRAFT_NOTE + body
         if page.kind == "week" and page.meta.get("materials", True) is not False:
             week = next(w for w in course.weeks if w.overview is page)
             body = body.rstrip() + "\n" + _week_materials(week, page)
@@ -190,7 +198,7 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
         files[str(page.rel)] = join_front_matter(meta, body).encode("utf-8")
 
     if found_widgets:
-        files[widgets.DATA] = widgets.data(found_widgets, opts.widget_cache)
+        files[widgets.DATA] = widgets.data(found_widgets, opts.widget_cache, editable=opts.preview)
 
     # 3. Generated pages.
     generated = generated_pages(course)

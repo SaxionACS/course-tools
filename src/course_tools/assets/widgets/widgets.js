@@ -405,7 +405,7 @@
   // Widget registry
   // ========================================================================
   const types = {};
-  const COMMON = ['type', 'view', 'title', 'task', 'controls', 'hide', 'goal'];
+  const COMMON = ['type', 'view', 'title', 'task', 'controls', 'hide', 'goal', 'editable'];
   const Widget = {
     define(name, def) { types[name] = def; },
     typeOf(config) {
@@ -438,6 +438,7 @@
         const [def, c] = Widget.settings(config);
         const known = new Set([...COMMON, ...(def.keys || [])]);
         for (const k of Object.keys(config)) if (!known.has(k)) warnings.push(`unknown setting "${k}"`);
+        if (c.editable != null && typeof c.editable !== 'boolean') warnings.push('editable is true or false');
         if (def.controls) {
           for (const k of listOf(c.controls)) if (!def.controls.includes(k)) warnings.push(`unknown control "${k}" (${def.controls.join(', ')})`);
         }
@@ -2306,10 +2307,51 @@
     internals: {addSub, numberTarget, numberGoalMet, arithmeticGoal, arithmeticGoalMet, conventionOf, registerFields, registerTarget,
       registerGoalMet, settable, checkCode, modelCode, codeGoal, packFields, packetFields, frameSettings, toSlots, fromSlots, shiftOnce, SHIFTS},
   };
+  // editable: true: the widget's YAML under it, to change and apply (a playground, or a gallery for authors).
+  // The YAML reader (js-yaml) is loaded from a CDN when it is first needed.
+  const JS_YAML = 'https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js';
+  let yamlReader = null;
+  function readYaml() {
+    yamlReader ||= new Promise((resolve, reject) => {
+      const script = h('script', {src: JS_YAML});
+      script.onload = () => {
+        const y = root.jsyaml, int = y.types.int;
+        // integers beyond 2^53 stay exact as text, which the widgets read as numbers (as the build does)
+        const exactInt = new y.Type('tag:yaml.org,2002:int', {kind: 'scalar', resolve: int.resolve,
+          construct: data => { const n = int.construct(data); return Number.isSafeInteger(n) ? n : data.replace(/_/g, ''); },
+          predicate: int.predicate, represent: int.represent, defaultStyle: int.defaultStyle});
+        const schema = new y.Schema({implicit: [y.types.null, y.types.bool, exactInt, y.types.float],
+          explicit: [y.types.str, y.types.seq, y.types.map]});
+        resolve(text => y.load(text, {schema}));
+      };
+      script.onerror = () => { yamlReader = null; reject(new Error('The YAML reader could not be loaded. Is there an internet connection?')); };
+      document.head.append(script);
+    });
+    return yamlReader;
+  }
+  function editor(el, host, original) {
+    const area = h('textarea', {class: 'cw-editor', spellcheck: 'false', 'aria-label': 'Configuration of the widget (YAML)'});
+    area.value = original;
+    area.rows = Math.min(24, original.split('\n').length + 1);
+    const error = h('div', {class: 'cw-error', 'aria-live': 'polite'});
+    const apply = async () => {
+      try { Widget.mount(host, (await readYaml())(area.value)); error.textContent = ''; }
+      catch (e) { error.textContent = e.message; }
+    };
+    const reset = () => { area.value = original; Widget.mount(host, JSON.parse(el.getAttribute('data-config'))); error.textContent = ''; };
+    area.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); apply(); } });
+    return h('details', {class: 'cw-source'}, h('summary', {text: 'Configuration (YAML): edit and apply'}), area,
+      h('div', {class: 'cw-row'}, Kit.button('Apply', apply, true), Kit.button('Reset', reset),
+        h('span', {class: 'cw-note', text: 'Ctrl+Enter also applies.'})), error);
+  }
+
   if (hasDom) {
     const mountAll = () => document.querySelectorAll('.course-widget[data-config]').forEach(el => {
-      try { Widget.mount(el, JSON.parse(el.getAttribute('data-config'))); }
-      catch (e) { el.replaceChildren(h('div', {class: 'cw-error', text: `This widget cannot be shown: ${e.message}`})); }
+      const host = h('div', {class: 'cw-host'});
+      el.replaceChildren(host);
+      try { Widget.mount(host, JSON.parse(el.getAttribute('data-config'))); }
+      catch (e) { host.replaceChildren(h('div', {class: 'cw-error', text: `This widget cannot be shown: ${e.message}`})); }
+      if (el.hasAttribute('data-yaml')) el.append(editor(el, host, el.getAttribute('data-yaml')));
     });
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountAll);
     else mountAll();

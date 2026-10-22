@@ -10,8 +10,8 @@ what changed recently.
 
 | Path | What |
 |:--|:--|
-| `src/course_tools/cli.py` | the `course` command: `build`, `preview`, `stage`, `clean`, `doctor` |
-| `src/course_tools/course.py` | scans a course repository: weeks, pages, slides, logbooks; skips `private` |
+| `src/course_tools/cli.py` | the `course` command: `build`, `preview`, `stage` (`--preview`: as `course preview` stages), `clean`, `doctor` |
+| `src/course_tools/course.py` | scans a course repository: weeks, pages, slides, logbooks; skips `private`, and draft pages (`draft: true`) except in `course preview` |
 | `src/course_tools/stage.py` | writes the Quarto project in `.build/`: pages as `.qmd`, generated pages, zips, sidebar, `_quarto.yml`; rewrites only changed files |
 | `src/course_tools/markdown.py` | GitHub Markdown → Quarto: code fences, titles, `---` rules |
 | `src/course_tools/info.py`, `models.py`, `genai.py` | pages generated from `info/general.yaml`, `assessment.yaml`, `genAI.yaml` |

@@ -56,18 +56,24 @@ class Widget:
     source: str         # e.g. lessons/week_02/lesson3.md
     number: int         # 1, 2, ... on the page
     config: dict | None
+    text: str = ""      # the YAML, normalized (shown under the widget with editable: true)
     error: str | None = None
 
 
-def key(text: str) -> str:
-    """The key of a block: SHA-1 of its text without trailing spaces, blank edges and common indentation."""
+def normalize(text: str) -> str:
+    """A block's text without trailing spaces, blank lines at the start and end, and common indentation."""
     lines = [line.expandtabs(4).rstrip(" \t\r") for line in text.split("\n")]
     while lines and not lines[0]:
         lines.pop(0)
     while lines and not lines[-1]:
         lines.pop()
     indent = min((len(line) - len(line.lstrip(" ")) for line in lines if line), default=0)
-    return hashlib.sha1("\n".join(line[indent:] for line in lines).encode("utf-8")).hexdigest()
+    return "\n".join(line[indent:] for line in lines)
+
+
+def key(text: str) -> str:
+    """The key of a block: SHA-1 of its normalized text (filters/widgets.lua computes the same)."""
+    return hashlib.sha1(normalize(text).encode("utf-8")).hexdigest()
 
 
 def blocks(body: str) -> list[str]:
@@ -107,7 +113,7 @@ def find(body: str, source: str) -> list[Widget]:
     """The widgets of a page, their YAML read (problems are reported later, with the results)."""
     found = []
     for n, text in enumerate(blocks(body), start=1):
-        widget = Widget(key(text), source, n, None)
+        widget = Widget(key(text), source, n, None, normalize(text))
         try:
             config = yaml.safe_load(text)
             if isinstance(config, dict):
@@ -180,8 +186,12 @@ def results(widgets: list[Widget], cache: Path | None) -> dict[str, dict]:
     return known
 
 
-def data(widgets: list[Widget], cache: Path | None) -> bytes:
-    """``_course/widgets.json``: per widget its configuration (JSON) and its PDF form. Reports problems."""
+def data(widgets: list[Widget], cache: Path | None, editable: bool = False) -> bytes:
+    """``_course/widgets.json``: per widget its configuration (JSON) and its PDF form. Reports problems.
+
+    With `editable` (``course preview`` only), widgets with ``editable: true`` get their YAML too:
+    the browser shows it under the widget to change and apply. The published site never has it.
+    """
     printed = results(widgets, cache)
     entries: dict[str, dict] = {}
     for w in widgets:
@@ -196,6 +206,8 @@ def data(widgets: list[Widget], cache: Path | None) -> bytes:
         entry = {"error": error} if error else {}   # no nulls: Lua reads them as userdata
         if w.config is not None:
             entry["config"] = json.dumps(w.config, ensure_ascii=False, separators=(",", ":"))
+            if editable and w.config.get("editable") is True:
+                entry["yaml"] = w.text
         for k in ("svg", "width", "height", "caption", "title", "task", "exercise"):
             if r.get(k) is not None and not error:
                 entry[k] = r[k]

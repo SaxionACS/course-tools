@@ -6,7 +6,9 @@ in _course/widgets.json, keyed by the SHA-1 of the block's text.
 
 * HTML: <div class="course-widget" data-config="..."> with the configuration
   as JSON. The script assets/widgets/widgets.js, added to pages with
-  widgets, builds the widget in it.
+  widgets, builds the widget in it. In `course preview`, a widget with
+  `editable: true` also has data-yaml: the YAML, which the script shows under
+  the widget to change and apply.
 * PDF (Typst): the picture, with the title, task and caption, and a link to
   the widget on the website. A challenge (a widget with a goal) becomes an
   exercise: filters/practice.lua numbers it and puts the answer in the
@@ -71,8 +73,9 @@ local function html(entry, id)
     return pandoc.RawBlock('html', '<div class="course-widget" id="' .. id .. '"><div class="cw-error">This widget cannot be shown: '
       .. escape(entry.error or 'unknown') .. '</div></div>')
   end
+  local yaml = entry.yaml and (' data-yaml="' .. escape(entry.yaml) .. '"') or ''
   return pandoc.RawBlock('html', '<div class="course-widget" id="' .. id .. '" data-config="' .. escape(entry.config)
-    .. '"><noscript>This widget needs JavaScript.</noscript></div>')
+    .. '"' .. yaml .. '><noscript>This widget needs JavaScript.</noscript></div>')
 end
 
 local function picture(entry)

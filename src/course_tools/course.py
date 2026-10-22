@@ -101,6 +101,7 @@ class Course:
     references: list[Page]
     reference_files: list[PurePosixPath]
     terms: list = field(default_factory=list)    # key terms of all pages (terms.Term)
+    drafts: list[Path] = field(default_factory=list)   # sources of draft pages left out (draft: true)
 
     @property
     def title(self) -> str:
@@ -228,8 +229,17 @@ def _week_label(n: int, title: str | None) -> str:
     return f"Week {n}: {title}"
 
 
-def scan(root: Path) -> Course:
+def scan(root: Path, drafts: bool = False) -> Course:
+    """Read a course repository. Pages with `draft: true` in their front matter
+    are left out, unless `drafts` (for `course preview`)."""
     root = root.resolve()
+    left_out: list[Path] = []
+
+    def published(pages: list[Page]) -> list[Page]:
+        if drafts:
+            return pages
+        left_out.extend(p.src for p in pages if p.meta.get("draft") is True)
+        return [p for p in pages if p.meta.get("draft") is not True]
     general = _load_yaml(root / "info" / "general.yaml")
     if general is None:
         raise CourseError(f"{root / 'info' / 'general.yaml'} not found - is this a course repository?")
@@ -245,7 +255,7 @@ def scan(root: Path) -> Course:
     if readme:
         home = read_page(readme, PurePosixPath("index.qmd"), "home")
 
-    info_pages = [read_page(p, _qmd(_rel(p, root)), "info") for p in _md_files(root / "info", root)]
+    info_pages = published([read_page(p, _qmd(_rel(p, root)), "info") for p in _md_files(root / "info", root)])
 
     lesson_weeks = _week_dirs(root / "lessons", root)
     assignment_weeks = _week_dirs(root / "assignments", root)
@@ -297,8 +307,10 @@ def scan(root: Path) -> Course:
                     if starter.is_dir():
                         page.starter_dir = starter
                     week.assignments.append(page)
+            week.assignments = published(week.assignments)
             week.logbooks = _attach_logbooks(week.assignments, root, n)
 
+        week.lectures = published(week.lectures)
         week.lectures.sort(key=lambda p: p.order)
         week.assignments.sort(key=lambda p: p.order)
         for p in [week.overview, week.assignments_overview, *week.lectures, *week.assignments, *week.logbooks]:
@@ -312,7 +324,7 @@ def scan(root: Path) -> Course:
         r = _find_readme(d) if d.is_dir() else None
         if r:
             overview = read_page(r, _qmd(_rel(r, root)), "section")
-        pages = [read_page(p, _qmd(_rel(p, root)), kind) for p in _md_files(d, root)]
+        pages = published([read_page(p, _qmd(_rel(p, root)), kind) for p in _md_files(d, root)])
         pages.sort(key=lambda p: p.order)
         return overview, pages
 
@@ -330,7 +342,7 @@ def scan(root: Path) -> Course:
         root=root, general=general, assessment=assessment, genai=genai, genai_file=genai_file, home=home, info_pages=info_pages,
         weeks=weeks, exams_overview=exams_overview, exams=exams,
         references_overview=references_overview, references=references,
-        reference_files=reference_files,
+        reference_files=reference_files, drafts=left_out,
     )
     course.terms = terms.collect((p, _rel(p.src, root)) for p in course.pages() if p.src is not None)
     return course
