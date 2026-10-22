@@ -19,9 +19,13 @@ what changed recently.
 | `src/course_tools/compiler_explorer.py` | course and page settings for Compiler Explorer links (validated, passed to the filter) |
 | `src/course_tools/terms.py` | key terms: reads `{.terms}` blocks from the Markdown, generates the glossary and review pages |
 | `src/course_tools/outcomes.py` | learning outcomes named in the front matter of pages (`outcomes:`), and the outcome map page |
+| `src/course_tools/widgets.py` | widgets: finds ```` ```widget ```` blocks, reads their YAML, runs `print.js` (cached) and writes `_course/widgets.json` |
+| `src/course_tools/assets/widgets/widgets.js` | the widgets: runs in the browser (`render`) and at build time (`print`, `exercise`); see below |
+| `src/course_tools/assets/widgets/print.js` | build-time entry point, run with `quarto run` (Quarto's Deno) |
 | `src/course_tools/assets/filters/practice.lua` | Lua filter: self-checks, predictions, comparisons; the "Answers" section of PDFs |
 | `src/course_tools/assets/filters/compiler-explorer.lua` | Lua filter: Compiler Explorer links on code blocks with `ce` |
 | `src/course_tools/assets/filters/terms.lua` | Lua filter: the key-terms box, with the ids the glossary links to |
+| `src/course_tools/assets/filters/widgets.lua` | Lua filter: widgets as `<div class="course-widget" data-config>` (HTML) or pictures and exercises (PDF) |
 | `src/course_tools/assets/filters/course.lua` | Lua filter: PDF button, learning outcomes and reading time, slides/GenAI/logbook/starter boxes, links, code annotations, diagram alignment, footer, PDF header |
 | `src/course_tools/assets/theme/` | `head.html` (browser script), `practice.html` (self-checks, predictions, comparisons), `terms.html` (definitions on first use, review deck; reads the glossary page) and `saxion.scss` (theme) |
 | `src/course_tools/assets/typst/header.typ` | PDF styling |
@@ -31,6 +35,7 @@ what changed recently.
 | `.github/workflows/check.yml` | CI for this repository: runs `scripts/check.py` |
 | `tests/course/` | test course that uses every feature |
 | `scripts/check.py` | builds the test course and checks the output |
+| `tests/widgets.js` | tests of the widgets' logic and PDF answers (`quarto run tests/widgets.js`, also run by `check.py`) |
 | `docs/authoring.md`, `docs/course-info.md` | documentation for course authors |
 | `install.sh`, `requirements.md` | local installation (Ubuntu and macOS) |
 
@@ -52,6 +57,11 @@ what changed recently.
   - update `docs/authoring.md` or `docs/course-info.md`;
   - use the feature in `tests/course/` and check it in `scripts/check.py`;
   - describe it in `CHANGELOG.md` under the next version, with platform notes.
+- Widgets: `widgets.js` is one script for the browser and for the build
+  (Deno, no DOM). Only `render` and the `Kit` may touch the DOM; checks,
+  goals and answers are plain functions that both use, so that a printed
+  answer is checked like a student's answer. PDF pictures are SVG text
+  (`svgText`, `drawRows`, `picture`); Typst draws them.
 - The Quarto and PlantUML versions are pinned in three places: `install.sh`,
   the inputs of `publish-course.yml` and the `env` of `check.yml`. Change all
   three together.
@@ -84,7 +94,8 @@ what changed recently.
    `PYTHONPATH=src python3 scripts/check.py --course "python3 -m course_tools"`.
 2. Run `python3 scripts/check.py`. It builds the test course with PDFs (one to
    three minutes) and must end with `0 failed`. `--html-only` is faster;
-   `--keep` keeps the build so you can look at it.
+   `--keep` keeps the build so you can look at it. For widget changes,
+   `quarto run tests/widgets.js` checks the logic in seconds.
 3. For changes that affect how pages look, also look at the pages: run
    `course preview` in a copy of `tests/course`, or build a real course.
 

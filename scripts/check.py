@@ -58,8 +58,17 @@ REQUIRED_MESSAGES = (
     "warning: general.yaml: learning outcome LO3 is not covered by any page "
     "(`outcomes` in the front matter of a page)",
 )
+# Widgets with mistakes (lessons/week_02/lesson3.md): each line must start with one of these.
+WIDGET_MESSAGES = (
+    'warning: lessons/week_02/lesson3.md: widget 18 (dial): unknown type "dial" '
+    "(number, arithmetic, shift, register, frame, packet)",
+    'warning: lessons/week_02/lesson3.md: widget 19 (register): field MODE: bits "6,5" should look like 7 or 6..5',
+    'warning: lessons/week_02/lesson3.md: widget 20 (number): unknown setting "widht"',
+    "warning: lessons/week_02/lesson3.md: widget 20 (number): goal: unsigned: 300 does not fit in 8 bits",
+    "warning: lessons/week_02/lesson3.md: widget 21: the YAML cannot be read: ",
+)
 # Other lines that look like a warning or an error fail the check, except these.
-ALLOWED_MESSAGES = REQUIRED_MESSAGES + (
+ALLOWED_MESSAGES = REQUIRED_MESSAGES + WIDGET_MESSAGES + (
     # Quarto, for tabsets in Typst (shown one after the other in the PDF).
     "Warning: couldn't recognize format, using default tabset rendering",
 )
@@ -72,6 +81,7 @@ PAGES = [
     "lessons/week_01/index.html", "lessons/week_01/lesson1.html",
     "lessons/week_01/lesson2.html", "lessons/week_01/lesson10.html",
     "lessons/week_02/index.html", "lessons/week_02/lesson1.html", "lessons/week_02/lesson2.html",
+    "lessons/week_02/lesson3.html",
     "assignments/week_01/index.html", "assignments/week_01/assignment1.html",
     "assignments/week_01/assignment2/index.html",
     "exams/index.html", "exams/exam1.html",
@@ -167,6 +177,8 @@ def check_build(c: Checks, course_cmd: list[str], course: Path, html_only: bool)
     c.ok(REQUIRED_MESSAGES[2] in lines, "a key term defined twice is reported")
     c.ok(REQUIRED_MESSAGES[3] in lines, "an unknown learning outcome in the front matter is reported")
     c.ok(REQUIRED_MESSAGES[4] in lines, "a learning outcome that no page covers is reported")
+    missing = [m for m in WIDGET_MESSAGES if not any(line.startswith(m) for line in lines)]
+    c.ok(not missing, "widgets with mistakes are reported, with the page and the widget's number", "\n        ".join(missing))
 
     # A second stage with the same options must not change any file.
     stage = run(course_cmd + ["stage", "--source", str(course), "--site-url", SITE_URL] + extra, cwd=course)
@@ -307,6 +319,34 @@ def check_outcomes(c: Checks, read) -> None:
     c.ok('href="./info/outcomes.html"' in read("index.html"), "the outcome map in the sidebar")
 
 
+def check_widget_logic(c: Checks) -> None:
+    c.section("Widget logic (quarto run tests/widgets.js)")
+    quarto = os.environ.get("QUARTO_PATH") or shutil.which("quarto")
+    out = run([quarto, "run", str(REPO / "tests" / "widgets.js")]) if quarto else None
+    lines = ANSI.sub("", out.stdout).strip().splitlines() if out else ["quarto not found"]
+    c.ok(out is not None and out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
+         "PDF answers checked like a student's answer, for every kind of challenge; encoders and shifts"
+         + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
+
+
+def check_widgets(c: Checks, read) -> None:
+    c.section("Widgets (lessons/week_02/lesson3)")
+    html = read("lessons/week_02/lesson3.html")
+    p = main_content(html)
+    divs = re.findall(r'<div class="course-widget" id="([\w-]+)"(?: data-config="([^"]*)")?>', p)
+    configs = [json.loads(htmllib.unescape(cfg)) if cfg else {} for _, cfg in divs]
+    c.ok(len(divs) == 21, "a widget for every ```widget block, not for one shown inside a code block", f"found {len(divs)}")
+    types = [cfg.get("type") for cfg in configs]
+    c.ok(types == ["number"] * 4 + ["arithmetic"] * 4 + ["shift"] + ["register"] * 3 + ["frame"] * 4 + ["packet"]
+         + ["dial", "register", "number", None], "the configurations of the widgets, as JSON", f"types: {types}")
+    if len(configs) == 21:
+        c.ok(configs[3].get("value") == "16045690984503111693", "64-bit values are passed as text (no rounding in JavaScript)")
+        c.ok(divs[0][0] == "widget-1" and divs[2][0] == "wheel", "every widget has an id: the block's own, or widget-<n>")
+    c.ok("NOT-A-WIDGET" in p and p.count('class="cw-error"') == 1, "a widget in a code block is shown as code; unreadable YAML is reported on the page")
+    c.ok(re.search(r'<script src="[^"]*site_libs/quarto-contrib/course-widgets-\w+/widgets\.js"', html)
+         and "course-widgets" not in read("lessons/week_02/lesson1.html"), "the widget script, only on pages with widgets")
+
+
 def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     def read(rel: str) -> str:
         p = dist / rel
@@ -409,6 +449,7 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     check_practice(c, read)
     check_terms(c, read)
     check_outcomes(c, read)
+    check_widgets(c, read)
 
     if html_only:
         c.skip("PDFs", "--html-only")
@@ -452,6 +493,17 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("Learning outcomes: Superloops (LO1), LO2 · about" in text("lessons/week_02/lesson1.pdf"),
          "lesson PDF: the learning outcomes and the reading time")
     c.ok("LO3: Debugging" in text("info/outcomes.pdf"), "outcome map PDF")
+    t = text("lessons/week_02/lesson3.pdf")
+    questions, _, key = t.partition(" Answers ")
+    c.ok("WIDGET-TITLE" in questions and "binary 1101 0010 hexadecimal 0xD2 · unsigned 210 · signed −46" in questions
+         and "Try it on the website." in questions, "widget PDF: a picture of the widget, with its title and a link")
+    c.ok("Exercise 5." in questions and "Exercise 6." not in questions and "'O' 0x4F" not in questions,
+         "widget PDF: challenges are exercises, without their answers")
+    c.ok(all(a in key for a in ("Exercise 1 1101 0010 (0xD2)", "For example A =",
+                                "TIMCTRL = 0xC3 (1100 0011): EN = 1, MODE = 2 (periodic), DIV = 3.",
+                                "GPIO_CFG = (GPIO_CFG & ~(0x3u << 8)) | (0x2u << 8);", "frame 1: 'O' 0x4F, frame 2: 'K' 0x4B.")),
+         "widget PDF: the answers at the end")
+    c.ok("This widget cannot be shown: unknown type" in questions, "widget PDF: a widget with a mistake says so")
 
 
 def main() -> int:
@@ -476,6 +528,7 @@ def main() -> int:
     print(f"Test course: {course}")
 
     c = Checks()
+    check_widget_logic(c)
     if check_tools(c, course_cmd) and check_build(c, course_cmd, course, args.html_only):
         check_site(c, course / "dist", args.html_only)
 

@@ -9,6 +9,8 @@ Practice blocks (see docs/authoring.md):
   `::: {.answer}` inside is revealed after they wrote something.
 * `::: {.compare}`: two code blocks side by side; the browser marks the
   lines that differ.
+* In PDFs, a challenge widget (filters/widgets.lua runs before this filter)
+  becomes a numbered exercise, with its answer in the "Answers" section.
 
 Website: HTML from this filter, behaviour in theme/practice.html, styles in
 theme/saxion.scss. PDF: the questions without the answers; answers, feedback
@@ -19,7 +21,7 @@ local is_html = quarto.doc.is_format('html')
 local is_typst = quarto.doc.is_format('typst')
 
 local answers = pandoc.Blocks({})        -- PDF: the "Answers" section
-local count = {check = 0, predict = 0}
+local count = {check = 0, predict = 0, exercise = 0}
 
 -- Helpers ------------------------------------------------------------------
 
@@ -325,6 +327,19 @@ local function predict(div)
   return pandoc.Div(blocks, pandoc.Attr('predict-' .. n, {'course-predict'}))
 end
 
+-- A challenge widget in the PDF (filters/widgets.lua) -------------------------
+
+local function widget_exercise(div)
+  count.exercise = count.exercise + 1
+  local n = count.exercise
+  local body, answer = pandoc.Blocks({label('Exercise ' .. n)}), nil
+  for _, b in ipairs(div.content) do
+    if b.t == 'Div' and b.classes:includes('answer') then answer = b.content else body:insert(b) end
+  end
+  add_answer('Exercise ' .. n, answer or {})
+  return pandoc.Div(body, pandoc.Attr('exercise-' .. n, {'course-exercise'}))
+end
+
 -- `::: {.compare}` -----------------------------------------------------------
 
 local function compare(div)
@@ -380,6 +395,7 @@ local function practice(doc)
     if div.classes:includes('check') then return check(div) end
     if div.classes:includes('predict') then return predict(div) end
     if div.classes:includes('compare') then return compare(div) end
+    if div.classes:includes('course-widget-exercise') then return widget_exercise(div) end
   end})
   if is_typst and #answers > 0 then
     doc.blocks:insert(raw('#pagebreak(weak: true)'))

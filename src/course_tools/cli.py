@@ -8,11 +8,13 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from . import __version__
 from .course import CourseError, is_ignored, scan
 from .stage import Options, desired_files, sync
+from .widgets import CACHE as WIDGET_CACHE
 
 STAGE_DIR = ".build"
 OUTPUT_DIR = "dist"
@@ -81,7 +83,7 @@ HINTS = {
 def _stage(source: Path, opts: Options, verbose: bool = True) -> Path:
     course = scan(source)
     stage = source / STAGE_DIR
-    changed = sync(stage, desired_files(course, opts))
+    changed = sync(stage, desired_files(course, replace(opts, widget_cache=stage / WIDGET_CACHE)))
     if verbose:
         print(f"Staged {course.title!r}: {len(course.weeks)} weeks, "
               f"{len(course.pages())} pages ({len(changed)} files updated)")

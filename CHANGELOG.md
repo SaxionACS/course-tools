@@ -13,6 +13,48 @@ Every release from 1.11.1 on has **platform notes**:
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 
+## 1.15.0 (2026-10-22)
+
+Interactive widgets for bits, numbers, registers and data on a wire. See
+[docs/authoring.md](docs/authoring.md#widgets).
+
+- A ```` ```widget ```` block with YAML in a page becomes an interactive
+  widget on the website. Types: `number` (converter, wheel), `arithmetic`
+  (addition and subtraction column by column, with flags), `shift` (shifts
+  and rotations, animated bit by bit), `register` (register map, bit
+  operations, C code challenge), `frame` (UART, SPI in all four modes, I²C
+  as timing diagrams with every signal line; optionally the SPI shift-register
+  ring) and `packet` (fields packed into bytes, byte and bit order, sent with
+  UART or SPI).
+- Shared settings: `signed: false | true | both` (which readings of a number
+  are shown), `convention: arm | intel` (flag names, the meaning of the carry
+  after a subtraction, shift instructions), widths up to 64 bits.
+- A widget with a `goal` is a challenge: the student's answer is checked in
+  the browser. In the PDF it becomes a numbered exercise with blank boxes to
+  fill in, and its answer goes to the "Answers" section at the end of the
+  page. Every printed answer is first checked with the same code that checks
+  a student's answer; a goal that cannot be reached is reported.
+- In the PDF, every widget is a picture of its starting state (shifts: every
+  step; long waveforms: in rows), with a link to the widget on the website.
+- The build checks every widget and reports mistakes with the page and the
+  widget's number: unknown types, settings and controls, YAML that cannot be
+  read, goals that do not fit. Bit ranges are written `7` or `6..5`.
+- The widget script is added only to pages with widgets.
+
+Platform notes:
+
+- **Dependencies:** none new. At build time the widget script runs in the
+  Deno that Quarto ships (`quarto run`), on every platform.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL): 117
+  checks, with new ones for the widget page, its PDF (pictures, exercises,
+  answers) and the reported mistakes, and the widget logic tests
+  (`quarto run tests/widgets.js`, 1414 checks: every kind of challenge's
+  printed answer checked like a student's answer, encoders, shifts). The
+  interactive behaviour was tested with a browser script (33 checks), not
+  part of CI.
+- **macOS:** untested. To do: run `scripts/check.py`; `quarto run` must work
+  (it is part of Quarto).
+
 ## 1.14.0 (2026-10-21)
 
 Learning outcomes on pages, and the outcome map. See

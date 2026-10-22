@@ -545,6 +545,222 @@ Notes:
 - Without key terms, the course has no glossary and no review page.
 - In the PDF of a page, the key terms are a box; there are no tooltips.
 
+## Widgets
+
+Widgets are small interactive tools for bits and bytes: number
+representations, binary arithmetic, shifts, registers, and data on a wire
+with timing diagrams. Students change values and see what happens. With a
+`goal`, a widget is a challenge that checks the student's answer.
+
+Every widget is a code block with the language `widget` and YAML inside. On
+GitHub it reads as plain YAML.
+
+````markdown
+```widget
+type: number
+width: 8
+value: 0b11010010
+explain: true
+```
+````
+
+On the website, the block becomes the widget, labelled *Try it* (or
+*Challenge*, with a goal). In the PDF it becomes a picture; see
+[Widgets in the PDF](#widgets-in-the-pdf).
+
+### Settings of every widget
+
+| Setting | Meaning |
+|:--|:--|
+| `type` | `number`, `arithmetic`, `shift`, `register`, `frame` or `packet` (required) |
+| `view` | a different form of the same type, for `number` and `register` |
+| `title` | a title above the widget |
+| `task` | what the student should do, shown in a box (plain text) |
+| `controls` | what the student may change, for example `[bits, hex]`; per type below |
+| `hide` | readouts to hide (numbers), for example `[unsigned, signed]` in a challenge |
+| `goal` | makes the widget a challenge; per type below |
+
+Settings that several types share:
+
+- `width`: the number of bits, 1 to 64.
+- `signed: false` (unsigned only), `true` (signed only) or `both` (the
+  default): which readings of a value the widget shows: weights, readouts,
+  flags and explanations.
+- `convention: arm` (the default) or `intel`: the flag names (C, V, N, Z or
+  CF, OF, SF, ZF), the meaning of the carry after a subtraction (ARM: C = 0
+  is a borrow; Intel: CF = 1 is a borrow), and the instructions shown for
+  shifts.
+- Numbers can be written as `42`, `-7`, `0x2A`, `0b101010` or `'A'`; 64-bit
+  values such as `0xDEADBEEFCAFEF00D` are kept exactly.
+
+### Numbers
+
+`type: number` shows one value in many forms: bits, binary, hexadecimal,
+unsigned and signed decimal. Students click bits or type in any box.
+
+| Setting | Meaning |
+|:--|:--|
+| `view` | `converter` (the default) or `wheel`: counting round a 2- to 5-bit wheel, where unsigned and signed numbers wrap |
+| `width`, `value`, `signed` | see above; default 8 bits, value 0 |
+| `explain` | `true`: rows of bit weights (one for unsigned, one for signed: the top bit counts as −128), and the sums |
+| `controls` | `bits`, `bin`, `hex`, `unsigned`, `signed`, `width` (a choice of 4 to 64 bits); default: all but `width` |
+| `show` | `[char]` adds the ASCII character |
+| `goal` | `{signed: -46}`, `{unsigned: 210}` or `{value: 0xD2}`: the bits the student must set |
+
+````markdown
+```widget
+type: number
+task: Set the bits so that, read as a signed 8-bit number, the value is −46.
+controls: [bits]
+hide: [unsigned, signed]
+goal:
+  signed: -46
+```
+````
+
+### Arithmetic
+
+`type: arithmetic` adds (`op: add`) or subtracts (`op: sub`) column by
+column, with the carries, the result read as unsigned and signed numbers, and
+the flags. A subtraction is shown as A + ~B + 1, the way the hardware does it.
+
+| Setting | Meaning |
+|:--|:--|
+| `op` | `add` (the default) or `sub` |
+| `a`, `b` | the operands; default 0 |
+| `width`, `signed`, `convention` | see above |
+| `step` | `true`: the student adds one column at a time |
+| `controls` | `a`, `b`, `width` (4, 8 or 16 bits); default `[a, b]` |
+| `goal` | `{flags: {V: 1, C: 0}}` (ARM or Intel names) and/or `{result: 44}` |
+
+````markdown
+```widget
+type: arithmetic
+task: Find two 8-bit numbers whose sum overflows as signed numbers (V = 1), but not as unsigned numbers (C = 0).
+goal:
+  flags: {V: 1, C: 0}
+```
+````
+
+### Shifts
+
+`type: shift` shifts or rotates a value one bit at a time, and the bits move
+across the screen: the bit that leaves drops into a box (C, the carry, with
+`carry: true`); the bit that comes in is a 0, a copy of the sign bit, or the
+old carry. Under every operation is its instruction (ARM, or Intel with
+`convention: intel`).
+
+| Setting | Meaning |
+|:--|:--|
+| `value`, `width`, `signed`, `convention` | see above |
+| `op` | the operation selected at the start (default `shl`) |
+| `ops` | the operations to choose from: `shl` (<<), `shr` (>> logical), `sar` (>> arithmetic), `rol`, `ror` (rotate), `rcl`, `rcr` (rotate through the carry); default `[shl, shr, sar, rol, ror]` |
+| `amount` | the number of bits for *Shift n bits* (default 1) |
+| `carry` | `true`: show the carry flag for all operations, not only `rcl` and `rcr` |
+
+ARM has no rotate-left instructions; `rcr` is ARM's `rrx`.
+
+### Registers
+
+`type: register` describes a register as in a datasheet. Nothing is tied to a
+processor: the name, the width and the fields come from the YAML.
+
+| Setting | Meaning |
+|:--|:--|
+| `name` | the register's name in C, for example `TIMCTRL` |
+| `width` | 1 to 64 bits (default 8) |
+| `fields` | a list of fields, see below; bits without a field are reserved |
+| `reset`, `value` | the value after reset, and the value at the start (default: the reset value) |
+| `view` | `map` (the default): set fields by bits or by meaning, with the C; `ops`: try `\|=`, `&= ~`, `^=` and `=` with a mask; `code`: the student writes C |
+| `starter` | `code` view: the code in the editor at the start |
+| `goal` | `map`: `{fields: {MODE: 2}}` and/or `{value: 0xC3}`. `code`: `fields`, `set_bits`, `clear_bits` and `toggle_bits` |
+
+A field has `bits` (one bit, `7`, or a range, `6..5`), a `name`, and
+optionally `access` (`rw`, the default; `r` for read-only; `w`), `values`
+(names for values, which the map offers as a list) and `doc`.
+
+````markdown
+```widget
+type: register
+view: code
+name: TIMCTRL
+fields:
+  - {bits: 7, name: EN, doc: Enable the timer}
+  - {bits: 6..5, name: MODE, values: {0: stopped, 1: one-shot, 2: periodic}}
+  - {bits: 4, name: IRQ, access: r}
+  - {bits: 2..0, name: DIV}
+task: Write C that sets MODE to periodic (2) without changing any other bit.
+goal:
+  fields: {MODE: 2}
+```
+````
+
+The `code` view runs the student's C (assignments with `=`, `|=`, `&=`, `^=`,
+shifts and masks) on 20 starting values, so code that only works by accident
+is caught, and shows the bits that end up wrong. CMSIS-style names such as
+`TIMCTRL_MODE_Pos` and `TIMCTRL_MODE_Msk` may be used.
+
+### Frames
+
+`type: frame` draws bytes on a wire as a timing diagram, with every signal
+line. Pointing at a bit shows what it is.
+
+| Setting | Meaning |
+|:--|:--|
+| `protocol` | `uart` (the default), `spi` or `i2c` |
+| UART | `data` (`"Hi"`, `[0x48, 0x69]` or `"0x48 0x69"`), `baud`, `data_bits` (5 to 9), `parity` (`none`, `even`, `odd`), `stop_bits` (1 or 2), `bit_order` (`lsb`, the default, or `msb`) |
+| SPI | `mosi` and `miso` (bytes), `mode` (0 to 3), `bit_order` (`msb`, the default, or `lsb`), `word_bits` (default 8), `ring: true` (below) |
+| I²C | `address` (7 bits), `transfers`: a list of `{write: [...]}` and `{read: [...]}`, joined by repeated starts |
+| `controls` | `data`, `mosi`, `miso`, `parity`, `stop_bits`, `data_bits`, `bit_order`, `baud`, `mode`, `address` |
+| `goal` | `decode`: the values are hidden and the student types what was sent |
+
+With `ring: true`, an SPI frame also shows the two shift registers, the
+controller's and the target's, as one ring: the student clocks it bit by bit,
+the waveform marks the bit, and after 8 clocks the two bytes have swapped.
+
+### Packets
+
+`type: packet` packs fields of any size into bytes and shows them in memory
+and on the wire, optionally sent with UART or SPI.
+
+| Setting | Meaning |
+|:--|:--|
+| `fields` | a list of `{name, bits, value}`, with `signed: true` for a signed field; 1 to 64 bits |
+| `byte_order` | `big` (the default) or `little`: for fields of whole bytes |
+| `bit_order` | `msb` (the default) or `lsb`: which bit of a byte goes first on the wire |
+| `pack` | `msb` (the default): fields smaller than a byte from bit 7 down; `lsb`: from bit 0 up, like C bit-fields on little-endian processors such as ARM |
+| `send` | `none` (the default), `uart` or `spi` |
+| `mode` | the SPI mode, 0 to 3 |
+| `controls` | `byte_order`, `bit_order`, `pack`, `send`, `mode`; default `[byte_order, bit_order]` |
+
+### Widgets in the PDF
+
+A PDF cannot be interactive, so every widget becomes a picture of how it
+starts, with a link to the widget on the website. A shift shows every step,
+and a long timing diagram is split into rows.
+
+A challenge becomes a numbered exercise (*Exercise 1*, …) with empty boxes to
+fill in, and its answer goes to the *Answers* section at the end of the page.
+Before an answer is printed, it is checked with the same code that checks a
+student's answer on the website. For goals with many right answers (flags,
+C code), the answer is one example. A goal that no answer can reach is
+reported by the build, and the widget is printed as a picture only.
+
+### Mistakes the build reports
+
+The build checks every widget and reports mistakes with the page and the
+widget's number, for example
+`warning: lessons/week_02/lesson3.md: widget 2 (register): goal: no field MODEX`:
+
+- YAML that cannot be read, an unknown `type`, `view`, setting or control;
+- values that do not fit, bit ranges other than `7` or `6..5`, fields that
+  overlap;
+- goals that ask for something impossible (a read-only field, a value that
+  does not fit, flags no operands give).
+
+On the website, a widget with a mistake shows the same message instead of the
+widget.
+
 ## Page footer: dates from git
 
 Every page ends with a footer that says when its source file was added to the
