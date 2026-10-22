@@ -13,6 +13,28 @@ Every release from 1.11.1 on has **platform notes**:
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 
+## 1.17.1 (2026-10-22)
+
+- Fix: `course preview` showed "Quarto Render Error" (without a message) on
+  a page after the second edit that changed several pages at once, such as a
+  key term (the lesson and the glossary), until the preview was restarted.
+  This is a bug in Quarto's preview: it fails when it re-renders several
+  pages at once, from the second time on (Quarto 1.10.18, 1.10.19 and the
+  1.11.6 pre-release; also in a plain two-page Quarto website). Now the
+  preview writes changed pages one at a time and waits until Quarto has
+  rendered each one (at most 60 s) before it writes the next. A key-term edit
+  takes a few seconds longer.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 121
+  checks. The fix was tested by hand with `course preview` on a real course:
+  four key-term edits in a row (each time the lesson and the glossary
+  updated, about 5 s; with `--pdf` about 12 s, PDFs included), where the
+  second edit failed before. The check script does not run the preview.
+- **macOS:** untested. Nothing platform-specific changed.
+
 ## 1.17.0 (2026-10-22)
 
 - `course preview --pdf`: the preview renders the PDFs too, and the pages

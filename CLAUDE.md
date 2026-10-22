@@ -62,6 +62,10 @@ what changed recently.
   goals and answers are plain functions that both use, so that a printed
   answer is checked like a student's answer. PDF pictures are SVG text
   (`svgText`, `drawRows`, `picture`); Typst draws them.
+- `course preview` writes changed pages one at a time (`stage.sync(settle=...)`,
+  `cli._rendered`): Quarto's preview fails silently when it re-renders several
+  pages at once, from the second time on. Keep it that way unless a Quarto
+  release fixes this (test: change two pages at once, twice, in a preview).
 - The Quarto and PlantUML versions are pinned in three places: `install.sh`,
   the inputs of `publish-course.yml` and the `env` of `check.yml`. Change all
   three together.

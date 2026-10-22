@@ -80,10 +80,10 @@ HINTS = {
 # Commands
 # --------------------------------------------------------------------------
 
-def _stage(source: Path, opts: Options, verbose: bool = True) -> Path:
+def _stage(source: Path, opts: Options, verbose: bool = True, settle=None) -> Path:
     course = scan(source, drafts=opts.preview)
     stage = source / STAGE_DIR
-    changed = sync(stage, desired_files(course, replace(opts, widget_cache=stage / WIDGET_CACHE)))
+    changed = sync(stage, desired_files(course, replace(opts, widget_cache=stage / WIDGET_CACHE)), settle)
     if verbose:
         print(f"Staged {course.title!r}: {len(course.weeks)} weeks, "
               f"{len(course.pages())} pages ({len(changed)} files updated)")
@@ -128,6 +128,33 @@ def _snapshot(source: Path) -> dict:
     return snap
 
 
+# How long `course preview` waits for Quarto to render a page before it writes the next one
+RENDER_WAIT = 60
+
+
+def _rendered(stage: Path, pdf: bool):
+    """For `course preview`: wait until Quarto has rendered a page that was just staged.
+
+    Quarto's preview fails without a message when it re-renders several pages
+    at once, from the second time on (Quarto 1.10.18, 1.10.19 and 1.11.6). A
+    key-term edit changes two pages: the lesson and the glossary. One page at a
+    time works, so the stager writes changed pages one by one and waits here
+    for each page's HTML (and its PDF, with --pdf, if the page has one).
+    """
+    def settle(rel: str) -> None:
+        start = time.time()
+        out = stage / "_site" / rel[:-len(".qmd")]
+        outputs = [Path(f"{out}.html")]
+        if pdf and Path(f"{out}.pdf").exists():
+            outputs.append(Path(f"{out}.pdf"))
+        while time.time() - start < RENDER_WAIT:
+            if all(p.exists() and p.stat().st_mtime >= start for p in outputs):
+                return
+            time.sleep(0.25)
+        print(f"warning: Quarto has not rendered {rel} after {RENDER_WAIT} s; going on", file=sys.stderr)
+    return settle
+
+
 def cmd_preview(args) -> int:
     source = Path(args.source).resolve()
     opts = Options(site_url=None, pdf=args.pdf, plantuml=find_plantuml(), preview=True)
@@ -147,7 +174,7 @@ def cmd_preview(args) -> int:
             if new != snap:
                 snap = new
                 try:
-                    _stage(source, opts)
+                    _stage(source, opts, settle=_rendered(stage, args.pdf))
                 except (CourseError, OSError, ValueError) as e:
                     print(f"error: {e}", file=sys.stderr)
     except KeyboardInterrupt:

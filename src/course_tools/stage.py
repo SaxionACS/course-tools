@@ -411,8 +411,22 @@ def quarto_config(course: Course, opts: Options) -> dict:
 # Writing the stage
 # --------------------------------------------------------------------------
 
-def sync(stage: Path, files: dict[str, bytes | Path]) -> list[str]:
+def _differs(target: Path, content: bytes | Path) -> bool:
+    if not target.is_file():
+        return True
+    if isinstance(content, Path):
+        st, tst = content.stat(), target.stat()
+        return tst.st_size != st.st_size or int(tst.st_mtime) != int(st.st_mtime)
+    return target.read_bytes() != content
+
+
+def sync(stage: Path, files: dict[str, bytes | Path], settle=None) -> list[str]:
     """Make ``stage`` contain exactly ``files`` (plus Quarto's own output).
+
+    Pages (``.qmd``) are written after the other files, which filters read
+    while a page renders. ``settle(rel)``, if given, is called after a page
+    is written when more pages follow: ``course preview`` waits there until
+    Quarto has rendered it (see ``cli.cmd_preview``).
 
     Returns the list of paths that were written or removed.
     """
@@ -432,22 +446,18 @@ def sync(stage: Path, files: dict[str, bytes | Path]) -> list[str]:
             target.unlink()
             changed.append(rel)
 
-    for rel, content in files.items():
-        target = stage / rel
+    todo = [rel for rel, content in files.items() if _differs(stage / rel, content)]
+    pages = [rel for rel in todo if rel.endswith(".qmd")]
+    for rel in [rel for rel in todo if not rel.endswith(".qmd")] + pages:
+        target, content = stage / rel, files[rel]
+        target.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(content, Path):
-            st = content.stat()
-            if target.is_file():
-                tst = target.stat()
-                if tst.st_size == st.st_size and int(tst.st_mtime) == int(st.st_mtime):
-                    continue
-            target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(content, target)
         else:
-            if target.is_file() and target.read_bytes() == content:
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
         changed.append(rel)
+        if settle is not None and rel in pages and rel != pages[-1]:
+            settle(rel)
 
     manifest_path.write_text(json.dumps(sorted(files)))
     return changed

@@ -788,7 +788,9 @@ have no footer.
 
 Run `course preview` in the course repository. It shows the website on
 <http://localhost:4200> and updates the page when you save a file. It
-renders the web pages only, so the pages have no PDF button. With
+renders the web pages only, so the pages have no PDF button. When a change
+affects several pages (a key term also changes the glossary), they are updated
+one after the other. With
 `course preview --pdf`, the PDFs are rendered too and updated when you save
 a page (a few seconds longer per page; the first start renders every PDF).
 Run `course build` for the full output, including the PDFs, in `dist/`. Add
