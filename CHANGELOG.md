@@ -33,7 +33,12 @@ Platform notes:
   four key-term edits in a row (each time the lesson and the glossary
   updated, about 5 s; with `--pdf` about 12 s, PDFs included), where the
   second edit failed before. The check script does not run the preview.
-- **macOS:** untested. Nothing platform-specific changed.
+- **macOS:** verified on macOS 26.6.2 (Apple M1), 2026-10-24.
+  `scripts/check.py` passes, 121 checks with the PDFs (about 35 s), with
+  Python 3.15 and Graphviz 16.1 from Homebrew. `course preview` was tested
+  with a script on a copy of the test course: four key-term edits in a row
+  (the cheat sheet and the glossary) updated both pages within 3 s each; with
+  `--pdf`, the HTML and the PDFs within 5 s. Ctrl+C stops the preview.
 
 ## 1.17.0 (2026-10-22)
 
@@ -50,7 +55,8 @@ Platform notes:
   was tested by hand on the test course: PDF buttons, PDFs served, and a
   page's PDF updated about 2 seconds after saving. The check script does not
   run the preview.
-- **macOS:** untested. Nothing platform-specific changed.
+- **macOS:** verified on macOS 26.6.2 (Apple M1), 2026-10-24, with 1.17.1:
+  `course preview --pdf` serves the PDFs and updates them after every edit.
 
 ## 1.16.0 (2026-10-22)
 
@@ -78,8 +84,8 @@ Platform notes:
   a note for the preview) and editable widgets (YAML only in the preview).
   The editor was tested in `course preview` of the template's gallery with
   a browser script (11 checks), not part of CI.
-- **macOS:** untested. Nothing platform-specific changed; to do: run
-  `scripts/check.py`.
+- **macOS:** verified on macOS 26.6.2 (Apple M1), 2026-10-24, with 1.17.1:
+  `scripts/check.py` passes. The YAML editor in the browser was not tried.
 
 ## 1.15.0 (2026-10-22)
 
@@ -120,8 +126,9 @@ Platform notes:
   printed answer checked like a student's answer, encoders, shifts). The
   interactive behaviour was tested with a browser script (33 checks), not
   part of CI.
-- **macOS:** untested. To do: run `scripts/check.py`; `quarto run` must work
-  (it is part of Quarto).
+- **macOS:** verified on macOS 26.6.2 (Apple M1), 2026-10-24, with 1.17.1:
+  `scripts/check.py` passes, the widget logic tests included
+  (`quarto run tests/widgets.js`).
 
 ## 1.14.0 (2026-10-21)
 
@@ -148,8 +155,8 @@ Platform notes:
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), with new
   checks for the badges, the outcome map and their PDFs. The hover text was
   tested with a browser script, not part of CI.
-- **macOS:** untested. Nothing platform-specific changed; to do: run
-  `scripts/check.py`.
+- **macOS:** verified on macOS 26.6.2 (Apple M1), 2026-10-24, with 1.17.1:
+  `scripts/check.py` passes.
 
 ## 1.13.0 (2026-10-21)
 
@@ -179,8 +186,8 @@ Platform notes:
   checks for the glossary, the key-terms box, the review page and their PDFs.
   The browser part (definitions on first use, the review deck) was tested with
   a browser script, not part of CI.
-- **macOS:** untested. Nothing platform-specific changed; to do: run
-  `scripts/check.py`.
+- **macOS:** verified on macOS 26.6.2 (Apple M1), 2026-10-24, with 1.17.1:
+  `scripts/check.py` passes.
 
 ## 1.12.0 (2026-10-20)
 
@@ -216,8 +223,8 @@ Platform notes:
   Explorer links. The answer checking in the browser was tested with a browser
   script (not part of CI): all question types, tolerances, decimal commas,
   case, accepted answers, "Show answer", predictions and the marked lines.
-- **macOS:** untested. Nothing platform-specific changed; to do: run
-  `scripts/check.py`.
+- **macOS:** verified on macOS 26.6.2 (Apple M1), 2026-10-24, with 1.17.1:
+  `scripts/check.py` passes.
 
 ## 1.11.1 (2026-10-20)
 
@@ -241,10 +248,10 @@ Platform notes:
   without it, that part is skipped.
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL). The Check
   workflow runs on GitHub's Ubuntu 24.04 runners.
-- **macOS:** untested. To do: run `./install.sh --local` and
-  `python3 scripts/check.py`. Note that temporary directories on macOS are
-  under `/private/var/...`; course-tools only treats `private` directories
-  *inside* the course as private.
+- **macOS:** verified on macOS 26.6.2 (Apple M1), 2026-10-24, with 1.17.1:
+  `scripts/check.py` passes, the PDF text checks included (`pdftotext` from
+  Homebrew's poppler), and the private-file checks work with the temporary
+  directory under `/private/var`. `install.sh` has not changed since 1.11.0.
 
 ## 1.11.0 (2026-10-11)
 
