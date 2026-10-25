@@ -1781,7 +1781,8 @@
       if (dataBits < 5 || dataBits > 9) throw new Error('data_bits is 5 … 9');
       if (stops !== 1 && stops !== 2) throw new Error('stop_bits is 1 or 2');
       const lsb = oneOf(c.bit_order ?? 'lsb', ['lsb', 'msb'], 'bit_order') === 'lsb';
-      const gap = int(c.gap ?? 1);
+      const gap = int(c.gap ?? 0);   // idle bit times between frames; a UART with data waiting sends none
+      if (gap < 0 || gap > 20) throw new Error('gap is 0 … 20');
       const segs = [], labels = [], groups = [], grid = [], bitTimes = [];
       let t = 0;
       const push = (level, text, tip, cls) => { segs.push({t0: t, t1: t + 1, level, tip}); if (text) labels.push({t0: t, t1: t + 1, text, cls}); grid.push(t); t += 1; };
@@ -1805,7 +1806,12 @@
         }
         for (let s = 0; s < stops; s++) push(1, 'stop', 'stop bit: always 1', 'frame');
         groups.push({t0, t1: t, text: byteName(v), hidden: hide, tip: `frame ${k + 1}: ${byteName(v)}`});
-        if (k < c.bytes.length - 1 && gap) { segs.push({t0: t, t1: t + gap, level: 1, tip: 'idle'}); t += gap; }
+        if (k < c.bytes.length - 1 && gap) {
+          segs.push({t0: t, t1: t + gap, level: 1, tip: 'idle: the line stays high until the next start bit'});
+          labels.push({t0: t, t1: t + gap, text: 'idle'});
+          grid.push(t);
+          t += gap;
+        }
       });
       grid.push(t);
       segs.push({t0: t, t1: t + 1, level: 1, tip: 'idle'});
@@ -2187,7 +2193,7 @@
   function packetWave(st, bytes) {
     const values = bytes.map(b => b.value);
     const spec = st.send === 'uart'
-      ? Protocols.uart({bytes: values, bit_order: st.bit_order, parity: 'none', stop_bits: 1, baud: 115200, gap: 1}, false)
+      ? Protocols.uart({bytes: values, bit_order: st.bit_order, parity: 'none', stop_bits: 1, baud: 115200}, false)
       : Protocols.spi({mosiBytes: values, misoBytes: null, bit_order: st.bit_order, mode: int(st.mode)}, false);
     const segs = (spec.bitTimes || []).map(bt => {
       const x = bytes[bt.byte].bits[bt.pos];

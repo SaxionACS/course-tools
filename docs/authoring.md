@@ -716,11 +716,17 @@ line. Pointing at a bit shows what it is.
 | Setting | Meaning |
 |:--|:--|
 | `protocol` | `uart` (the default), `spi` or `i2c` |
-| UART | `data` (`"Hi"`, `[0x48, 0x69]` or `"0x48 0x69"`), `baud`, `data_bits` (5 to 9), `parity` (`none`, `even`, `odd`), `stop_bits` (1 or 2), `bit_order` (`lsb`, the default, or `msb`) |
+| UART | `data` (`"Hi"`, `[0x48, 0x69]` or `"0x48 0x69"`), `baud`, `data_bits` (5 to 9), `parity` (`none`, `even`, `odd`), `stop_bits` (1 or 2), `bit_order` (`lsb`, the default, or `msb`), `gap` (below) |
 | SPI | `mosi` and `miso` (bytes), `mode` (0 to 3), `bit_order` (`msb`, the default, or `lsb`), `word_bits` (default 8), `ring: true` (below) |
 | I²C | `address` (7 bits), `transfers`: a list of `{write: [...]}` and `{read: [...]}`, joined by repeated starts |
 | `controls` | `data`, `mosi`, `miso`, `parity`, `stop_bits`, `data_bits`, `bit_order`, `baud`, `mode`, `address` |
 | `goal` | `decode`: the values are hidden and the student types what was sent |
+
+UART frames follow each other without a pause: the next start bit comes
+right after the stop bit, as when the transmitter always has the next byte
+ready. `gap: 3` lets the line idle (high) for 3 bit times between frames
+(0 to 20; default 0), for example to show that a receiver waits for the
+falling edge of the next start bit.
 
 With `ring: true`, an SPI frame also shows the two shift registers, the
 controller's and the target's, as one ring: the student clocks it bit by bit,

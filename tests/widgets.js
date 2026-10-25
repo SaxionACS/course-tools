@@ -184,6 +184,13 @@ for (let k = 0; k < 40; k++) {
   const even = Protocols.uart({bytes: [0x4F], parity: 'even'}, false).lanes[0].labels.find(l => l.text === 'P');
   const odd = Protocols.uart({bytes: [0x4F], parity: 'odd'}, false).lanes[0].labels.find(l => l.text === 'P');
   ok(even && odd, 'uart: parity bits');
+  // frames back to back: the start bit of 'i' follows the stop bit of 'H'; with gap, idle bit times between them
+  const wire = c => { const s = Protocols.uart(c, false); return s.lanes[0].segs.map(g => String(g.level).repeat(g.t1 - g.t0)).join(''); };
+  const hi = wire({bytes: [0x48, 0x69]});
+  ok(hi === '1' + '0000100101' + '0100101101' + '1', 'uart: frames back to back, no idle bit between them', hi);
+  const gap = wire({bytes: [0x48, 0x69], gap: 3});
+  ok(gap === '1' + '0000100101' + '111' + '0100101101' + '1', 'uart: gap: 3 idles 3 bit times between frames', gap);
+  ok(print({type: 'frame', data: 'Hi', gap: -1}).error?.includes('gap is 0'), 'uart: gap: -1 is refused');
   for (let mode = 0; mode < 4; mode++) {
     const s = Protocols.spi({mosiBytes: [0xA5], misoBytes: null, mode}, false);
     const clk = s.lanes[1].segs;

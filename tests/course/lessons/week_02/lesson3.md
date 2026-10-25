@@ -170,6 +170,7 @@ transfers:
 type: frame
 protocol: uart
 data: "OK"
+gap: 2
 task: Which two characters were sent?
 goal: decode
 ```

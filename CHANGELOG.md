@@ -13,6 +13,23 @@ Every release from 1.11.1 on has **platform notes**:
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 
+## 1.17.2 (2026-10-25)
+
+- Fix: a UART frame widget put one idle bit time between frames, which looked
+  like a second stop bit. Now the frames follow each other without a pause,
+  as when a UART always has the next byte ready. This also applies to packets
+  sent with `send: uart`. The new setting `gap` (0 to 20 bit times, default
+  0) lets the line idle between frames, marked "idle".
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes in the Check workflow (Ubuntu
+  24.04), 121 checks.
+- **macOS:** verified on macOS 26.6.2 (Apple M1), 2026-10-25.
+  `scripts/check.py` passes, 121 checks with the PDFs; the UART frames in
+  the PDF of the test course were checked by eye.
+
 ## 1.17.1 (2026-10-22)
 
 - Fix: `course preview` showed "Quarto Render Error" (without a message) on
