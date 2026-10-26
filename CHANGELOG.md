@@ -13,6 +13,33 @@ Every release from 1.11.1 on has **platform notes**:
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 
+## 1.18.0 (2026-10-26)
+
+Frame widgets: zoom, bit values, escapes.
+
+- A short timing diagram is zoomed in to fill the width of the widget (up
+  to 3×) instead of filling a third of it; a long one starts at the normal
+  zoom, as before. The zoom follows the width of the page until the student
+  uses the zoom buttons.
+- `bit_values: true` (default off) shows a 0 or 1 under the label of every
+  bit: start, data, parity and stop bits (UART), MOSI and MISO (SPI), and
+  the address, R/W, data and ACK bits (I²C), in the browser and in the PDF.
+  The `bit_values` control lets students show or hide them.
+- Text data understands C escapes, in the YAML and in the text box:
+  `\0 \a \b \t \n \v \f \r \e \\ \" \' \?`, octal `\101`, `\x41`, `\u0041`.
+  The box shows the data with escapes, frames are named by them (`'\n' 0x0A`),
+  and in a decode challenge, `\n` or `'\n'` is accepted as an answer.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 123
+  checks, with new ones for escapes and bit values (and 1438 widget logic
+  checks: escapes of every byte, bit values for UART, SPI and I²C, zoom to
+  fit). The zoom, the bit values and the text box were tested in a browser
+  on a real course page (12 checks), not part of CI.
+- **macOS:** untested. Nothing platform-specific changed.
+
 ## 1.17.2 (2026-10-25)
 
 - Fix: a UART frame widget put one idle bit time between frames, which looked

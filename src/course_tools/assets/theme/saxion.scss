@@ -798,6 +798,7 @@ svg.cw-wv { display: block; max-width: none; }
 .cw-wv-lbl.t { fill: var(--cw-warm); }
 .cw-wv-lbl.frame { fill: var(--cw-fg); font-size: 8.5px; }
 .cw-wv-cond { font-size: 10.5px; font-weight: 700; fill: var(--cw-accent); text-anchor: middle; }
+.cw-wv-val { font-size: 10px; font-weight: 700; fill: var(--cw-fg); text-anchor: middle; }
 .cw-wv-grid { stroke: var(--cw-grid); stroke-width: 1; }
 .cw-wv-group path { fill: none; stroke: var(--cw-muted); stroke-width: 1; }
 .cw-wv-group text { font-size: 11px; fill: var(--cw-fg); text-anchor: middle; font-weight: 700; }

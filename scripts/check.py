@@ -467,6 +467,12 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     check_terms(c, read)
     check_outcomes(c, read)
     check_widgets(c, read)
+    # the PDF pictures, drawn at build time (the stage, before `stage --preview` changes it)
+    data = json.loads((dist.parent / ".build" / "_course" / "widgets.json").read_text(encoding="utf-8"))
+    svgs = [e.get("svg", "") for e in data["widgets"].values() if '"bit_values":true' in e.get("config", "")]
+    values = "".join(re.findall(r'class="cw-wv-val"[^>]*>([01])<', svgs[0])) if svgs else ""
+    c.ok(len(svgs) == 1 and values.startswith("00001001001"),
+         "bit values under the bit labels: start, D0 … D7, parity and stop of 'H' (0x48, even parity)", f"values: {values[:22]}")
 
     c.section("Draft pages are not published")
     leaks = [p.relative_to(dist).as_posix() for p in [*dist.rglob("*.html"), dist / "search.json"]
@@ -527,6 +533,8 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
                                 "GPIO_CFG = (GPIO_CFG & ~(0x3u << 8)) | (0x2u << 8);", "frame 1: 'O' 0x4F, frame 2: 'K' 0x4B.")),
          "widget PDF: the answers at the end")
     c.ok("This widget cannot be shown: unknown type" in questions, "widget PDF: a widget with a mistake says so")
+    c.ok("'\\r' 0x0D" in questions and "'\\n' 0x0A" in questions,
+         "widget PDF: C escapes in text data (Hi\\r\\n), frames named by their escapes")
 
 
 def main() -> int:

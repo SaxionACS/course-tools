@@ -263,6 +263,36 @@ ok(print({type: 'number', width: 65}).error?.includes('width must be 1 … 64'),
 ok(!print({type: 'number', editable: true}).warnings.length && print({type: 'number', editable: 'yes'}).warnings.includes('editable is true or false'),
   'editable is true or false');
 
+// ---- frames: C escapes in text, bit values under the labels, zoom to fit --
+{
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const cases = [['AT\\r\\n', [65, 84, 13, 10]], ['\\0', [0]], ['\\x41\\101\\u0042', [65, 65, 66]], ['\\"\\\'\\\\\\?', [34, 39, 92, 63]],
+    ['\\t\\a\\b\\f\\v\\e', [9, 7, 8, 12, 11, 27]], ['\\q', [92, 113]], ['\\08', [0, 56]], ['0x48 0x69', [0x48, 0x69]]];
+  for (const [text, bytes] of cases) ok(same(I.toBytes(text), bytes), `escapes: ${text}`, JSON.stringify(I.toBytes(text)));
+  ok(same(I.toBytes('A\r\n'), [65, 13, 10]), 'text with real control characters (YAML in double quotes) is kept');
+  const all = String.fromCharCode(...Array(256).keys());
+  ok(I.unescapeText(I.escapeText(all)) === all && !/[\x00-\x1f\x7f]/.test(I.escapeText(all)), 'escapeText and unescapeText round-trip every byte');
+  ok(I.escapeText('Hi\r\n\0\\') === 'Hi\\r\\n\\0\\\\', 'escapeText for a text box', I.escapeText('Hi\r\n\0\\'));
+  ok(I.byteName(10) === "'\\n' 0x0A" && I.byteName(0) === "'\\0' 0x00" && I.byteName(0x48) === "'H' 0x48" && I.byteName(0x80) === '0x80',
+    'frame labels name control characters by their escapes');
+  const r = print({type: 'frame', protocol: 'uart', data: 'AT\\r\\n', goal: 'decode'});
+  ok(answerText(r) === "frame 1: 'A' 0x41, frame 2: 'T' 0x54, frame 3: '\\r' 0x0D, frame 4: '\\n' 0x0A.", 'a decode answer with escapes', answerText(r));
+
+  const values = c => [...(print(c).svg || '').matchAll(/<text[^>]*class="cw-wv-val"[^>]*>([01])<\/text>/g)].map(m => m[1]).join('');
+  ok(values({type: 'frame', protocol: 'uart', data: [0x48]}) === '', 'bit values are off by default');
+  ok(values({type: 'frame', protocol: 'uart', data: [0x48], bit_values: true}) === '0000100101',
+    'uart: bit values under start, D0 … D7 and stop', values({type: 'frame', protocol: 'uart', data: [0x48], bit_values: true}));
+  ok(values({type: 'frame', protocol: 'uart', data: [0x4F], parity: 'even', bit_values: true}) === '01111001011', 'uart: and under the parity bit');
+  ok(values({type: 'frame', protocol: 'spi', mode: 3, mosi: [0xA5], miso: [0x3C], bit_values: true}) === '1010010100111100', 'spi: under MOSI and MISO, every mode');
+  ok(values({type: 'frame', protocol: 'i2c', address: 0x48, transfers: [{write: [0x80]}], bit_values: true}) === '10010000' + '0' + '10000000' + '0',
+    'i2c: under the address, R/W, data and ACK bits');
+  ok(!print({type: 'frame', data: 'x', bit_values: true}).warnings.length, 'bit_values is a known setting');
+
+  const spec = Protocols.uart({bytes: [0xF0]}, false);
+  const width = 72 + spec.ticks * spec.unit;
+  ok(Math.abs(globalThis.CourseWidgets.Wave.fit(spec, 2 * width - 72) - 2) < 1e-9, 'zoom to fit: twice the width at zoom 2');
+}
+
 console.log(failed.length ? failed.map(f => `FAIL ${f}`).join('\n') : '');
 console.log(`${passed} ok, ${failed.length} failed`);
 if (failed.length) Deno.exit(1);

@@ -142,9 +142,10 @@ goal:
 ```widget
 type: frame
 protocol: uart
-data: "Hi"
+data: 'Hi\r\n'
 parity: even
-controls: [data, parity, stop_bits, bit_order]
+bit_values: true
+controls: [data, parity, stop_bits, bit_order, bit_values]
 ```
 
 ```widget

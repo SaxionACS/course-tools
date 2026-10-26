@@ -273,6 +273,7 @@
     `.cw-wv-lbl{font-size:9.5px;fill:${INK.muted};text-anchor:middle}`,
     `.cw-wv-lbl.c{fill:${INK.accent}}`, `.cw-wv-lbl.t{fill:${INK.warm}}`, `.cw-wv-lbl.frame{fill:${INK.fg};font-size:8.5px}`,
     `.cw-wv-cond{font-size:10.5px;font-weight:bold;fill:${INK.accent};text-anchor:middle}`,
+    `.cw-wv-val{font-size:10px;font-weight:bold;fill:${INK.fg};text-anchor:middle}`,
     `.cw-wv-grid{stroke:${INK.grid};stroke-width:1}`,
     `.cw-wv-group path{fill:none;stroke:${INK.muted};stroke-width:1}`,
     `.cw-wv-group text{font-size:11px;fill:${INK.fg};text-anchor:middle;font-weight:bold}`,
@@ -1655,15 +1656,20 @@
   // spec: {ticks, unit, lanes: [{name, kind?, segs, labels, marks}], groups, samples, grid, highlight}
   //   segment: {t0, t1, level: 0|1, who?} | {t0, t1, x: true} | {t0, t1, z: true} | band {t0, t1, color, text}
   // ========================================================================
+  // spec.bitValues: a 0 or 1 under the label of every bit (labels with bit: true), from the line's level.
+  const WAVE_LEFT = 58, WAVE_RIGHT = 14;
   const Wave = {
+    // The zoom at which the waveform is `width` px wide
+    fit(spec, width) { return (width - WAVE_LEFT - WAVE_RIGHT) / (spec.ticks * (spec.unit || 24)); },
     render(spec, zoom = 1, make = sv) {
       const unit = (spec.unit || 24) * zoom;
-      const LW = 58;
+      const LW = WAVE_LEFT;
       const groupH = spec.groups && spec.groups.length ? 32 : 6;
-      const laneH = l => (l.kind === 'band' ? 24 : 50);
+      const valueH = spec.bitValues ? 12 : 0;   // a row for the bit values, under the labels
+      const laneH = l => (l.kind === 'band' ? 24 : 50 + valueH);
       let y = groupH;
       const tops = spec.lanes.map(l => { const t = y; y += laneH(l); return t; });
-      const H = y + 6, W = LW + spec.ticks * unit + 14;
+      const H = y + 6, W = LW + spec.ticks * unit + WAVE_RIGHT;
       const X = t => LW + t * unit;
       const hatch = nextId('hatch');
       const svg = make('svg', {class: 'cw-wv', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': spec.alt || 'timing diagram'});
@@ -1691,7 +1697,7 @@
           }
           return;
         }
-        const sig = top + 18, yHi = sig + 2, yLo = sig + 26, yMid = sig + 14;
+        const sig = top + 18 + valueH, yHi = sig + 2, yLo = sig + 26, yMid = sig + 14;
         svg.append(make('text', {x: LW - 8, y: yMid + 4, class: 'cw-wv-name', text: lane.name}));
         let prev = null;
         for (const g of lane.segs) {
@@ -1711,16 +1717,20 @@
           if (g.tip) svg.append(make('rect', {x: x0, y: yHi - 3, width: Math.max(1, x1 - x0), height: yLo - yHi + 6, class: 'cw-wv-hit'}, make('title', {text: g.tip})));
           prev = g;
         }
+        const levelAt = t => { const g = lane.segs.find(s => s.t0 <= t && t < s.t1); return g ? g.level : undefined; };
         for (const lb of lane.labels || []) {
           if (lb.hidden) continue;
-          svg.append(make('text', {x: X((lb.t0 + lb.t1) / 2), y: sig - 3, class: 'cw-wv-lbl ' + (lb.cls || ''), text: lb.text}));
+          const xm = X((lb.t0 + lb.t1) / 2);
+          svg.append(make('text', {x: xm, y: sig - 3 - valueH, class: 'cw-wv-lbl ' + (lb.cls || ''), text: lb.text}));
+          const level = spec.bitValues && lb.bit ? levelAt((lb.t0 + lb.t1) / 2) : undefined;
+          if (level !== undefined) svg.append(make('text', {x: xm, y: sig - 3, class: 'cw-wv-val', text: String(level)}));
         }
-        for (const m of lane.marks || []) svg.append(make('text', {x: X(m.t), y: sig - 3, class: 'cw-wv-cond', text: m.text}));
+        for (const m of lane.marks || []) svg.append(make('text', {x: X(m.t), y: sig - 3 - valueH, class: 'cw-wv-cond', text: m.text}));
       });
       for (const m of spec.samples || []) {
         const x = X(m.t);
         svg.append(make('line', {x1: x, x2: x, y1: groupH, y2: H - 4, class: 'cw-wv-sample'}));
-        const ym = tops[m.lane] + 18 + 14;
+        const ym = tops[m.lane] + 18 + valueH + 14;
         svg.append(make('path', {d: m.dir === 'rise' ? `M${x - 4} ${ym + 4} L${x} ${ym - 3} L${x + 4} ${ym + 4} Z` : `M${x - 4} ${ym - 4} L${x} ${ym + 3} L${x + 4} ${ym - 4} Z`, class: 'cw-wv-arrow'}));
       }
       return svg;
@@ -1771,7 +1781,31 @@
     return segs;
   }
 
-  const byteName = v => (v >= 32 && v < 127 ? `'${String.fromCharCode(v)}' 0x${v.toString(16).toUpperCase().padStart(2, '0')}` : `0x${v.toString(16).toUpperCase().padStart(2, '0')}`);
+  // C escapes in text: \0 \a \b \t \n \v \f \r \e \\ \" \' \?, octal \ooo, \xHH, \uHHHH.
+  const ESCAPES = {a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, e: 27, '\\': 92, '"': 34, "'": 39, '?': 63};
+  const ESCAPE_OF = {0: '0', 7: 'a', 8: 'b', 9: 't', 10: 'n', 11: 'v', 12: 'f', 13: 'r', 27: 'e', 92: '\\'};
+  function unescapeText(text) {
+    return String(text).replace(/\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{4}|[0-7]{1,3}|.)/g, (all, e) => {
+      if (/^x/.test(e)) return String.fromCharCode(parseInt(e.slice(1), 16));
+      if (/^u[0-9a-fA-F]{4}$/.test(e)) return String.fromCharCode(parseInt(e.slice(1), 16));
+      if (/^[0-7]+$/.test(e)) return String.fromCharCode(parseInt(e, 8) & 0xFF);
+      return e in ESCAPES ? String.fromCharCode(ESCAPES[e]) : all;   // an unknown escape stays as written
+    });
+  }
+  // The other way round, for a text box: control characters, backslashes and non-ASCII as escapes
+  function escapeText(text) {
+    return [...String(text)].map(ch => {
+      const c = ch.charCodeAt(0);
+      if (c in ESCAPE_OF) return '\\' + ESCAPE_OF[c];
+      if (c >= 32 && c < 127) return ch;
+      return c < 256 ? `\\x${c.toString(16).toUpperCase().padStart(2, '0')}` : `\\u${c.toString(16).toUpperCase().padStart(4, '0')}`;
+    }).join('');
+  }
+  const byteName = v => {
+    const hex = `0x${v.toString(16).toUpperCase().padStart(2, '0')}`;
+    if (v >= 32 && v < 127) return `'${String.fromCharCode(v)}' ${hex}`;
+    return v in ESCAPE_OF ? `'\\${ESCAPE_OF[v]}' ${hex}` : hex;
+  };
   const hx = (v, digits = 2) => '0x' + v.toString(16).toUpperCase().padStart(digits, '0');
 
   // ---- protocol encoders: settings + data → waveform spec -----------------
@@ -1785,7 +1819,7 @@
       if (gap < 0 || gap > 20) throw new Error('gap is 0 … 20');
       const segs = [], labels = [], groups = [], grid = [], bitTimes = [];
       let t = 0;
-      const push = (level, text, tip, cls) => { segs.push({t0: t, t1: t + 1, level, tip}); if (text) labels.push({t0: t, t1: t + 1, text, cls}); grid.push(t); t += 1; };
+      const push = (level, text, tip, cls) => { segs.push({t0: t, t1: t + 1, level, tip}); if (text) labels.push({t0: t, t1: t + 1, text, cls, bit: true}); grid.push(t); t += 1; };
       segs.push({t0: 0, t1: 1, level: 1, tip: 'idle: the line is high'});
       t = 1;
       c.bytes.forEach((byte, k) => {
@@ -1852,7 +1886,7 @@
           const word = Math.floor(k / wb), j = k % wb, i = msb ? wb - 1 - j : j;
           const v = Number(bytes[word] ?? 0), b = (v >> i) & 1;
           segs.push({t0: start(k), t1: stop(k), level: b, tip: hide ? `${name}: D${i} = ${b}` : `${name}: bit ${i} of ${hx(v)} = ${b}`});
-          labels.push({t0: start(k), t1: stop(k), text: 'D' + i});
+          labels.push({t0: start(k), t1: stop(k), text: 'D' + i, bit: true});
           if (name === 'MOSI') bitTimes.push({byte: word, pos: i, t0: start(k), t1: stop(k)});
         }
         segs.push(Object.assign({t0: stop(total - 1), t1: T}, outside));
@@ -1895,7 +1929,7 @@
       const stop = () => { setScl(t, 0); setSda(t + 1, 0, 'c'); setScl(t + 2, 1); setSda(t + 3, 1, 'c', 'STOP: SDA rises while SCL is high'); marks.push({t: t + 3, text: 'P'}); t += 4; };
       const bit = (b, text, who, tip) => {
         setScl(t, 0); setSda(t + 1, b, who, tip); setScl(t + 2, 1);
-        labels.push({t0: t + 1, t1: t + 5, text, cls: who});
+        labels.push({t0: t + 1, t1: t + 5, text, cls: who, bit: true});
         t += 4;
       };
       const byte = (v, names, who, what) => {
@@ -1935,14 +1969,14 @@
     },
   };
 
-  // Bytes from YAML or from a text box: [0x48, 105], "Hi", or "0x48 0x69"
+  // Bytes from YAML or from a text box: [0x48, 105], "Hi\r\n" (with C escapes), or "0x48 0x69"
   function toBytes(value, maxBits = 8) {
     if (value == null) return [];
     const m = maxBits >= 32 ? 0xFFFFFFFF : (1 << maxBits) - 1;
     if (Array.isArray(value)) return value.map(x => (int(x) & m) >>> 0);
     const text = String(value);
     if (/^\s*(0x[0-9a-f]+[\s,]*)+$/i.test(text)) return text.trim().split(/[\s,]+/).map(x => (Number(BigInt(x)) & m) >>> 0);
-    return [...text].map(ch => ch.charCodeAt(0) & m);
+    return [...unescapeText(text)].map(ch => ch.charCodeAt(0) & m);
   }
   const bytesText = list => list.map(x => hx(x)).join(' ');
   // The encoder settings of a frame: the bytes it carries, and those the student decodes.
@@ -1964,8 +1998,8 @@
   // ========================================================================
   Widget.define('frame', {
     keys: ['protocol', 'data', 'baud', 'data_bits', 'parity', 'stop_bits', 'bit_order', 'gap', 'line',
-           'mode', 'mosi', 'miso', 'word_bits', 'cs_name', 'ring', 'address', 'transfers'],
-    defaults: {protocol: 'uart', controls: [], ring: false},
+           'mode', 'mosi', 'miso', 'word_bits', 'cs_name', 'ring', 'address', 'transfers', 'bit_values'],
+    defaults: {protocol: 'uart', controls: [], ring: false, bit_values: false},
     render(root, c, kit) {
       const st = Object.assign({}, c);
       const encoder = Protocols[st.protocol];
@@ -1975,7 +2009,8 @@
       // ring: true: the two SPI shift registers as a ring, clocked bit by bit; the waveform marks the bit
       const ring = c.ring ? spiRing(kit, () => renderWave()) : null;
       const decode = c.goal === 'decode';
-      let hidden = decode, zoom = 1;
+      // zoom: automatic until the student zooms: a short waveform is zoomed in to fill the width
+      let hidden = decode, zoom = 1, autoZoom = true;
       const top = h('div', {class: 'cw-controls'});
       const view = h('div', {class: 'cw-wave'});
       const caption = h('div', {class: 'cw-caption'});
@@ -1992,7 +2027,10 @@
         return kit.control(label, input);
       };
       const CONTROLS = {
-        data: () => text(st.protocol === 'uart' ? 'Data (text, or 0x48 0x69)' : 'Data (0x9F 0x00)', () => (typeof st.data === 'string' ? st.data : bytesText(toBytes(st.data))), x => { st.data = x; }),
+        // text is shown and typed with C escapes (\r, \n, \0, \x41, ...)
+        data: () => text(st.protocol === 'uart' ? 'Data (text, or 0x48 0x69)' : 'Data (0x9F 0x00)',
+          () => (typeof st.data === 'string' && !/^\s*(0x[0-9a-f]+[\s,]*)+$/i.test(st.data) ? escapeText(unescapeText(st.data)) : bytesText(toBytes(st.data))),
+          x => { st.data = x; }),
         mosi: () => text('MOSI bytes', () => bytesText(toBytes(st.mosi)), x => { toBytes(x); st.mosi = x; }),
         miso: () => text('MISO bytes', () => bytesText(toBytes(st.miso)), x => { toBytes(x); st.miso = x; }),
         parity: () => kit.control('Parity', kit.select(['none', 'even', 'odd'].map(x => ({value: x, label: x})), st.parity ?? 'none', x => { st.parity = x; build(); })),
@@ -2002,21 +2040,24 @@
         baud: () => kit.control('Baud rate', kit.select([1200, 9600, 115200, 1000000].map(x => ({value: x, label: String(x)})), int(st.baud ?? 9600), x => { st.baud = x; build(); })),
         mode: () => kit.control('SPI mode', kit.select([0, 1, 2, 3].map(x => ({value: x, label: `${x}: CPOL ${x >> 1}, CPHA ${x & 1}`})), int(st.mode ?? 0), x => { st.mode = x; build(); })),
         address: () => text('Address (7 bits)', () => hx(int(st.address ?? 0x48)), x => { const v = Bits.parse(x); if (v === null || v < 0n || v > 127n) throw new Error(); st.address = Number(v); }),
+        bit_values: () => kit.control('Bit values', kit.segmented([{value: false, label: 'hide'}, {value: true, label: 'show'}], !!st.bit_values, x => { st.bit_values = x; build(); })),
       };
       for (const key of listOf(c.controls)) {
         if (!CONTROLS[key]) throw new Error(`unknown control "${key}" (${Object.keys(CONTROLS).join(', ')})`);
         top.append(CONTROLS[key]());
       }
       top.append(kit.control('Zoom', h('span', {class: 'cw-row'},
-        h('button', {type: 'button', class: 'btn btn-sm btn-outline-secondary', text: '−', 'aria-label': 'zoom out', onClick: () => { zoom = Math.max(0.5, zoom / 1.25); renderWave(); }}),
-        h('button', {type: 'button', class: 'btn btn-sm btn-outline-secondary', text: '+', 'aria-label': 'zoom in', onClick: () => { zoom = Math.min(3, zoom * 1.25); renderWave(); }}))));
+        h('button', {type: 'button', class: 'btn btn-sm btn-outline-secondary', text: '−', 'aria-label': 'zoom out', onClick: () => { autoZoom = false; zoom = Math.max(0.5, zoom / 1.25); renderWave(); }}),
+        h('button', {type: 'button', class: 'btn btn-sm btn-outline-secondary', text: '+', 'aria-label': 'zoom in', onClick: () => { autoZoom = false; zoom = Math.min(3, zoom * 1.25); renderWave(); }}))));
 
       let bytes = [], spec = null;
       function build() {
         const s = frameSettings(st);
         spec = encoder(s, hidden);   // may throw: the input that caused it is marked
+        spec.bitValues = !!st.bit_values;
         bytes = s.decoded;
         if (ring) ring.load(s);
+        fit();
         renderWave();
         caption.textContent = spec.caption || '';
         legend.replaceChildren(...(spec.legend || []).map(([color, label]) => h('span', {}, h('i', {style: `border-color: ${color}`}), label)));
@@ -2025,7 +2066,18 @@
         const clocked = ring ? ring.clocks() : 0;
         view.replaceChildren(Wave.render(clocked ? Object.assign({}, spec, {highlight: spec.bitTimes[clocked - 1]}) : spec, zoom));
       }
+      // Automatic zoom: 1, or more (up to 3) when the waveform is shorter than the space for it
+      function fit() {
+        const width = view.clientWidth;
+        if (!autoZoom || !width || !spec) return false;
+        const z = Math.min(3, Math.max(1, Wave.fit(spec, width - 2)));
+        if (Math.abs(z - zoom) < 0.01) return false;
+        zoom = z;
+        return true;
+      }
       add(root, top, view, legend, caption, ring ? ring.el : null);
+      // the width is known once the widget is on the page, and changes with the window (or a tab that opens)
+      if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { if (fit()) renderWave(); }).observe(view);
       build();
       if (decode) {
         const inputs = bytes.map((b, k) => {
@@ -2036,7 +2088,9 @@
         decodeBox.append(kit.button('Check', () => {
           const wrong = inputs.map((input, k) => {
             const t = input.value.trim();
-            const v = t.length === 1 ? t.charCodeAt(0) : t.length === 3 && t[0] === "'" ? t.charCodeAt(1) : Number(Bits.parse(t) ?? -1n);
+            // a character (A, 'A', \n, '\n') or a number (0x41, 65)
+            const ch = unescapeText(/^(['"]).+\1$/.test(t) ? t.slice(1, -1) : t);
+            const v = ch.length === 1 ? ch.charCodeAt(0) : Number(Bits.parse(t) ?? -1n);
             return v === bytes[k] ? null : k + 1;
           }).filter(Boolean);
           if (wrong.length) {
@@ -2058,6 +2112,7 @@
       if (!encoder) throw new Error(`unknown protocol "${c.protocol}" (${Object.keys(Protocols).join(', ')})`);
       if (c.ring && c.protocol !== 'spi') throw new Error('ring: true is for protocol: spi');
       const spec = encoder(frameSettings(c), blank);
+      spec.bitValues = !!c.bit_values;
       const legend = (spec.legend || []).map(([color, label]) => `${color.includes('accent') ? 'green' : 'orange'}: ${label}`).join('; ');
       return Object.assign(picture(waveBlocks(spec)), {caption: [spec.caption, legend ? legend + '.' : ''].filter(Boolean).join(' ')});
     },
@@ -2308,9 +2363,9 @@
   // Start: build the widgets of the page (browser); the build uses `print`.
   // ========================================================================
   root.CourseWidgets = {
-    Widget, Bits, Protocols, CLang, print: config => Widget.print(config),
+    Widget, Bits, Protocols, CLang, Wave, print: config => Widget.print(config),
     // for the tests (tests/widgets.js)
-    internals: {addSub, numberTarget, numberGoalMet, arithmeticGoal, arithmeticGoalMet, conventionOf, registerFields, registerTarget,
+    internals: {unescapeText, escapeText, byteName, toBytes, addSub, numberTarget, numberGoalMet, arithmeticGoal, arithmeticGoalMet, conventionOf, registerFields, registerTarget,
       registerGoalMet, settable, checkCode, modelCode, codeGoal, packFields, packetFields, frameSettings, toSlots, fromSlots, shiftOnce, SHIFTS},
   };
   // editable: true: the widget's YAML under it, to change and apply (a playground, or a gallery for authors).

@@ -711,16 +711,25 @@ is caught, and shows the bits that end up wrong. CMSIS-style names such as
 ### Frames
 
 `type: frame` draws bytes on a wire as a timing diagram, with every signal
-line. Pointing at a bit shows what it is.
+line. Pointing at a bit shows what it is. A short diagram is zoomed in to
+fill the width of the widget; students can zoom with − and +.
 
 | Setting | Meaning |
 |:--|:--|
 | `protocol` | `uart` (the default), `spi` or `i2c` |
-| UART | `data` (`"Hi"`, `[0x48, 0x69]` or `"0x48 0x69"`), `baud`, `data_bits` (5 to 9), `parity` (`none`, `even`, `odd`), `stop_bits` (1 or 2), `bit_order` (`lsb`, the default, or `msb`), `gap` (below) |
+| UART | `data` (`'Hi\r\n'`, `[0x48, 0x69]` or `"0x48 0x69"`), `baud`, `data_bits` (5 to 9), `parity` (`none`, `even`, `odd`), `stop_bits` (1 or 2), `bit_order` (`lsb`, the default, or `msb`), `gap` (below) |
 | SPI | `mosi` and `miso` (bytes), `mode` (0 to 3), `bit_order` (`msb`, the default, or `lsb`), `word_bits` (default 8), `ring: true` (below) |
 | I²C | `address` (7 bits), `transfers`: a list of `{write: [...]}` and `{read: [...]}`, joined by repeated starts |
-| `controls` | `data`, `mosi`, `miso`, `parity`, `stop_bits`, `data_bits`, `bit_order`, `baud`, `mode`, `address` |
+| `bit_values` | `true`: a 0 or 1 under the label of every bit (start, data, parity and stop bits; MOSI and MISO; I²C address, R/W, data and ACK bits). Default `false` |
+| `controls` | `data`, `mosi`, `miso`, `parity`, `stop_bits`, `data_bits`, `bit_order`, `baud`, `mode`, `address`, `bit_values` |
 | `goal` | `decode`: the values are hidden and the student types what was sent |
+
+Text data can contain C escapes: `\0`, `\n`, `\r`, `\t`, `\"`, `\\`, `\x41`
+(two hexadecimal digits), `\101` (octal), `\u0041`, and also `\a \b \f \v \e \' \?`.
+Write them in single quotes (`data: 'AT\r\n'`) or without quotes; in double
+quotes, YAML reads them itself, which works too, except for octal, `\?` and `\'`.
+Students can type escapes in the data box, which shows control characters
+the same way, and the frames name them: `'\n' 0x0A`.
 
 UART frames follow each other without a pause: the next start bit comes
 right after the stop bit, as when the transmitter always has the next byte
