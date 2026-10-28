@@ -16,6 +16,7 @@ what changed recently.
 | `src/course_tools/markdown.py` | GitHub Markdown → Quarto: code fences, titles, `---` rules |
 | `src/course_tools/info.py`, `models.py`, `genai.py` | pages generated from `info/general.yaml`, `assessment.yaml`, `genAI.yaml` |
 | `src/course_tools/history.py` | page footer dates, from one `git log` |
+| `src/course_tools/tools.py` | the pinned Quarto, PlantUML and Chrome Headless Shell (versions and SHA-256), `course setup` (downloads them into a per-user folder) and the lookups the build uses; Java from jdk4py |
 | `src/course_tools/compiler_explorer.py` | course and page settings for Compiler Explorer links (validated, passed to the filter) |
 | `src/course_tools/terms.py` | key terms: reads `{.terms}` blocks from the Markdown, generates the glossary and review pages |
 | `src/course_tools/outcomes.py` | learning outcomes named in the front matter of pages (`outcomes:`), and the outcome map page |
@@ -29,15 +30,16 @@ what changed recently.
 | `src/course_tools/assets/filters/course.lua` | Lua filter: PDF button, learning outcomes and reading time, slides/GenAI/logbook/starter boxes, links, code annotations, diagram alignment, footer, PDF header |
 | `src/course_tools/assets/theme/` | `head.html` (browser script), `practice.html` (self-checks, predictions, comparisons), `terms.html` (definitions on first use, review deck; reads the glossary page) and `saxion.scss` (theme) |
 | `src/course_tools/assets/typst/header.typ` | PDF styling |
+| `src/course_tools/assets/fonts/` | Lato (OFL), the body font of the PDFs: staged into `_course/fonts`, found by Typst through `font-paths` |
 | `src/course_tools/assets/texts/genai/` | texts of the GenAI policy page |
 | `src/course_tools/assets/_extensions/pandoc-ext/diagram` | vendored PlantUML filter (don't edit) |
-| `.github/workflows/publish-course.yml` | reusable workflow that course repositories call as `@v1` |
+| `.github/workflows/publish-course.yml` | reusable workflow that course repositories call as `@v2` |
 | `.github/workflows/check.yml` | CI for this repository: runs `scripts/check.py` |
 | `tests/course/` | test course that uses every feature |
 | `scripts/check.py` | builds the test course and checks the output |
 | `tests/widgets.js` | tests of the widgets' logic and PDF answers (`quarto run tests/widgets.js`, also run by `check.py`) |
 | `docs/authoring.md`, `docs/course-info.md` | documentation for course authors |
-| `install.sh`, `requirements.md` | local installation (Ubuntu and macOS) |
+| `install.sh`, `requirements.md` | local installation (Ubuntu and macOS): system packages, uv, `uv tool install`, `course setup` |
 
 ## Rules
 
@@ -66,9 +68,12 @@ what changed recently.
   `cli._rendered`): Quarto's preview fails silently when it re-renders several
   pages at once, from the second time on. Keep it that way unless a Quarto
   release fixes this (test: change two pages at once, twice, in a preview).
-- The Quarto and PlantUML versions are pinned in three places: `install.sh`,
-  the inputs of `publish-course.yml` and the `env` of `check.yml`. Change all
-  three together.
+- The Quarto, PlantUML and Chrome Headless Shell versions are pinned in one
+  place, `tools.py`, with the SHA-256 of the download for every platform
+  (`check.py` checks that none is missing). The build uses only the copies
+  from `course setup` (or `QUARTO_PATH`, `PLANTUML_JAR`), never a Quarto on
+  `PATH`. Don't add system-wide tools; Graphviz (apt, Homebrew) is the only
+  one.
 
 ## Platforms
 
@@ -83,19 +88,19 @@ what changed recently.
     no `sed -i` without a suffix, no `readlink -f`, different `date` options.
   - macOS file systems are case-insensitive: renaming `Lecture1.md` to
     `lecture1.md` must work (see `stage.sync`).
-  - On macOS, `java` on `PATH` can be a stub that only says Java is missing,
-    and `python3` can be Apple's. Run PlantUML through the `plantuml` wrapper
-    or `PLANTUML_JAR`; run Python helpers with `sys.executable`, not
-    `python3` from `PATH`.
+  - On macOS, `python3` on `PATH` can be Apple's: run Python helpers with
+    `sys.executable`. Java is jdk4py's (`tools.java()`), never `java` from
+    `PATH` (on macOS that can be a stub that only says Java is missing).
   - Homebrew's Graphviz is newer than Ubuntu's 2.43, so PlantUML layouts can
     differ a little. That is fine.
-  - Typst finds fonts on its own; check with `quarto typst fonts`.
+  - Lato comes with course-tools, so the PDFs look the same everywhere;
+    other fonts Typst finds on its own (check with `quarto typst fonts`).
 
 ## Checking a change
 
-1. Use this checkout: `./install.sh --local` installs it in editable mode (once),
-   or run it without installing:
-   `PYTHONPATH=src python3 scripts/check.py --course "python3 -m course_tools"`.
+1. Use this checkout: `./install.sh --local` installs it in editable mode
+   (once) and runs `course setup`. After a change of the pins in `tools.py`,
+   run `course setup` again.
 2. Run `python3 scripts/check.py`. It builds the test course with PDFs (one to
    three minutes) and must end with `0 failed`. `--html-only` is faster;
    `--keep` keeps the build so you can look at it. For widget changes,
@@ -120,23 +125,25 @@ what changed recently.
    `src/course_tools/__init__.py` (for example `1.12.0`).
 2. Finish the `CHANGELOG.md` entry for that version, with platform notes.
    `scripts/check.py` fails without it.
-3. After the merge into `main`, tag and move `v1`:
-   `git tag v1.12.0 && git tag -f v1 && git push origin v1.12.0 && git push -f origin v1`.
+3. After the merge into `main`, tag and move `v2`:
+   `git tag v2.1.0 && git tag -f v2 && git push origin v2.1.0 && git push -f origin v2`.
+   `v1` (1.18.0) is frozen: don't move it.
 
 Compatible fixes raise the last number, compatible features the middle one.
-An incompatible change needs `v2` (see README).
+An incompatible change needs `v3` (see README).
 
 ## Syncing macOS
 
 When asked to bring course-tools up to date on a Mac (for example "sync
-course-tools to v1.12.0 on this Mac"):
+course-tools to v2.1.0 on this Mac"):
 
 1. `git fetch --tags` and check out `main`.
 2. Note the installed version (`course --version`) and read the platform notes
    of every `CHANGELOG.md` entry after it.
-3. Run `./install.sh --local` (installs new dependencies, editable install).
+3. Run `./install.sh --local` (installs new dependencies, editable install,
+   `course setup`).
 4. Run `python3 scripts/check.py`. For the PDF text checks, install
-   `pdftotext` with `brew install poppler`.
+   `pdftotext` and `pdffonts` with `brew install poppler`.
 5. If something fails because of macOS, fix it on a branch
    `macos/v<version>`. Don't change how things work on Ubuntu. Update the
    macOS line of the platform notes: `verified on macOS <version> (<chip>),

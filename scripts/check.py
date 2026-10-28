@@ -16,8 +16,9 @@ installing it:
 
     PYTHONPATH=src python3 scripts/check.py --course "python3 -m course_tools"
 
-Only the Python standard library is used. If `pdftotext` (poppler) is
-installed, the text of the PDFs is checked too.
+The tools must be set up (`course setup`). Only the Python standard library
+is used. If `pdftotext` and `pdffonts` (poppler) are installed, the text and
+the fonts of the PDFs are checked too.
 
 When you add a feature to course-tools, use it in tests/course and check it
 here.
@@ -40,6 +41,9 @@ import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "src"))
+from course_tools import tools  # noqa: E402  (standard library only, like this script)
+
 COURSE = REPO / "tests" / "course"
 SITE_URL = "https://example.org/check/"
 SECRET = "SECRET-PRIVATE-TOKEN"     # in every private file of the test course
@@ -156,6 +160,12 @@ def check_tools(c: Checks, course_cmd: list[str]) -> bool:
     changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8") if (REPO / "CHANGELOG.md").is_file() else ""
     c.ok(re.search(rf"^## {re.escape(expected or '?')}\b", changelog, re.M),
          f"CHANGELOG.md has an entry for {expected}")
+    missing = [name for t in tools.TOOLS for plat in tools.PLATFORMS
+               if (name := t.download(t.pinned, plat)[1]) not in tools.SHA256]
+    c.ok(not missing, "every pinned download has a SHA-256, for every platform", f"missing: {missing}")
+    setup = run(course_cmd + ["setup"])
+    c.ok(setup.returncode == 0 and "Downloading" not in setup.stdout,
+         "`course setup` keeps the tools that are already set up", setup.stdout.strip())
     doctor = run(course_cmd + ["doctor"])
     return c.ok(doctor.returncode == 0, "`course doctor` finds all tools", doctor.stdout.strip())
 
@@ -337,9 +347,11 @@ def check_outcomes(c: Checks, read) -> None:
 
 def check_widget_logic(c: Checks) -> None:
     c.section("Widget logic (quarto run tests/widgets.js)")
-    quarto = os.environ.get("QUARTO_PATH") or shutil.which("quarto")
-    out = run([quarto, "run", str(REPO / "tests" / "widgets.js")]) if quarto else None
-    lines = ANSI.sub("", out.stdout).strip().splitlines() if out else ["quarto not found"]
+    try:
+        out, lines = run([tools.quarto(), "run", str(REPO / "tests" / "widgets.js")]), []
+        lines = ANSI.sub("", out.stdout).strip().splitlines()
+    except tools.ToolError as e:
+        out, lines = None, [str(e)]
     c.ok(out is not None and out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
          "PDF answers checked like a student's answer, for every kind of challenge; encoders and shifts"
          + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
@@ -495,6 +507,12 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     practice_pdf = dist / "lessons/week_02/lesson1.pdf"
     c.ok(practice_pdf.is_file() and b"https://godbolt.org/clientstate/" in practice_pdf.read_bytes(),
          "Compiler Explorer links in PDFs")
+    if shutil.which("pdffonts"):
+        fonts = run(["pdffonts", str(dist / "lessons/week_01/lesson1.pdf")]).stdout
+        c.ok("Lato-Regular" in fonts and "Lato-Bold" in fonts,
+             "PDFs use Lato, which comes with course-tools (CI does not install it)", fonts)
+    else:
+        c.skip("fonts of the PDFs", "pdffonts not installed")
     if not shutil.which("pdftotext"):
         c.skip("text of the PDFs", "pdftotext not installed")
         return

@@ -1,4 +1,4 @@
-"""Command-line interface: ``course build``, ``course preview``, ``course doctor``, ``course clean``."""
+"""Command-line interface: ``course build``, ``course preview``, ``course setup``, ``course doctor``, ``course clean``."""
 
 from __future__ import annotations
 
@@ -11,9 +11,10 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import __version__
+from . import __version__, tools
 from .course import CourseError, is_ignored, scan
 from .stage import Options, desired_files, sync
+from .tools import ToolError
 from .widgets import CACHE as WIDGET_CACHE
 
 STAGE_DIR = ".build"
@@ -24,20 +25,12 @@ OUTPUT_DIR = "dist"
 # External tools
 # --------------------------------------------------------------------------
 
-def find_quarto() -> str:
-    quarto = os.environ.get("QUARTO_PATH") or shutil.which("quarto")
-    if not quarto:
-        sys.exit("error: Quarto not found. Install it (see requirements.md) or set QUARTO_PATH.")
-    return quarto
-
-
-def find_plantuml() -> list[str] | None:
-    """Command for PlantUML: $PLANTUML_JAR (run with java), else `plantuml` on PATH."""
-    jar = os.environ.get("PLANTUML_JAR")
-    if jar:
-        return ["java", "-jar", jar]
-    exe = shutil.which("plantuml")
-    return [exe] if exe else None
+def _tool(find):
+    """Run a lookup from tools.py; exit with its hint (`run course setup`) if the tool is missing."""
+    try:
+        return find()
+    except ToolError as e:
+        sys.exit(f"error: {e}")
 
 
 def _version(cmd: list[str], require_success: bool = True) -> str | None:
@@ -52,28 +45,8 @@ def _version(cmd: list[str], require_success: bool = True) -> str | None:
     return text[0]
 
 
-def _has_font(quarto: str | None, family: str) -> bool:
-    """Whether Typst (which renders the PDFs) finds the font; else ask fontconfig."""
-    if quarto:
-        try:
-            out = subprocess.run([quarto, "typst", "fonts"], capture_output=True, text=True, timeout=60)
-            if out.returncode == 0:
-                # Quarto passes the list on stderr.
-                return family in (out.stdout + out.stderr).splitlines()
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    if shutil.which("fc-list"):
-        return bool(subprocess.run(["fc-list", family], capture_output=True, text=True).stdout.strip())
-    return False
-
-
-# How to install what `course doctor` finds missing (see install.sh).
-HINTS = {
-    "graphviz": "brew install graphviz" if sys.platform == "darwin" else "sudo apt install graphviz",
-    "java": "brew install openjdk, then run install.sh" if sys.platform == "darwin"
-            else "sudo apt install default-jre-headless",
-    "lato": "brew install --cask font-lato" if sys.platform == "darwin" else "sudo apt install fonts-lato",
-}
+# How to install Graphviz, which `course doctor` reports when it is missing (see install.sh).
+GRAPHVIZ_HINT = "brew install graphviz" if sys.platform == "darwin" else "sudo apt install graphviz"
 
 
 # --------------------------------------------------------------------------
@@ -92,14 +65,14 @@ def _stage(source: Path, opts: Options, verbose: bool = True, settle=None) -> Pa
 
 def cmd_build(args) -> int:
     source = Path(args.source).resolve()
-    opts = Options(site_url=args.site_url, pdf=not args.html_only, plantuml=find_plantuml())
+    quarto, env = _tool(tools.quarto), _tool(lambda: tools.environment(pdf=not args.html_only))
+    opts = Options(site_url=args.site_url, pdf=not args.html_only, plantuml=_tool(tools.plantuml))
     stage = _stage(source, opts)
-    quarto = find_quarto()
     cmd = [quarto, "render", str(stage)]
     if args.html_only:
         cmd += ["--to", "html"]
     print("Running:", " ".join(cmd))
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, env=env)
     if result.returncode != 0:
         print("error: Quarto failed", file=sys.stderr)
         return result.returncode
@@ -157,15 +130,15 @@ def _rendered(stage: Path, pdf: bool):
 
 def cmd_preview(args) -> int:
     source = Path(args.source).resolve()
-    opts = Options(site_url=None, pdf=args.pdf, plantuml=find_plantuml(), preview=True)
+    quarto, env = _tool(tools.quarto), _tool(lambda: tools.environment(pdf=args.pdf))
+    opts = Options(site_url=None, pdf=args.pdf, plantuml=_tool(tools.plantuml), preview=True)
     stage = _stage(source, opts)
-    quarto = find_quarto()
     # --pdf: Quarto renders the PDFs too, at the start and for every page that changes
     cmd = [quarto, "preview", str(stage), "--render", "all" if args.pdf else "html", "--port", str(args.port)]
     if args.no_browser:
         cmd.append("--no-browser")
     print("Running:", " ".join(cmd))
-    proc = subprocess.Popen(cmd)
+    proc = subprocess.Popen(cmd, env=env)
     snap = _snapshot(source)
     try:
         while proc.poll() is None:
@@ -188,7 +161,11 @@ def cmd_preview(args) -> int:
 
 def cmd_stage(args) -> int:
     source = Path(args.source).resolve()
-    opts = Options(site_url=args.site_url, pdf=not (args.html_only or args.preview), plantuml=find_plantuml(),
+    try:
+        plantuml = tools.plantuml()
+    except ToolError:     # staging works without the tools; Quarto then has no PlantUML command
+        plantuml = None
+    opts = Options(site_url=args.site_url, pdf=not (args.html_only or args.preview), plantuml=plantuml,
                    preview=args.preview)
     print(_stage(source, opts))
     return 0
@@ -204,6 +181,18 @@ def cmd_clean(args) -> int:
     return 0
 
 
+def cmd_setup(args) -> int:
+    try:
+        tools.setup({"quarto": args.quarto, "plantuml": args.plantuml}, force=args.force)
+    except (ToolError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if not shutil.which("dot"):
+        print(f"warning: Graphviz is not installed; most PlantUML diagrams need it ({GRAPHVIZ_HINT})",
+              file=sys.stderr)
+    return 0
+
+
 def cmd_doctor(args) -> int:
     ok = True
 
@@ -214,27 +203,30 @@ def cmd_doctor(args) -> int:
             ok = False
         print(f"[{mark}] {name}: {value or 'not found'}" + (f"  ({hint})" if not value and hint else ""))
 
+    def tool(find):
+        try:
+            return find(), None
+        except ToolError as e:
+            return None, str(e)
+
     print(f"course-tools {__version__}, Python {sys.version.split()[0]}")
-    quarto = os.environ.get("QUARTO_PATH") or shutil.which("quarto")
-    report("Quarto", quarto and _version([quarto, "--version"]), hint="see requirements.md")
+    print(f"Tools folder: {tools.home()}")
+    quarto, problem = tool(tools.quarto)
+    report("Quarto", quarto and _version([quarto, "--version"]), hint=problem or "")
     report("Typst (bundled with Quarto)", quarto and _version([quarto, "typst", "--version"]))
-    plantuml = find_plantuml()
-    # `plantuml -version` also checks Graphviz and fails without it, although
-    # PlantUML itself works; Graphviz is checked separately below.
+    plantuml, problem = tool(tools.plantuml)
+    # `-version` also checks Graphviz and fails without it, although PlantUML
+    # itself works; Graphviz is checked separately below.
     version = plantuml and _version(plantuml + ["-version"], require_success=False)
-    plantuml_ok = bool(version and "PlantUML" in version)
-    report("PlantUML", version if plantuml_ok else None,
-           hint="needs Java; set PLANTUML_JAR or put plantuml on PATH")
-    report("Graphviz (PlantUML diagrams other than sequence diagrams)", _version(["dot", "-V"]),
-           hint=HINTS["graphviz"])
-    # On macOS, `java` on PATH may be a stub that only says Java is missing;
-    # install.sh then lets the plantuml wrapper run Homebrew's Java directly.
-    java = _version(["java", "-version"]) or (plantuml_ok and "used by plantuml (not on PATH)")
-    report("Java", java, hint=HINTS["java"])
-    chrome = os.environ.get("QUARTO_CHROMIUM")
-    report("Chrome for Mermaid in PDFs", chrome or "managed by Quarto (run: quarto install chrome-headless-shell)",
-           required=False)
-    report("Lato font (PDF)", "installed" if _has_font(quarto, "Lato") else None, hint=HINTS["lato"])
+    report("PlantUML", version if version and "PlantUML" in version else None, hint=problem or "")
+    report("Java (jdk4py, runs PlantUML)", _version([tools.java(), "-version"]))
+    report("Graphviz (PlantUML diagrams other than sequence and activity diagrams)", _version(["dot", "-V"]),
+           hint=GRAPHVIZ_HINT)
+    chrome, problem = tool(lambda: tools.environment(pdf=True)["QUARTO_CHROMIUM"])
+    if chrome and not os.environ.get("QUARTO_CHROMIUM"):
+        chrome = Path(chrome).parent.name    # the version folder
+    report("Chrome Headless Shell (Mermaid diagrams in PDFs)", chrome, hint=problem or "")
+    report("Lato font (PDF)", "bundled with course-tools")
     return 0 if ok else 1
 
 
@@ -267,6 +259,15 @@ def main(argv=None) -> int:
 
     add("clean", cmd_clean, "Remove .build/ and dist/.")
     add("doctor", cmd_doctor, "Check that the required tools are installed.")
+
+    p = sub.add_parser("setup", help="Download Quarto, PlantUML and Chrome Headless Shell (pinned versions).",
+                       description=f"Download the pinned Quarto ({tools.QUARTO}), PlantUML ({tools.PLANTUML}) and "
+                                   f"Chrome Headless Shell ({tools.CHROME}) into {tools.home()}, and remove "
+                                   "other versions. Already present tools are kept.")
+    p.add_argument("--quarto", metavar="VERSION", help="another Quarto version (not checked against a SHA-256)")
+    p.add_argument("--plantuml", metavar="VERSION", help="another PlantUML version (not checked against a SHA-256)")
+    p.add_argument("--force", action="store_true", help="download again, also tools that are present")
+    p.set_defaults(func=cmd_setup)
 
     args = parser.parse_args(argv)
     try:

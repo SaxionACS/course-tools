@@ -54,9 +54,13 @@ Install the tools once, on Ubuntu 24.04 (also in WSL) or on macOS with
 [Homebrew](https://brew.sh) (see [requirements](requirements.md)):
 
 ```bash
-git clone https://github.com/SaxionACS/course-tools.git
-course-tools/install.sh
+curl -LsSf https://raw.githubusercontent.com/SaxionACS/course-tools/v2/install.sh | bash
 ```
+
+This installs [uv](https://docs.astral.sh/uv/), which installs Python and the
+`course` command, and `course setup` downloads the pinned Quarto, PlantUML and
+Chrome Headless Shell into a folder of your own (`course doctor` shows it).
+Only Graphviz (and git) come from apt or Homebrew.
 
 Then, in a course repository:
 
@@ -65,6 +69,7 @@ course preview         # live preview on http://localhost:4200 (HTML only)
 course preview --pdf   # the same, with the PDFs (slower)
 course build           # website + PDFs in dist/
 course doctor          # check the installed tools
+course setup           # download the tools again after an update of course-tools
 course clean           # remove .build/ and dist/
 ```
 
@@ -81,17 +86,17 @@ repositories.
      and choose "Accessible from repositories in the SaxionACS
      organization". Authors then install with `./install.sh --local` from a
      clone.
-2. **Tag a release.** Courses refer to the major version tag `v1`:
+2. **Tag a release.** Courses refer to the major version tag, now `v2`:
 
    ```bash
-   git tag v1.0.0 && git tag -f v1 && git push origin v1.0.0 && git push -f origin v1
+   git tag v2.0.0 && git tag -f v2 && git push origin v2.0.0 && git push -f origin v2
    ```
 
-   For a compatible fix, tag `v1.0.1` and move `v1` to it; for a compatible
-   new feature, `v1.1.0`. Add the release to [CHANGELOG.md](CHANGELOG.md)
+   For a compatible fix, tag `v2.0.1` and move `v2` to it; for a compatible
+   new feature, `v2.1.0`. Add the release to [CHANGELOG.md](CHANGELOG.md)
    first. All courses pick up the change on their next build.
-   For an incompatible change, release `v2`; courses switch by changing `@v1`
-   (and `tools-ref`) in their workflow. Keep `version` in `pyproject.toml` and
+   For an incompatible change, release `v3`; courses switch by changing `@v2`
+   (and `tools-ref`) in their workflow. `v1` (1.18.0) is frozen. Keep `version` in `pyproject.toml` and
    `__version__` in `src/course_tools/__init__.py` equal to the tag (without
    the `v`), so that `course --version` shows which release a build used.
 3. **Create the template repository** from `course_template` and mark it as a
@@ -123,10 +128,13 @@ To check how a page looks when embedded, add `?embed=1` to its URL.
 
 ## Versions
 
-The Quarto and PlantUML versions are pinned in
-[`install.sh`](install.sh), in the inputs of the publish workflow and in the
-check workflow, so local builds and CI builds are the same. To upgrade, change
-all three, run the check, and release a new tag.
+The Quarto, PlantUML and Chrome Headless Shell versions are pinned in one
+place, [`src/course_tools/tools.py`](src/course_tools/tools.py), with the
+SHA-256 of every download. `course setup` installs them, locally and in CI, so
+local builds and CI builds are the same. To upgrade, change the version and
+its hashes, run the check, and release a new tag. Java comes from the
+[jdk4py](https://pypi.org/project/jdk4py/) package, the Lato font of the PDFs
+from `src/course_tools/assets/fonts`.
 
 ## Developing course-tools
 

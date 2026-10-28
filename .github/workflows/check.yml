@@ -3,7 +3,7 @@
 # on Ubuntu only. Nothing is published.
 #
 # Merge a branch into main only when this check has passed on its last commit.
-# The tools are installed as in publish-course.yml; keep the versions equal.
+# The tools are installed as in publish-course.yml.
 
 name: Check
 
@@ -19,10 +19,6 @@ concurrency:
   group: check-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  QUARTO_VERSION: "1.10.18"
-  PLANTUML_VERSION: "1.2026.8"
-
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -31,37 +27,28 @@ jobs:
       - name: Check out course-tools
         uses: actions/checkout@v7
 
-      - name: Install Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
-        with:
-          version: ${{ env.QUARTO_VERSION }}
-
-      - name: Install Chrome Headless Shell (Mermaid diagrams in PDFs)
-        run: quarto install chrome-headless-shell --no-prompt
-
-      - name: Install Lato, Graphviz and pdftotext
+      - name: Install Graphviz and poppler (pdftotext, pdffonts)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fonts-lato graphviz poppler-utils
+          sudo apt-get install -y --no-install-recommends graphviz poppler-utils
 
-      - name: Cache PlantUML
-        id: plantuml-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/plantuml
-          key: plantuml-${{ env.PLANTUML_VERSION }}
-
-      - name: Download PlantUML
-        if: steps.plantuml-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ~/plantuml
-          curl -fsSL -o ~/plantuml/plantuml.jar \
-            "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
 
       - name: Install course-tools from this commit
         run: |
-          pipx install .
-          echo "PLANTUML_JAR=$HOME/plantuml/plantuml.jar" >> "$GITHUB_ENV"
+          uv tool install --python 3.12 .
+          uv tool dir --bin >> "$GITHUB_PATH"
+
+      # The pins are in src/course_tools/tools.py: a new pin gets a new cache.
+      - name: Cache the tools
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/share/course-tools
+          key: course-tools-${{ runner.os }}-${{ hashFiles('src/course_tools/tools.py') }}
+
+      - name: Set up the tools
+        run: course setup
 
       - name: Check
         run: python3 scripts/check.py

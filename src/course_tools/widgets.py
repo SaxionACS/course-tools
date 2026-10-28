@@ -24,9 +24,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
-import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,6 +33,8 @@ from importlib import resources
 from pathlib import Path
 
 import yaml
+
+from . import tools
 
 DATA = "_course/widgets.json"           # in the stage, read by filters/widgets.lua
 CACHE = ".course-widgets-cache.json"    # in the stage, not published
@@ -142,9 +142,10 @@ def runtime_version() -> str:
 
 def _print(items: list[dict]) -> dict | None:
     """Run print.js on the widgets (one Deno process for all); None if that fails."""
-    quarto = os.environ.get("QUARTO_PATH") or shutil.which("quarto")
-    if not quarto:
-        _warn("Quarto not found: widgets are not checked and have no PDF form")
+    try:
+        quarto = tools.quarto()
+    except tools.ToolError as e:
+        _warn(f"widgets are not checked and have no PDF form: {e}")
         return None
     with tempfile.TemporaryDirectory(prefix="course-widgets-") as tmp:
         inp, out = Path(tmp) / "in.json", Path(tmp) / "out.json"

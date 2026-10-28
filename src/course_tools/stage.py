@@ -228,6 +228,8 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
     for rel, data in _walk_resources(assets):
         if rel.startswith("texts/"):   # used by the stager itself
             continue
+        if rel.startswith("fonts/") and not opts.pdf:   # Lato, for the PDFs only
+            continue
         target = rel if rel.startswith("_extensions/") else f"{ASSETS_DIR}/{rel}"
         files[target] = data
 
@@ -358,6 +360,8 @@ def quarto_config(course: Course, opts: Options) -> dict:
             "from": MARKDOWN_READER,
             "papersize": "a4",
             "mainfont": "Lato",
+            # Lato comes with course-tools (assets/fonts): it need not be installed.
+            "font-paths": [f"{ASSETS_DIR}/fonts"],
             "fontsize": "10.5pt",
             "margin": {"x": "2.2cm", "y": "2.5cm"},
             "include-in-header": [f"{ASSETS_DIR}/typst/header.typ"],

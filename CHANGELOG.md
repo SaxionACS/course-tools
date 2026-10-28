@@ -1,8 +1,8 @@
 # Changelog
 
 What changed in each release of course-tools. A release is a git tag such as
-`v1.11.1`; the tag `v1` points to the newest 1.x release, which the course
-repositories use.
+`v2.0.0`; the tag `v2` points to the newest 2.x release, which the course
+repositories use. `v1` stays at 1.18.0.
 
 Every release from 1.11.1 on has **platform notes**:
 
@@ -12,6 +12,64 @@ Every release from 1.11.1 on has **platform notes**:
 - **macOS:** `verified` (with macOS version, chip and date), `untested`, or
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
+
+## 2.0.0 (unreleased)
+
+A contained installation: course-tools brings its own tools.
+
+- `course setup` downloads the pinned Quarto (1.10.18), PlantUML (1.2026.8)
+  and Chrome Headless Shell (156.0.8078.73) into a per-user folder
+  (`~/.local/share/course-tools`, `~/Library/Application Support/course-tools`),
+  checks each download against its SHA-256 and removes versions that are no
+  longer pinned. `course build` and `course preview` use only these copies;
+  a missing or outdated tool stops them with "run `course setup`".
+  `QUARTO_PATH` and `PLANTUML_JAR` still override them.
+- The versions are pinned in one place, `src/course_tools/tools.py`, instead
+  of three. `course setup --quarto VERSION` (or `--plantuml`) sets up another
+  version, without a SHA-256 check and with a warning on every build.
+- Java comes from the jdk4py package (Java 21), a dependency of course-tools.
+- The Lato font comes with course-tools (Typst `font-paths`); it no longer
+  has to be installed.
+- `install.sh` installs [uv](https://docs.astral.sh/uv/) (unless present),
+  which installs Python 3.12 and course-tools (`uv tool install`), then runs
+  `course setup`. It works as a one-liner,
+  `curl -LsSf https://raw.githubusercontent.com/SaxionACS/course-tools/v2/install.sh | bash`;
+  `--local` still installs a clone, editable. From apt and Homebrew it only
+  installs Graphviz, git and git-lfs. It replaces course-tools 1.x (pipx)
+  and offers to remove what the 1.x installer put in `/usr/local` and
+  `/Applications`, Quarto's package and Quarto's Chrome Headless Shell.
+- `course doctor` shows the tools folder and the versions.
+- The publish workflow and the check workflow install course-tools with uv
+  and run `course setup`, with the tools folder cached per course-tools
+  version. The `quarto-version` and `plantuml-version` inputs are empty by
+  default (the pinned versions); a value sets up that version instead.
+
+Why a new major version: course repositories have to change `@v1` to `@v2`,
+and local installations have to be redone.
+
+Upgrading a course: in `.github/workflows/publish.yml`, change
+`publish-course.yml@v1` to `@v2` (and `tools-ref`, if the workflow sets it).
+Upgrading a local installation: run the one-liner above (or `./install.sh`
+from a clone).
+
+Platform notes:
+
+- **Dependencies:** new: uv (replaces pipx), jdk4py (replaces the system
+  Java), truststore. Gone: system Quarto, PlantUML wrapper, Java, fonts-lato /
+  font-lato, Chrome Headless Shell installed by Quarto. Graphviz stays
+  (apt, Homebrew).
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 126
+  checks, with new ones for the SHA-256 of every pinned download on every
+  platform, `course setup` keeping tools that are present, and Lato in the
+  PDFs; run with Typst ignoring the system fonts and without Quarto's own
+  Chrome Headless Shell. Tested by hand: `course setup` when a tool is
+  missing, outdated or another version, a download with a wrong SHA-256,
+  `course preview --pdf` with an edit, and `install.sh --local` in a scratch
+  home with apt, sudo and pipx stubbed (not on a clean machine). The new
+  Check workflow runs on the push of this branch.
+- **macOS:** untested. To do on a Mac: `./install.sh --local` (Homebrew
+  packages, uv, the removal of the 1.x tools, `course setup` with the
+  `macos.tar.gz` Quarto and the `mac-arm64` Chrome), then `scripts/check.py`.
 
 ## 1.18.0 (2026-10-26)
 
