@@ -86,6 +86,7 @@ Settings of the block:
 | `speed` | the speed the machine starts at: `1` (real time, the default), slower (`1/4`, `1/10`, `1/100`, down to `1/1000`) or faster (`2`, `10`, up to `100`) |
 | `speeds` | the speed buttons, for example `[1, 2, 10]` or `[1/100, 1/10, 1]`. By default they are chosen from the machine's times ([On the website](#on-the-website)) |
 | `clock` | `true` or `false`: show the time and its controls (*Pause*, *Speed*, *Skip ahead*). By default only for machines that use time ([On the website](#on-the-website)) |
+| `transition` | how long the dot takes along an arrow: `420 ms` (the default), `1 s`, up to `5 s`, or `0` for no dot. Only the picture waits for it ([On the website](#on-the-website)) |
 | `log` | `open` (the default), `folded` (closed until the student opens it) or `hidden` (no log) |
 | `editable` | `true`: in `course preview`, the YAML under the machine, to change and apply ([Trying things out](#trying-things-out-editable-true)) |
 
@@ -356,11 +357,25 @@ full speed.
 From top to bottom:
 
 - **The diagram**, centred, with the current state in green. A transition
-  flashes its arrow orange and sends a dot along it; when the dot arrives,
-  the entry actions of the new state light up for a moment. That shows the
-  order: first the arrow's actions, then the entry actions. An internal
-  action lights up when it runs. A state with a running `after` or held
-  condition shows a bar at its bottom that fills up.
+  flashes its arrow orange and sends a dot along it. The state stays green
+  until the dot arrives; then the new state turns green and its entry actions
+  light up for a moment. That shows the order: first the arrow's actions,
+  then the entry actions. An internal action lights up when it runs. A state
+  with a running `after` or held condition shows a bar at its bottom that
+  fills up.
+
+  The outputs and the text follow the dot: what the arrow's actions change
+  shows when the dot leaves, what the entry actions change (and blinking)
+  when it arrives. Only the picture waits: the machine has moved at once, so
+  a timer that the new state starts counts from the event, and the log
+  shows the event's time.
+
+  The dot takes 420 ms, or the `transition:` of the YAML (`transition: 1 s`
+  to follow it more easily, `transition: 0` for no dot). It is shorter when
+  the new state would move on before it arrives (a fast blinker, or a high
+  speed): the dot always arrives before the next timeout. A click before it
+  arrives finishes it at once. A folded machine, and a browser set to reduce
+  motion, show no dot.
 - **Inputs**: a button per input, in the order of `inputs:`. Buttons always
   work, also when the current state ignores them: that is something to see.
 - **Outputs**: the LEDs and buzzers.

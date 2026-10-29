@@ -14,6 +14,27 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.4.0 (2026-10-29)
+
+State machines:
+
+- The new state turns green when the dot along the arrow arrives, not when
+  it leaves; the old state stays green until then. What the entry actions
+  change (outputs, text, blinking) also shows when the dot arrives; the
+  arrow's actions when it leaves. The machine itself still moves at once:
+  timers and the log keep the true time.
+- `transition: 1 s` sets the time of the dot (420 ms by default, up to 5 s);
+  `transition: 0` leaves it out. The dot is shorter when the new state would
+  move on before it arrives, so fast blinkers and high speeds keep up.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 141 checks
+  (`tests/statemachine.js`: 132, in the browser: 27).
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
+
 ## 2.3.0 (2026-10-29)
 
 State machines, after their first use in a lesson:

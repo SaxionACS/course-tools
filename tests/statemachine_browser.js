@@ -100,8 +100,11 @@ try {
   // the switch: states ON and OFF, a click button
   ok(await js(`T.state(0)`) === 'OFF' && await js(`T.led(0, 'LED')`) === false, 'switch: starts in OFF, LED off');
   await js(`T.click(0, 'pressed')`);
-  ok(await js(`T.state(0)`) === 'ON' && await js(`T.led(0, 'LED')`) === true && (await js(`T.log(0)`)).includes('pressed: OFF -> ON'),
-    'switch: a click moves it to ON, the LED goes on, the log says so', await js(`T.log(0)`));
+  ok(await js(`T.state(0)`) === 'OFF' && await js(`!!T.block(0).querySelector('.sm-token')`) && await js(`T.led(0, 'LED')`) === true,
+    'switch: while the dot travels, OFF stays lit; the arrow\'s LED on is done at once', `${await js(`T.state(0)`)}, LED ${await js(`T.led(0, 'LED')`)}`);
+  await sleep(600);
+  ok(await js(`T.state(0)`) === 'ON' && !await js(`!!T.block(0).querySelector('.sm-token')`) && (await js(`T.log(0)`)).includes('pressed: OFF -> ON'),
+    'switch: ON lights up when the dot arrives; the log says so', await js(`T.log(0)`));
   ok(await js(`!!T.block(0).querySelector('.sm-source textarea')`) === false, 'switch: no YAML editor on the published site');
   ok(await js(`T.block(0).querySelector('.sm-ctl').textContent`) === 'Reset' && await js(`!!T.block(4).querySelector('.sm-ctl .sm-clock')`),
     'switch: no clock, pause or speed without time (only Reset); clock: true shows them', await js(`T.block(0).querySelector('.sm-ctl').textContent`));
@@ -126,6 +129,8 @@ try {
   }
   ok(await js(`T.pill(1, 0)`) === 'PRESSED' && await js(`T.pill(1, 1)`) === 'LIGHT_ON' && await js(`T.led(1, 'LED')`) === true,
     'side by side: skip ahead through the bounces to the press; the light switch gets pressed', `${kinds.length} skips`);
+  ok(await js(`T.state(1)`) === 'PRESSED' && !await js(`!!T.block(1).querySelector('.sm-token')`),
+    'side by side: transition: 0 has no dot; states change at once');
   ok(kinds.filter(s => /^A bounce: pin (low|high)\.$/.test(s)).length >= 4 && kinds.at(-1) === 'Skipped to [pin high for 50 ms].',
     'side by side: skip ahead stops at every bounce, then at the press', kinds.join(' | '));
 
@@ -135,7 +140,11 @@ try {
   ok(await js(`T.status(2)`) === 'LAP is ignored: RESET has no arrow for it.' && (await js(`T.log(2)`)).includes('LAP ignored in RESET'),
     'stopwatch: an ignored event is shown and logged', await js(`T.status(2)`));
   await js(`T.click(2, 'START')`);
+  ok(await js(`T.state(2)`) === 'RESET' && await js(`T.text(2)`) === 'reset',
+    'stopwatch: before the dot arrives, RESET stays lit and the entry print of RUNNING waits', `${await js(`T.state(2)`)}: ${await js(`T.text(2)`)}`);
   await sleep(600);
+  ok(await js(`T.state(2)`) === 'RUNNING' && await js(`T.text(2)`) === 'reset\nrunning',
+    'stopwatch: when the dot arrives, RUNNING lights up and prints', `${await js(`T.state(2)`)}: ${await js(`T.text(2)`)}`);
   ok(await js(`[...T.block(2).querySelectorAll('.act.glow')].map(t => t.textContent).join(' | ')`) === 'entry: print "running", | start limit 50..60 s',
     'stopwatch: the entry actions light up when RUNNING is entered', await js(`[...T.block(2).querySelectorAll('.act.glow')].map(t => t.textContent).join(' | ')`));
   await js(`T.click(2, 'LAP')`);
@@ -144,6 +153,7 @@ try {
   ok(await js(`T.text(2)`) === 'reset\nrunning\nlap' && await js(`T.state(2)`) === 'RUNNING', 'stopwatch: an internal action prints and stays', await js(`T.text(2)`));
   ok((await js(`T.block(2).querySelector('.sm-timers').textContent`)).includes('limit'), 'stopwatch: the timer limit is shown');
   await js(`T.click(2, 'START')`);
+  await sleep(600);
   ok(await js(`T.state(2)`) === 'STOPPED' && await js(`T.text(2)`) === 'reset\nrunning\nlap\nstopped' && await js(`T.led(2, 'LED')`) === true,
     'stopwatch: entry actions on lines without dashes all run', await js(`T.text(2)`));
   await sleep(300);

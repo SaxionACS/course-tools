@@ -107,7 +107,7 @@
   // Reading the YAML: read(config) -> model, or an Error with a message for the author
   // ========================================================================
   const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-  const TOP_KEYS = ['title', 'task', 'direction', 'text', 'log', 'speed', 'speeds', 'clock', 'inputs', 'outputs', 'initial', 'states', 'machines', 'editable'];
+  const TOP_KEYS = ['title', 'task', 'direction', 'text', 'log', 'speed', 'speeds', 'clock', 'transition', 'inputs', 'outputs', 'initial', 'states', 'machines', 'editable'];
   const MACHINE_KEYS = ['title', 'direction', 'initial', 'states', 'folded'];
   const STATE_KEYS = ['entry', 'do', 'on'];
   const LEDS = ['red', 'green', 'amber', 'yellow', 'blue', 'white'];
@@ -137,6 +137,17 @@
     const min = Number(m[1]) * f, max = m[2] != null ? Number(m[2]) * f : min;
     if (!(min > 0) || max < min) fail(`${where}: "${t}" must be longer than 0, with the shorter time first`);
     return {min, max, text: `${m[1]}${m[2] != null ? `..${m[2]}` : ''} ${m[3]}`};
+  }
+
+  // the time of the dot along an arrow: 600 ms, 1 s, or 0 for no dot -> ms, up to 5 s
+  const TRANSITION = 420;
+  function transitionOf(v) {
+    const s = clean(v);
+    if (/^0(?:\.0*)?(?: ?m?s)?$/.test(s)) return 0;
+    const m = /^(\d+(?:\.\d+)?) ?(ms|s)$/.exec(s);
+    const ms = m ? Number(m[1]) * (m[2] === 's' ? 1000 : 1) : NaN;
+    if (!(ms <= 5000)) fail(`transition: "${s}" is not a time for the dot along an arrow. Write 600 ms or 1 s (up to 5 s), or 0 for no dot`);
+    return ms;
   }
 
   // a speed: 1 (real time), slower 1/4, 1/100, 0.5, faster 2, 10 -> the factor, 1/1000 to 100
@@ -445,8 +456,9 @@
     // the clock and its controls (pause, speed, skip ahead): for machines that use time, unless clock: says otherwise
     const timed = ctx.timers.size > 0 || Object.values(ctx.inputs).some(i => i.bouncy) || machines.some(m => Object.values(m.states).some(st =>
       st.do.length || st.on.some(tr => tr.trigger.kind === 'after' || tr.trigger.kind === 'held')));
+    const transition = config.transition != null ? transitionOf(config.transition) : TRANSITION;
     return {title: config.title != null ? String(config.title) : '', task: config.task != null ? String(config.task) : '',
-      text, log, speed, speeds, clock: config.clock ?? timed, direction, inputs: ctx.inputs, outputs: ctx.outputs, timers: [...ctx.timers],
+      text, log, speed, speeds, clock: config.clock ?? timed, transition, direction, inputs: ctx.inputs, outputs: ctx.outputs, timers: [...ctx.timers],
       prints: ctx.prints, machines, warnings};
   }
 
@@ -454,6 +466,12 @@
   // Running the machines
   // ========================================================================
   const fmt = ms => (ms < 1000 ? `${Math.max(0, Math.round(ms))} ms` : `${(ms / 1000).toFixed(1)} s`);
+  // print or clear on t: a display (one text) or a terminal (lines, the last 200)
+  function write(t, a, terminal) {
+    if (a.kind === 'clear') { t.display = ''; t.lines = []; }
+    else if (terminal) { t.lines.push(a.text); if (t.lines.length > 200) t.lines.shift(); }
+    else t.display = a.text;
+  }
 
   // Simulated time in ms. advance(to) runs everything that is due, in order, so
   // the speed changes nothing but the pace. random() is Math.random unless a test
@@ -482,29 +500,33 @@
       s.state = name; s.since = this.t;
       s.afters = st.on.filter(tr => tr.trigger.kind === 'after').map(tr => { const total = this.pick(tr.trigger.time); return {tr, due: this.t + total, total}; });
       s.blinks = st.do.map(a => ({a, next: this.t + a.period}));
-      this.run(s, st.entry);
+      this.run(s, st.entry, 'entry');
     }
-    run(s, actions) {
+    // The page hears of every change to an output or the text (hooks.effect) and
+    // where it comes from: 'arrow', 'entry' or 'do' (blinking).
+    run(s, actions, phase) {
       for (const a of actions) {
-        if (a.kind === 'set') this.out[a.out] = a.value === 'toggle' ? !this.out[a.out] : a.value === 'on';
-        else if (a.kind === 'print') {
-          if (this.model.text === 'terminal') { this.lines.push(a.text); if (this.lines.length > 200) this.lines.shift(); }
-          else this.display = a.text;
+        if (a.kind === 'set') {
+          this.out[a.out] = a.value === 'toggle' ? !this.out[a.out] : a.value === 'on';
+          this.hooks.effect?.(s, {out: a.out, value: this.out[a.out]}, phase);
+        } else if (a.kind === 'print' || a.kind === 'clear') {
+          write(this, a, this.model.text === 'terminal');
           this.textVersion++;
-        } else if (a.kind === 'clear') { this.display = ''; this.lines = []; this.textVersion++; }
-        else if (a.kind === 'start') { const total = this.pick(a.time); this.timers[a.timer] = {due: this.t + total, total}; }
+          this.hooks.effect?.(s, {text: a}, phase);
+        } else if (a.kind === 'start') { const total = this.pick(a.time); this.timers[a.timer] = {due: this.t + total, total}; }
         else if (a.kind === 'stop') this.timers[a.timer] = null;
         else if (a.kind === 'send') this.queue.push({name: a.event, source: 'sent'});
       }
     }
     fire(s, tr, cause) {
       const from = s.state;
+      this.hooks.leave?.(s, tr);
       if (tr.internal) {
-        this.run(s, tr.actions);
+        this.run(s, tr.actions, 'arrow');
         this.say({machine: s.m.name, cause, from, internal: true, text: tr.actions.map(a => a.src).join(', ')});
       } else {
         s.afters = []; s.blinks = [];          // exit
-        this.run(s, tr.actions);
+        this.run(s, tr.actions, 'arrow');
         this.enter(s, tr.target);
         this.say({machine: s.m.name, cause, from, to: tr.target});
       }
@@ -568,7 +590,11 @@
           if (h.level === tr.trigger.level) consider(Math.max(h.since, s.since) + tr.trigger.time.min, 1, 'held', tr.trigger.label, () => { this.fire(s, tr, tr.trigger.label); this.drain(); });
         }
         for (const a of s.afters) consider(a.due, 2, 'after', a.tr.trigger.label, () => { s.afters = s.afters.filter(x => x !== a); this.fire(s, a.tr, a.tr.trigger.label); this.drain(); });
-        if (blinks) for (const b of s.blinks) consider(b.next, 4, 'blink', b.a.src, () => { this.out[b.a.out] = !this.out[b.a.out]; b.next += b.a.period; });
+        if (blinks) for (const b of s.blinks) consider(b.next, 4, 'blink', b.a.src, () => {
+          this.out[b.a.out] = !this.out[b.a.out];
+          b.next += b.a.period;
+          this.hooks.effect?.(s, {out: b.a.out, value: this.out[b.a.out]}, 'do');
+        });
       }
       for (const [name, tm] of Object.entries(this.timers)) if (tm) consider(tm.due, 3, 'timer', name, () => { this.timers[name] = null; this.queue.push({name, source: 'timer'}); this.drain(); });
       return best;
@@ -594,6 +620,16 @@
         list.push({label: tr.trigger.label, total, waiting: !counting, left: counting ? Math.max(h.since, s.since) + total - this.t : total});
       }
       return list;
+    }
+    // how long until a machine moves by itself (after, held, a timer it has an arrow for); Infinity if nothing is due
+    soonest(s) {
+      let left = Infinity;
+      for (const p of this.pending(s)) if (!p.waiting) left = Math.min(left, p.left);
+      for (const tr of s.m.states[s.state].on) {
+        const tm = tr.trigger.kind === 'event' && this.timers[tr.trigger.event];
+        if (tm) left = Math.min(left, tm.due - this.t);
+      }
+      return left;
     }
   }
 
@@ -828,7 +864,8 @@
 
   function machineView(m, multi) {
     const pic = drawMachine(layoutMachine(m), m, sv, false);
-    const v = {m, pic, shown: null, pill: null, el: null, folded: false};
+    // at: the state the page shows (the source, while the dot is on its way); shown: the one drawn lit
+    const v = {m, pic, at: null, shown: null, flight: null, buf: [], pill: null, el: null, folded: false};
     const wrap = h('div', {class: 'sm-pic'}, pic.svg);
     if (!multi) { v.el = h('div', {class: 'sm-panel'}, wrap); return v; }
     const reacts = [], sends = [];
@@ -862,12 +899,14 @@
     return h('div', {class: 'sm-buzz', title: 'buzzer (no sound)'}, icon, h('span', {text: o.name}));
   }
 
-  const TOKEN_MS = 420;   // the dot along an arrow
-
   function mount(host, model) {
     const n = ++uid;
     const multi = model.machines.length > 1;
     let sim = null, paused = false, speed = model.speed, alive = true, visible = true;
+    // The outputs and the text as the page shows them. The machines move at once,
+    // but while a dot travels along an arrow, the source stays lit and what the
+    // target's entry actions (and blinking) change waits for the dot.
+    let shown = null;
     const bouncy = {};
     const views = model.machines.map(m => machineView(m, multi));
     const top = h('div', {class: 'sm'});
@@ -979,42 +1018,76 @@
       el._smTimer = setTimeout(() => el.classList.remove(cls), ms);
     }
     // lines in a box (entry actions, an internal action) light up for a moment
-    function glow(v, key, delay) {
+    function glow(v, key) {
       const lines = v.pic.lines[key];
       if (!lines || v.folded || reduceMotion()) return;
-      const go = () => lines.forEach(t => pulse(t, 'glow', 1300));
-      if (delay) setTimeout(go, delay); else go();
+      lines.forEach(t => pulse(t, 'glow', 1300));
     }
-    // a dot along the arrow; false if there is none (reduced motion)
-    function token(edge) {
+    // the dot along the arrow of a move, `ms` long; false if there is none (reduced motion)
+    function token(v, f, ms) {
+      const edge = f.edge;
       if (reduceMotion()) return false;
       let len = 0;
       try { len = edge.path.getTotalLength(); } catch (e) { return false; }
       if (!len) return false;
       const t0 = performance.now();
       edge.anim = t0;
-      if (!edge.dot) { edge.dot = sv('circle', {class: 'sm-token', r: 4.5}); edge.g.append(edge.dot); }
+      // on top of everything: half-way, an arrow runs under its label
+      if (!edge.dot) { edge.dot = sv('circle', {class: 'sm-token', r: 4.5}); v.pic.svg.append(edge.dot); }
       const step = now => {
         if (edge.anim !== t0) return;
-        const k = Math.min(1, (now - t0) / TOKEN_MS);
+        const k = Math.min(1, (now - t0) / ms);
         const p = edge.path.getPointAtLength(len * k);
         edge.dot.setAttribute('cx', r1(p.x)); edge.dot.setAttribute('cy', r1(p.y));
-        if (k < 1) requestAnimationFrame(step); else { edge.dot.remove(); edge.dot = null; }
+        if (k < 1) requestAnimationFrame(step);
+        else { edge.dot.remove(); edge.dot = null; if (v.flight === f) land(v); }
       };
       requestAnimationFrame(step);
       return true;
     }
+    // the dot arrives, or the machine moves on before it does: the target lights
+    // up and what its entry actions change shows
+    function land(v) {
+      const f = v.flight;
+      if (!f) return;
+      v.flight = null;
+      stopDot(f);
+      f.fx.forEach(show);
+      v.at = f.target;
+      glow(v, `${f.target}|entry`);
+      if (!views.some(x => x.flight)) resync();
+    }
+    function stopDot(f) {
+      if (f?.edge?.dot) { f.edge.anim = null; f.edge.dot.remove(); f.edge.dot = null; }
+    }
+    function show(fx) {
+      if (fx.text) { write(shown, fx.text, model.text === 'terminal'); shown.version++; }
+      else shown.out[fx.out] = fx.value;
+    }
+    // with no dot on its way, the page shows the machines as they are
+    function resync() {
+      shown = {out: {...sim.out}, display: sim.display, lines: sim.lines.slice(), version: (shown?.version ?? 0) + 1};
+    }
+    const viewOf = s => views.find(x => x.m === s.m);
     const hooks = {
       log: addLog,
+      leave: s => land(viewOf(s)),
+      effect: (s, fx, phase) => {
+        const v = viewOf(s);
+        if (phase === 'entry') v.buf.push(fx);              // for the move that follows (fired)
+        else if (phase === 'do' && v.flight) v.flight.fx.push(fx);
+        else if (shown) show(fx);
+      },
       fired: (s, tr) => {
-        const v = views.find(x => x.m === s.m);
-        if (tr.internal) { glow(v, tr.id, 0); return; }
-        const e = v.pic.edges[tr.id];
-        if (!e) return;
-        pulse(e.g, 'fired', 1000);
-        pulse(e.label, 'fired', 1000);
-        // the entry actions light up when the dot arrives: after the arrow's actions
-        glow(v, `${tr.target}|entry`, !v.folded && token(e) ? TOKEN_MS : 0);
+        const v = viewOf(s);
+        if (!sim) return;                                    // starting (reset)
+        if (tr.internal) { glow(v, tr.id); return; }
+        // the dot arrives before the machine moves on by itself, at this speed
+        const ms = Math.min(model.transition, 0.8 * sim.soonest(s) / speed);
+        const f = v.flight = {target: tr.target, fx: v.buf, edge: v.pic.edges[tr.id]};
+        v.buf = [];
+        if (f.edge) { pulse(f.edge.g, 'fired', Math.max(1000, ms + 600)); pulse(f.edge.label, 'fired', Math.max(1000, ms + 600)); }
+        if (!(f.edge && !v.folded && ms >= 40 && token(v, f, ms))) land(v);
       },
       ignored: (e, ms) => {
         if (e.source !== 'input' && e.source !== 'edge') return;
@@ -1081,22 +1154,22 @@
     function paint() {
       views.forEach((v, k) => {
         const s = sim.ms[k];
-        if (v.shown !== s.state) {
+        if (v.shown !== v.at) {
           if (v.shown) v.pic.states[v.shown].g.classList.remove('on', 'timed');
-          v.pic.states[s.state].g.classList.add('on');
-          v.shown = s.state;
-          if (v.pill) v.pill.textContent = s.state;
+          v.pic.states[v.at].g.classList.add('on');
+          v.shown = v.at;
+          if (v.pill) v.pill.textContent = v.at;
         }
-        const node = v.pic.states[s.state];
-        const p = sim.pending(s).filter(x => !x.waiting).sort((a, b) => a.left - b.left)[0];
+        const node = v.pic.states[v.at];
+        const p = !v.flight && v.at === s.state ? sim.pending(s).filter(x => !x.waiting).sort((a, b) => a.left - b.left)[0] : null;
         node.g.classList.toggle('timed', !!p);
         if (p) node.bar.setAttribute('width', r1(node.w * Math.min(1, Math.max(0, 1 - p.left / p.total))));
       });
-      for (const o of outs) outEls[o.name].classList.toggle('on', !!sim.out[o.name]);
-      if (textEl && shownText !== sim.textVersion) {
-        shownText = sim.textVersion;
-        if (model.text === 'terminal') { textEl.textContent = sim.lines.join('\n'); textEl.scrollTop = textEl.scrollHeight; }
-        else textEl.textContent = sim.display;
+      for (const o of outs) outEls[o.name].classList.toggle('on', !!shown.out[o.name]);
+      if (textEl && shownText !== shown.version) {
+        shownText = shown.version;
+        if (model.text === 'terminal') { textEl.textContent = shown.lines.join('\n'); textEl.scrollTop = textEl.scrollHeight; }
+        else textEl.textContent = shown.display;
       }
       if (timersEl) paintTimers();
       holdViews.forEach(paintTrace);
@@ -1107,11 +1180,15 @@
       logEl.replaceChildren();
       statusEl.textContent = '';
       holdViews.forEach(hv => hv.release());
+      views.forEach(v => { stopDot(v.flight); v.flight = null; });
+      sim = shown = null;                                    // the hooks keep still while the machines start
       sim = new Sim(model, hooks);
       for (const name of Object.keys(bouncy)) sim.holds[name].bouncy = bouncy[name];
+      views.forEach((v, k) => { v.buf = []; v.at = sim.ms[k].state; });
+      resync();
       shownText = -1;
       paint();
-      if (clicked) views.forEach((v, k) => glow(v, `${sim.ms[k].state}|entry`, 0));
+      if (clicked) views.forEach(v => glow(v, `${v.at}|entry`));
     }
     reset();
 

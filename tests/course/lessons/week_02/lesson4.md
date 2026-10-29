@@ -33,6 +33,7 @@ states:
 title: The button and the light switch
 speed: 1/100
 log: hidden
+transition: 0
 inputs:
   pin: bouncy pin
 outputs:

@@ -937,7 +937,7 @@ svg.cw-wv { display: block; max-width: none; }
 .sm-edge.fired .head { fill: var(--sm-warm); }
 .sm-svg .sm-edge.fired .lbl { fill: var(--sm-warm); }
 .sm-svg .init { fill: var(--sm-fg); }
-.sm-token { fill: var(--sm-warm); }
+.sm-token { fill: var(--sm-warm); stroke: var(--sm-surface); stroke-width: 1.5px; }
 
 // inputs, outputs, text, timers
 .sm-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr)); gap: .9rem 1.4rem; align-items: start; border-top: 1px solid var(--sm-grid); padding-top: .8rem; }

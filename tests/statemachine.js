@@ -114,6 +114,9 @@ for (const [id, config] of Object.entries(EX)) {
     '| separates the state from the actions, as / does', JSON.stringify(bar.A.on[0]));
   const slash = read({inputs: {b: 'button'}, outputs: {L: 'led'}, states: {A: {on: {b: 'A / print "a/b|c"'}}}}).machines[0].states.A.on[0];
   ok(slash.target === 'A' && slash.actions[0].text === 'a/b|c', '/ and | inside a print are text', JSON.stringify(slash.actions));
+  const tr = v => read(Object.assign(copy(EX.switch), v == null ? {} : {transition: v})).transition;
+  ok([tr(), tr('600 ms'), tr('1.5 s'), tr(0), tr('0 ms'), tr('5 s')].join() === '420,600,1500,0,0,5000',
+    'transition: the time of the dot, 420 ms unless set; 0 for none', [tr(), tr('600 ms'), tr('1.5 s'), tr(0), tr('0 ms'), tr('5 s')].join());
 }
 
 // ---- mistakes are reported, with what to write instead -------------------
@@ -142,6 +145,8 @@ c = copy(EX.switch); c.inputs = {start: 'button'}; bad(c, /"start" is a word of 
 c = copy(EX.switch); c.speed = '200'; bad(c, /speed: "200" is not a speed/, 'speed above 100');
 c = copy(EX.switch); c.speeds = []; bad(c, /speeds: is a list of 1 to 8 speeds/, 'speeds: empty');
 c = copy(EX.switch); c.speeds = [1, 'fast']; bad(c, /speeds: "fast" is not a speed/, 'speeds: a word');
+c = copy(EX.switch); c.transition = 600; bad(c, /transition: "600" is not a time for the dot along an arrow. Write 600 ms/, 'transition: a time without a unit');
+c = copy(EX.switch); c.transition = '10 s'; bad(c, /transition: "10 s" is not a time .*up to 5 s/, 'transition: over 5 s');
 c = copy(EX.switch); c.log = 'closed'; bad(c, /log: is open, folded or hidden/, 'log: closed');
 c = copy(EX.switch); c.colour = 'red'; bad(c, /unknown key "colour"/, 'an unknown key');
 c = copy(EX.staircase); c.states.LIGHT_ON.on = {'after 10': 'LIGHT_OFF'}; bad(c, /"10" is not a time/, 'a time without a unit');
@@ -214,6 +219,30 @@ for (const id of ['staircase', 'staircase2']) {
   ok(st() === 'IDLE' && sim.timers.egg === null, 'kitchen: cancel stops the timer');
   sim.dispatch('START'); sim.advance(sim.t + 6001); ok(st() === 'RINGING' && sim.display === 'Done!' && sim.out.BUZZER, 'kitchen: rings');
   sim.advance(sim.t + 5001); ok(st() === 'IDLE' && !sim.out.BUZZER, 'kitchen: back to IDLE after 5 s'); }
+// what the page hears: changes to outputs and text, where they come from, and a move before its actions
+{ const heard = [];
+  const say = (s, what) => heard.push(`${s.m.name}:${what}`);
+  const sim = new Sim(read(EX.stopwatch), {
+    leave: (s, tr) => say(s, `leave ${tr.id}`),
+    effect: (s, fx, phase) => say(s, `${phase} ${fx.text ? fx.text.text : `${fx.out}=${fx.value}`}`),
+  }, rnd);
+  ok(heard.join('|') === 'machine:entry LED=false|machine:entry reset', 'the page hears the entry actions of the first state', heard.join('|'));
+  heard.length = 0;
+  sim.dispatch('START'); sim.advance(260); sim.dispatch('LAP'); sim.dispatch('START');
+  const want = ['leave', 'entry running', 'do LED=true', 'leave', 'arrow lap', 'leave', 'entry LED=true', 'entry stopped'];
+  ok(heard.map(x => x.replace(/^machine:/, '').replace(/^leave .*/, 'leave')).join('|') === want.join('|'),
+    'effects in order: entry, blinking (do), an internal action (arrow); leave comes first', heard.join('|')); }
+{ const {sim, st} = run('staircase');
+  ok(sim.soonest(sim.ms[0]) === Infinity, 'soonest: nothing is due in LIGHT_OFF');
+  sim.dispatch('pressed'); sim.advance(4000);
+  ok(st() === 'LIGHT_ON' && sim.soonest(sim.ms[0]) === 6000, 'soonest: the after 10 s of LIGHT_ON, 4 s in', sim.soonest(sim.ms[0])); }
+{ const {sim} = run('staircase2');
+  sim.dispatch('pressed'); sim.advance(2500);
+  ok(sim.soonest(sim.ms[0]) === 7500, 'soonest: a named timer that LIGHT_ON has an arrow for', sim.soonest(sim.ms[0])); }
+{ const {sim} = run('button');
+  ok(sim.soonest(sim.ms[0]) === Infinity, 'soonest: a held time does not count while the pin is low');
+  sim.press('pin', true); sim.advance(sim.t + 20);
+  ok(sim.soonest(sim.ms[0]) <= 50 && sim.soonest(sim.ms[0]) > 0, 'soonest: the held time counts while the pin is high', sim.soonest(sim.ms[0])); }
 { const {sim, log} = run('loop', {inputs: {go: 'button'}, machines: {a: {states: {A: {on: {go: 'A / send x', x: 'A / send y'}}}},
   b: {states: {B: {on: {y: 'B / send x'}}}}}});
   sim.dispatch('go'); ok(log.some(e => e.error && /Over 500 events/.test(e.error)), 'machines that send each other events forever are stopped'); }
