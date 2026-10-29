@@ -12,8 +12,54 @@ Every release from 1.11.1 on has **platform notes**:
 - **macOS:** `verified` (with macOS version, chip and date), `untested`, or
   what still has to be done on a Mac. macOS is supported on a best-effort
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
+- **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.0.0 (unreleased)
+## 2.1.0 (unreleased)
+
+Windows: course-tools runs natively on Windows 10/11 (x64).
+
+- `install.ps1` installs it from PowerShell:
+  `irm https://raw.githubusercontent.com/SaxionACS/course-tools/v2/install.ps1 | iex`,
+  or `-File install.ps1 [-Local]` from a clone. Like `install.sh`, it installs
+  uv, course-tools (Python 3.12) and runs `course setup`; Git for Windows
+  comes from winget if git is missing. No administrator rights needed.
+- On Windows, `course setup` also downloads Graphviz (16.1.0, the official
+  zip, SHA-256 checked) and PlantUML uses it (`GRAPHVIZ_DOT`).
+- `course doctor` reports the Graphviz that PlantUML itself finds.
+- Fixes, found on Windows but not only for it:
+  - The PlantUML command in `_quarto.yml` is escaped: Quarto reads it as
+    Markdown, which took the backslashes out of a Windows path and would
+    also change a path with `_name_` or `$x$` in it.
+  - Warnings name course files with `/`, also on Windows.
+  - Stopping `course preview` on Windows stops Quarto's server too
+    (`quarto.exe` starts `deno.exe`); the port is free again.
+  - `course setup` waits for a virus scanner that still holds a new file.
+- The installers leave `PATH` alone when `UV_NO_MODIFY_PATH` is set, and
+  `.gitattributes` keeps `install.sh` in LF, so that a clone made with Git
+  for Windows still runs in WSL.
+- The test course has a PlantUML class diagram, which needs Graphviz.
+- The docs recommend WSL on Windows (2-4 times faster), with native Windows
+  as the simpler option.
+
+Platform notes:
+
+- **Dependencies:** on Windows, Graphviz 16.1.0 from `course setup`. Else none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 127
+  checks (new: the class diagram), with Typst ignoring the system fonts. A
+  PlantUML jar under a path with `_x_`, `b~1` and `$y$` in it works.
+  `install.sh --local` tested again in a scratch home (stubs for apt, sudo,
+  pipx), also with `UV_NO_MODIFY_PATH`.
+- **macOS:** untested; nothing in this release is meant to change macOS
+  (the escaped PlantUML command and the class diagram are the parts to watch).
+- **Windows:** verified on Windows 11 Enterprise (x64), 2026-10-28, natively
+  (not WSL), in a sandbox folder: `install.ps1 -Local` and the `irm | iex`
+  form, `scripts/check.py` (127 checks), and `course preview` of the
+  template, checked out with CRLF line endings, with and without `--pdf`
+  (one- and two-page edits, twice; stopping it frees the port). A changed
+  page shows up after about 12 s (50 s with `--pdf`), against 5 s (13 s) in
+  WSL on the same laptop.
+
+## 2.0.0 (2026-10-28)
 
 A contained installation: course-tools brings its own tools.
 

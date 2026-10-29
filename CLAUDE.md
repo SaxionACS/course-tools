@@ -39,7 +39,7 @@ what changed recently.
 | `scripts/check.py` | builds the test course and checks the output |
 | `tests/widgets.js` | tests of the widgets' logic and PDF answers (`quarto run tests/widgets.js`, also run by `check.py`) |
 | `docs/authoring.md`, `docs/course-info.md` | documentation for course authors |
-| `install.sh`, `requirements.md` | local installation (Ubuntu and macOS): system packages, uv, `uv tool install`, `course setup` |
+| `install.sh`, `install.ps1`, `requirements.md` | local installation: Ubuntu and macOS (`install.sh`: system packages, uv, `uv tool install`, `course setup`), Windows (`install.ps1`: the same without system packages) |
 
 ## Rules
 
@@ -72,8 +72,8 @@ what changed recently.
   place, `tools.py`, with the SHA-256 of the download for every platform
   (`check.py` checks that none is missing). The build uses only the copies
   from `course setup` (or `QUARTO_PATH`, `PLANTUML_JAR`), never a Quarto on
-  `PATH`. Don't add system-wide tools; Graphviz (apt, Homebrew) is the only
-  one.
+  `PATH`. Don't add system-wide tools; Graphviz (apt, Homebrew; on Windows
+  from `course setup`) is the only one.
 
 ## Platforms
 
@@ -82,7 +82,13 @@ what changed recently.
 - **macOS** with Homebrew is best effort: there is no macOS CI, and an
   occasional broken local build on macOS is acceptable. A Claude agent on the
   maintainer's Mac brings macOS up to date when asked (see "Syncing macOS").
-- Keep things working on both:
+- **Windows 10/11** (x64), natively, is best effort too, with no CI. WSL
+  (Ubuntu) is the recommended way on Windows: it is 2-4 times faster. The
+  maintainer's Windows laptop runs WSL; from WSL, a Claude agent can test
+  native Windows with `powershell.exe`, in a folder in `%TEMP%` with uv's
+  folders, `COURSE_TOOLS_HOME`, `DENO_DIR` and `TEMP` pointed into it and
+  `UV_NO_MODIFY_PATH=1` (else `uv tool update-shell` changes the user's PATH).
+- Keep things working on all three:
   - `install.sh` and other shell scripts run in macOS's bash 3.2: no
     associative arrays, `mapfile` or `${var,,}`. BSD tools differ from GNU:
     no `sed -i` without a suffix, no `readlink -f`, different `date` options.
@@ -93,6 +99,13 @@ what changed recently.
     `PATH` (on macOS that can be a stub that only says Java is missing).
   - Homebrew's Graphviz is newer than Ubuntu's 2.43, so PlantUML layouts can
     differ a little. That is fine.
+  - Windows: paths use `\`. Print course paths with `/` (`as_posix()`, and
+    `source_name()` in the filters). A path in `_quarto.yml` is read as
+    Markdown, so the stager escapes it (`stage._literal`). `install.ps1` runs
+    in Windows PowerShell 5.1: ASCII only, no `&&`, and no
+    `$ErrorActionPreference = 'Stop'` (5.1 then stops on stderr output of
+    programs); check `$LASTEXITCODE` instead. Stopping Quarto means stopping
+    its process tree (`quarto.exe` starts `deno.exe`).
   - Lato comes with course-tools, so the PDFs look the same everywhere;
     other fonts Typst finds on its own (check with `quarto typst fonts`).
 

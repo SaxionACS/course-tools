@@ -13,6 +13,7 @@ import io
 import json
 import os
 import posixpath
+import re
 import shutil
 import stat
 import sys
@@ -149,7 +150,7 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
         if page.src is not None:
             files.pop(page.src.relative_to(root).as_posix(), None)
         extra: dict = {}
-        if found := outcomes.of_page(page.meta.get("outcomes"), los, str(page.src.relative_to(root))):
+        if found := outcomes.of_page(page.meta.get("outcomes"), los, page.src.relative_to(root).as_posix()):
             extra["outcomes"] = outcomes.badges(page.rel, found)
             covered.append((page, found))
         if found := page_history(page.src):
@@ -177,11 +178,11 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
                                    "href": _rel_link(page.rel, page.assignment.rel)}
         if ids := terms.page_ids(course.terms, str(page.rel)):
             extra["terms"] = ids
-        ce = compiler_explorer.settings(page.meta.get("compiler_explorer"), str(page.src.relative_to(root)))
+        ce = compiler_explorer.settings(page.meta.get("compiler_explorer"), page.src.relative_to(root).as_posix())
         if ce:
             extra["compiler-explorer"] = compiler_explorer.encode(ce)
         if page.kind == "assignment":
-            rule = genai.assignment_rule(genai_level, page.meta.get("genai"), str(page.src.relative_to(root)))
+            rule = genai.assignment_rule(genai_level, page.meta.get("genai"), page.src.relative_to(root).as_posix())
             if rule is not None:
                 extra["genai"] = {**rule, "policy": _rel_link(page.rel, PurePosixPath("info/genai.qmd"))}
         body = separate_thematic_breaks(rewrite_fences(page.body))
@@ -266,6 +267,12 @@ def _generated(text: str, directory: str, page_history: dict | None = None,
     if html_only:
         meta["format"] = "html"
     return join_front_matter(meta, body).encode("utf-8")
+
+
+def _literal(text: str) -> str:
+    """`text` as a metadata string, which Quarto reads as Markdown: a Windows path
+    (C:\\Users) or a name like _x_ in a path would change. Escape all punctuation."""
+    return re.sub(r"([!-/:-@\[-`{-~])", r"\\\1", text)
 
 
 def _walk_resources(base, prefix=""):
@@ -384,7 +391,7 @@ def quarto_config(course: Course, opts: Options) -> dict:
         course_site["compiler-explorer"] = compiler_explorer.encode(ce)
 
     engines = {name: False for name in ("asymptote", "cetz", "d2", "dot", "mermaid", "tikz")}
-    engines["plantuml"] = {"execpath": opts.plantuml} if opts.plantuml else True
+    engines["plantuml"] = {"execpath": [_literal(a) for a in opts.plantuml]} if opts.plantuml else True
 
     return {
         "project": {

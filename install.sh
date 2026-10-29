@@ -10,7 +10,8 @@
 #                           for working on course-tools itself)
 #
 # Environment: TOOLS_REF (course-tools version from GitHub, default v2),
-# PYTHON_VERSION (default 3.12).
+# PYTHON_VERSION (default 3.12), UV_NO_MODIFY_PATH (set: leave the shell's
+# startup files alone).
 
 set -euo pipefail
 
@@ -84,17 +85,21 @@ main() {
   else
     uv tool install --force --python "${PYTHON_VERSION}" "git+${TOOLS_REPO}@${TOOLS_REF}"
   fi
-  # Puts ~/.local/bin (where `course` is) on PATH in the shell's startup files,
-  # if a new terminal would not have it there.
-  PATH="${login_path}" "$(command -v uv)" tool update-shell || true
+  local course
+  course="$(uv tool dir --bin)/course"
+  if [[ -z ${UV_NO_MODIFY_PATH:-} ]]; then
+    # Puts ~/.local/bin (where `course` is) on PATH in the shell's startup files,
+    # if a new terminal would not have it there.
+    PATH="${login_path}" "$(command -v uv)" tool update-shell || true
+  fi
 
   remove_old_installs "${os}"
 
   step "Quarto, PlantUML and Chrome Headless Shell"
-  course setup
+  "${course}" setup
 
   step "Check"
-  course doctor
+  "${course}" doctor
 
   echo
   echo "Done. Open a new terminal (so PATH is updated), go to a course repository and run:"

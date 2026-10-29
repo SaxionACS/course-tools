@@ -84,6 +84,15 @@ stop
 @enduml
 ```
 
+```plantuml
+@startuml
+class GraphvizUart {
+  +send(byte b)
+}
+GraphvizUart --> GraphvizPin : tx
+@enduml
+```
+
 ![A figure](images/figure.svg){width=40%}
 
 ---

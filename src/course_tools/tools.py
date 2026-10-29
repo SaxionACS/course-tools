@@ -1,11 +1,12 @@
-"""The programs course-tools runs, in a per-user folder: Quarto, PlantUML and Chrome Headless Shell.
+"""The programs course-tools runs, in a per-user folder: Quarto, PlantUML, Chrome Headless Shell
+and, on Windows, Graphviz.
 
 `course setup` downloads the pinned versions below, checks them against their
 SHA-256 and unpacks them into `home()`. `course build` and `course preview` use
 only these copies (not a Quarto or PlantUML on PATH), so that every machine and
 CI build with the same versions; QUARTO_PATH and PLANTUML_JAR override them.
-Java comes from the jdk4py package (a dependency of course-tools) and Graphviz
-from the system (apt, Homebrew).
+Java comes from the jdk4py package (a dependency of course-tools) and, except
+on Windows, Graphviz from the system (apt, Homebrew).
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ import re
 import shutil
 import ssl
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -30,6 +33,7 @@ from pathlib import Path
 QUARTO = "1.10.18"
 PLANTUML = "1.2026.8"
 CHROME = "156.0.8078.73"   # Chrome Headless Shell, from Chrome for Testing
+GRAPHVIZ = "16.1.0"        # Windows only; elsewhere from apt or Homebrew
 
 SHA256 = {
     # https://github.com/quarto-dev/quarto-cli/releases/download/v1.10.18/quarto-1.10.18-checksums.txt
@@ -45,6 +49,8 @@ SHA256 = {
     "chrome-headless-shell-156.0.8078.73-mac-arm64.zip": "512c7d34cd5b65d617a39a48915b490eed4208a63e9d47b0fd7893e83be85765",
     "chrome-headless-shell-156.0.8078.73-mac-x64.zip": "be798095cd693357a7a6a0e7a0c4ebd81563e16f51225eb98aacc906d6326519",
     "chrome-headless-shell-156.0.8078.73-win64.zip": "e6d26810df71efd0a3dfd0f7246d75d279ebdf8a8ec153d1ac44069657298628",
+    # https://gitlab.com/graphviz/graphviz/-/releases (the .sha256 next to the zip)
+    "graphviz-16.1.0-win64.zip": "733e49626c492242eb8dca30ea627b6ead20710e207998c7933b4909d92d6abc",
 }
 
 PLATFORMS = ("linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64")
@@ -87,6 +93,7 @@ class Tool:
     label: str
     pinned: str
     option: str | None = None   # `course setup` option for another version
+    platforms: tuple[str, ...] = PLATFORMS
 
     def download(self, version: str, plat: str) -> tuple[str, str]:
         """(URL, file name) of the download; the file name is the key in SHA256."""
@@ -98,6 +105,9 @@ class Tool:
         if self.key == "plantuml":
             name = f"plantuml-{version}.jar"
             return f"https://github.com/plantuml/plantuml/releases/download/v{version}/{name}", name
+        if self.key == "graphviz":
+            return (f"https://gitlab.com/api/v4/projects/4207231/packages/generic/graphviz-releases/{version}/"
+                    f"windows_10_cmake_Release_Graphviz-{version}-win64.zip", f"graphviz-{version}-win64.zip")
         cft = _chrome_platform(plat)
         return (f"https://storage.googleapis.com/chrome-for-testing-public/{version}/{cft}/"
                 f"chrome-headless-shell-{cft}.zip", f"chrome-headless-shell-{version}-{cft}.zip")
@@ -109,6 +119,8 @@ class Tool:
             return folder / "bin" / ("quarto.exe" if windows else "quarto")
         if self.key == "plantuml":
             return folder / "plantuml.jar"
+        if self.key == "graphviz":
+            return folder / "bin" / "dot.exe"
         return folder / ("chrome-headless-shell.exe" if windows else "chrome-headless-shell")
 
 
@@ -121,6 +133,7 @@ TOOLS = (
     Tool("quarto", "Quarto", QUARTO, "quarto"),
     Tool("plantuml", "PlantUML", PLANTUML, "plantuml"),
     Tool("chrome", "Chrome Headless Shell", CHROME),
+    Tool("graphviz", "Graphviz", GRAPHVIZ, platforms=("windows-x64",)),
 )
 BY_KEY = {t.key: t for t in TOOLS}
 
@@ -165,7 +178,16 @@ def java() -> str:
         import jdk4py
     except ImportError:   # course-tools installed without its dependencies
         return "java"
+    if sys.platform == "win32":
+        return str(jdk4py.JAVA.with_suffix(".exe"))
     return str(jdk4py.JAVA)
+
+
+def dot() -> str | None:
+    """Graphviz's `dot`: from `course setup` on Windows, else from PATH (None if missing)."""
+    if sys.platform == "win32":
+        return str(installed("graphviz"))
+    return shutil.which("dot")
 
 
 def plantuml() -> list[str]:
@@ -175,10 +197,13 @@ def plantuml() -> list[str]:
 
 
 def environment(pdf: bool) -> dict[str, str]:
-    """Environment for Quarto: for PDFs, the Chrome Headless Shell from `course setup` (Mermaid)."""
+    """Environment for Quarto: for PDFs, the Chrome Headless Shell from `course setup` (Mermaid);
+    on Windows, Graphviz from `course setup` for PlantUML."""
     env = dict(os.environ)
     if pdf and not env.get("QUARTO_CHROMIUM"):
         env["QUARTO_CHROMIUM"] = str(installed("chrome"))
+    if sys.platform == "win32" and not env.get("GRAPHVIZ_DOT"):
+        env["GRAPHVIZ_DOT"] = dot()
     return env
 
 
@@ -195,6 +220,8 @@ def setup(versions: dict[str, str | None] | None = None, force: bool = False) ->
     root.mkdir(parents=True, exist_ok=True)
     state = _state()
     for tool in TOOLS:
+        if plat not in tool.platforms:
+            continue
         version = (versions or {}).get(tool.key) or tool.pinned
         if not re.fullmatch(r"[0-9][0-9A-Za-z.+-]*", version):
             raise ToolError(f"{version!r} is not a {tool.label} version")
@@ -219,7 +246,7 @@ def _install(tool: Tool, version: str, plat: str, folder: Path) -> None:
     if version == tool.pinned and not expected:
         raise ToolError(f"no SHA-256 pinned for {name}")
     folder.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".setup-", dir=folder.parent) as tmp:
+    with tempfile.TemporaryDirectory(prefix=".setup-", dir=folder.parent, ignore_cleanup_errors=True) as tmp:
         archive = Path(tmp) / name
         print(f"Downloading {tool.label} {version} from {url}", flush=True)
         digest = _download(url, archive)
@@ -240,8 +267,11 @@ def _install(tool: Tool, version: str, plat: str, folder: Path) -> None:
                 unpacked = entries[0]
         if not tool.program(unpacked).exists():
             raise ToolError(f"{name} does not contain {tool.program(Path()).as_posix()}")
+        if tool.key == "graphviz":
+            # The zip has no plugin list (config6): without it, dot knows no output formats.
+            subprocess.run([str(tool.program(unpacked)), "-c"], check=True, timeout=120)
         _remove(folder)
-        unpacked.rename(folder)
+        _rename(unpacked, folder)
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -304,6 +334,18 @@ def _unzip(archive: Path, target: Path) -> None:
                 shutil.copyfileobj(src, dst)
             if mode & 0o111:
                 path.chmod(path.stat().st_mode | 0o755)
+
+
+def _rename(source: Path, target: Path) -> None:
+    # On Windows, a virus scanner may still have a new file open for a moment.
+    for attempt in range(40):
+        try:
+            source.rename(target)
+            return
+        except PermissionError:
+            if attempt == 39:
+                raise
+            time.sleep(0.5)
 
 
 def _remove(path: Path) -> None:

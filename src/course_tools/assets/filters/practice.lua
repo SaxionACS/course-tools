@@ -29,7 +29,8 @@ local function source_name()
   local file = quarto.doc.input_file
   local dir = quarto.project.directory
   if dir and file:sub(1, #dir) == dir then file = file:sub(#dir + 2) end
-  return (file:gsub('%.qmd$', '.md'))
+  -- With / on Windows too, like the warnings of the stager.
+  return (file:gsub('\\', '/'):gsub('%.qmd$', '.md'))
 end
 
 -- Warnings appear once, in the HTML pass.

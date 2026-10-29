@@ -160,7 +160,7 @@ def check_tools(c: Checks, course_cmd: list[str]) -> bool:
     changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8") if (REPO / "CHANGELOG.md").is_file() else ""
     c.ok(re.search(rf"^## {re.escape(expected or '?')}\b", changelog, re.M),
          f"CHANGELOG.md has an entry for {expected}")
-    missing = [name for t in tools.TOOLS for plat in tools.PLATFORMS
+    missing = [name for t in tools.TOOLS for plat in t.platforms
                if (name := t.download(t.pinned, plat)[1]) not in tools.SHA256]
     c.ok(not missing, "every pinned download has a SHA-256, for every platform", f"missing: {missing}")
     setup = run(course_cmd + ["setup"])
@@ -436,9 +436,13 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
          "C code annotations (// <1>) become annotation numbers")
     c.ok(m.count("SHOWN-NEVER-RUN") == 1, "an executable cell is shown, not run")
     c.ok("mermaid-js" in m and 'data-layout-align="center"' in m, "Mermaid diagram, centred")
-    c.ok(m.count('<img src="data:image/svg+xml') == 2, "PlantUML diagrams are inline SVG")
-    c.ok(m.count('class="course-diagram" style="text-align: center"') == 1,
+    c.ok(m.count('<img src="data:image/svg+xml') == 3, "PlantUML diagrams are inline SVG")
+    c.ok(m.count('class="course-diagram" style="text-align: center"') == 2,
          "PlantUML diagrams are centred unless they set fig-align")
+    svgs = [base64.b64decode(b).decode("utf-8", "replace")
+            for b in re.findall(r'<img src="data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)', m)]
+    c.ok(any('data-diagram-type="CLASS"' in svg and "GraphvizPin" in svg for svg in svgs),
+         "a PlantUML class diagram, laid out by Graphviz")
     c.ok('src="images/figure.svg"' in m, "image")
     c.ok("<hr" in m and "<li>first item</li>" in m, "a rule followed by text, and a list right after text")
     c.ok(all(line in m for line in FOOTER), "footer with the dates and author from git")

@@ -199,7 +199,7 @@ def _attach_logbooks(assignments: list[Page], root: Path, week: int) -> list[Pag
             continue
         for ref in refs if isinstance(refs, list) else [refs]:
             path = (page.src.parent / str(ref)).resolve()
-            where = page.src.relative_to(root)
+            where = _rel(page.src, root)
             if not path.is_file() or path.suffix.lower() != ".md":
                 print(f"warning: {where}: logbook {ref} is not a Markdown file next to the assignment",
                       file=sys.stderr)

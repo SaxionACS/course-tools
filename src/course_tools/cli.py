@@ -46,7 +46,8 @@ def _version(cmd: list[str], require_success: bool = True) -> str | None:
 
 
 # How to install Graphviz, which `course doctor` reports when it is missing (see install.sh).
-GRAPHVIZ_HINT = "brew install graphviz" if sys.platform == "darwin" else "sudo apt install graphviz"
+GRAPHVIZ_HINT = {"darwin": "brew install graphviz", "win32": "run `course setup`"}.get(sys.platform,
+                                                                                     "sudo apt install graphviz")
 
 
 # --------------------------------------------------------------------------
@@ -154,7 +155,11 @@ def cmd_preview(args) -> int:
         pass
     finally:
         if proc.poll() is None:
-            proc.terminate()
+            if sys.platform == "win32":
+                # quarto.exe only starts deno.exe, which runs the server: stop both.
+                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+            else:
+                proc.terminate()
             proc.wait()
     return 0
 
@@ -187,7 +192,7 @@ def cmd_setup(args) -> int:
     except (ToolError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    if not shutil.which("dot"):
+    if sys.platform != "win32" and not shutil.which("dot"):   # on Windows, `course setup` installs it
         print(f"warning: Graphviz is not installed; most PlantUML diagrams need it ({GRAPHVIZ_HINT})",
               file=sys.stderr)
     return 0
@@ -215,13 +220,21 @@ def cmd_doctor(args) -> int:
     report("Quarto", quarto and _version([quarto, "--version"]), hint=problem or "")
     report("Typst (bundled with Quarto)", quarto and _version([quarto, "typst", "--version"]))
     plantuml, problem = tool(tools.plantuml)
-    # `-version` also checks Graphviz and fails without it, although PlantUML
-    # itself works; Graphviz is checked separately below.
-    version = plantuml and _version(plantuml + ["-version"], require_success=False)
-    report("PlantUML", version if version and "PlantUML" in version else None, hint=problem or "")
+    # `-version` also reports the Graphviz that PlantUML finds (with the build's
+    # environment: on Windows, GRAPHVIZ_DOT), and fails without it.
+    out = ""
+    if plantuml:
+        env, _ = tool(lambda: tools.environment(pdf=False))
+        try:
+            out = subprocess.run(plantuml + ["-version"], capture_output=True, text=True, timeout=60, env=env).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    lines = out.strip().splitlines()
+    report("PlantUML", lines[0] if lines and "PlantUML" in lines[0] else None, hint=problem or "")
     report("Java (jdk4py, runs PlantUML)", _version([tools.java(), "-version"]))
-    report("Graphviz (PlantUML diagrams other than sequence and activity diagrams)", _version(["dot", "-V"]),
-           hint=GRAPHVIZ_HINT)
+    graphviz = next((line.split(":", 1)[1].strip() for line in lines if line.startswith("GraphViz:")), None)
+    report("Graphviz (PlantUML diagrams other than sequence and activity diagrams)",
+           graphviz if "Installation seems OK" in out else None, hint=GRAPHVIZ_HINT)
     chrome, problem = tool(lambda: tools.environment(pdf=True)["QUARTO_CHROMIUM"])
     if chrome and not os.environ.get("QUARTO_CHROMIUM"):
         chrome = Path(chrome).parent.name    # the version folder

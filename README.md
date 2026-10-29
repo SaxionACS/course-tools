@@ -57,10 +57,17 @@ Install the tools once, on Ubuntu 24.04 (also in WSL) or on macOS with
 curl -LsSf https://raw.githubusercontent.com/SaxionACS/course-tools/v2/install.sh | bash
 ```
 
+On Windows, use WSL (faster), or PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/SaxionACS/course-tools/v2/install.ps1 | iex
+```
+
 This installs [uv](https://docs.astral.sh/uv/), which installs Python and the
 `course` command, and `course setup` downloads the pinned Quarto, PlantUML and
 Chrome Headless Shell into a folder of your own (`course doctor` shows it).
-Only Graphviz (and git) come from apt or Homebrew.
+Only Graphviz (and git) come from apt or Homebrew; on Windows, `course setup`
+downloads Graphviz too.
 
 Then, in a course repository:
 
@@ -145,6 +152,6 @@ from `src/course_tools/assets/fonts`.
   to every branch, without publishing anything. Merge into `main` only when
   it has passed.
 - **Record changes** in [CHANGELOG.md](CHANGELOG.md), with platform notes for
-  Ubuntu and macOS.
+  Ubuntu, macOS and Windows.
 - [CLAUDE.md](CLAUDE.md) has the rules for AI agents working on this
   repository, including how macOS is kept up to date.
