@@ -27,6 +27,11 @@ what changed recently.
 | `src/course_tools/assets/filters/compiler-explorer.lua` | Lua filter: Compiler Explorer links on code blocks with `ce` |
 | `src/course_tools/assets/filters/terms.lua` | Lua filter: the key-terms box, with the ids the glossary links to |
 | `src/course_tools/assets/filters/widgets.lua` | Lua filter: widgets as `<div class="course-widget" data-config>` (HTML) or pictures and exercises (PDF) |
+| `src/course_tools/statemachine.py` | state machines: finds ```` ```statemachine ```` blocks, reads their YAML (only `true`/`false` are booleans, as in the browser), runs their `print.js` with the widgets' helpers and writes `_course/statemachines.json` |
+| `src/course_tools/assets/statemachine/statemachine.js` | the state machines: reading the YAML, running them, layout and drawing; in the browser and at build time (`print`) |
+| `src/course_tools/assets/statemachine/print.js` | build-time entry point, run with `quarto run` |
+| `src/course_tools/assets/statemachine/dagre.min.js` | dagre 3.1.1 (MIT, vendored from npm unchanged, licence next to it): the layout of the diagrams |
+| `src/course_tools/assets/filters/statemachine.lua` | Lua filter: state machines as `<div class="course-statemachine" data-config>` (HTML) or pictures and transition tables (PDF) |
 | `src/course_tools/assets/filters/course.lua` | Lua filter: PDF button, learning outcomes and reading time, slides/GenAI/logbook/starter boxes, links, code annotations, diagram alignment, footer, PDF header |
 | `src/course_tools/assets/theme/` | `head.html` (browser script), `practice.html` (self-checks, predictions, comparisons), `terms.html` (definitions on first use, review deck; reads the glossary page) and `saxion.scss` (theme) |
 | `src/course_tools/assets/typst/header.typ` | PDF styling |
@@ -38,7 +43,9 @@ what changed recently.
 | `tests/course/` | test course that uses every feature |
 | `scripts/check.py` | builds the test course and checks the output |
 | `tests/widgets.js` | tests of the widgets' logic and PDF answers (`quarto run tests/widgets.js`, also run by `check.py`) |
-| `docs/authoring.md`, `docs/course-info.md` | documentation for course authors |
+| `tests/statemachine.js` | tests of the state machines: running, mistakes, layouts that must not overlap, the PDF form (`quarto run tests/statemachine.js`, also run by `check.py`) |
+| `tests/statemachine_browser.js` | the test course's state machines in Chrome Headless Shell, driven over the DevTools protocol (run by `check.py` after the build) |
+| `docs/authoring.md`, `docs/course-info.md` | documentation for course authors (state machines: `docs/statemachines.md`) |
 | `install.sh`, `install.ps1`, `requirements.md` | local installation: Ubuntu and macOS (`install.sh`: system packages, uv, `uv tool install`, `course setup`), Windows (`install.ps1`: the same without system packages) |
 
 ## Rules
@@ -64,6 +71,15 @@ what changed recently.
   goals and answers are plain functions that both use, so that a printed
   answer is checked like a student's answer. PDF pictures are SVG text
   (`svgText`, `drawRows`, `picture`); Typst draws them.
+- State machines are not widgets (the maintainer wants them apart): their
+  own block, script, filter, data file and styles (`sm-`). They share only
+  plumbing in `widgets.py` (finding blocks, keys, the cache, running a
+  `print.js`). As with widgets, `statemachine.js` is one script for the
+  browser and the build; only `mount` and its helpers touch the DOM. Text is
+  measured with a table of Lato's widths (not the browser's fonts), so the
+  layout is the same in the browser, the PDF and the tests; `tests/statemachine.js`
+  checks that nothing overlaps. Change the semantics only together with
+  `docs/statemachines.md` ("How the machines behave").
 - `course preview` writes changed pages one at a time (`stage.sync(settle=...)`,
   `cli._rendered`): Quarto's preview fails silently when it re-renders several
   pages at once, from the second time on. Keep it that way unless a Quarto
@@ -117,7 +133,8 @@ what changed recently.
 2. Run `python3 scripts/check.py`. It builds the test course with PDFs (one to
    three minutes) and must end with `0 failed`. `--html-only` is faster;
    `--keep` keeps the build so you can look at it. For widget changes,
-   `quarto run tests/widgets.js` checks the logic in seconds.
+   `quarto run tests/widgets.js` checks the logic in seconds, and
+   `quarto run tests/statemachine.js` the state machines.
 3. For changes that affect how pages look, also look at the pages: run
    `course preview` in a copy of `tests/course`, or build a real course.
 

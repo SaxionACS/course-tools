@@ -24,7 +24,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from . import compiler_explorer, genai, history, info, outcomes, terms, widgets
+from . import compiler_explorer, genai, history, info, outcomes, statemachine, terms, widgets
 from .course import Course, Page, Week, is_ignored
 from .markdown import join_front_matter, natural_key, rewrite_fences, separate_thematic_breaks, split_front_matter
 
@@ -46,7 +46,8 @@ class Options:
     pdf: bool = True                  # also render a PDF of every page
     plantuml: list[str] | None = None  # command used to run PlantUML
     widget_cache: Path | None = None   # results of the widget checks, kept between builds
-    preview: bool = False              # course preview: draft pages, and editable widgets
+    statemachine_cache: Path | None = None   # the same for state machines
+    preview: bool = False              # course preview: draft pages, and editable widgets and state machines
 
 
 # --------------------------------------------------------------------------
@@ -146,6 +147,7 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
     los = info.learning_outcomes(course.general)
     covered = []   # (page, its learning outcomes), for the outcome map
     found_widgets = []
+    found_machines = []
     for page in course.pages():
         if page.src is not None:
             files.pop(page.src.relative_to(root).as_posix(), None)
@@ -186,7 +188,9 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
             if rule is not None:
                 extra["genai"] = {**rule, "policy": _rel_link(page.rel, PurePosixPath("info/genai.qmd"))}
         body = separate_thematic_breaks(rewrite_fences(page.body))
-        found_widgets += widgets.find(body, page.src.relative_to(root).as_posix() if page.src else str(page.rel))
+        source = page.src.relative_to(root).as_posix() if page.src else str(page.rel)
+        found_widgets += widgets.find(body, source)
+        found_machines += statemachine.find(body, source)
         if page.meta.get("draft") is True:
             body = DRAFT_NOTE + body
         if page.kind == "week" and page.meta.get("materials", True) is not False:
@@ -200,6 +204,8 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
 
     if found_widgets:
         files[widgets.DATA] = widgets.data(found_widgets, opts.widget_cache, editable=opts.preview)
+    if found_machines:
+        files[statemachine.DATA] = statemachine.data(found_machines, opts.statemachine_cache, editable=opts.preview)
 
     # 3. Generated pages.
     generated = generated_pages(course)
@@ -406,6 +412,7 @@ def quarto_config(course: Course, opts: Options) -> dict:
         "filters": [
             # widgets.lua before practice.lua: a challenge widget becomes an exercise in the PDF.
             f"{ASSETS_DIR}/filters/widgets.lua",
+            f"{ASSETS_DIR}/filters/statemachine.lua",
             f"{ASSETS_DIR}/filters/practice.lua",
             f"{ASSETS_DIR}/filters/compiler-explorer.lua",
             f"{ASSETS_DIR}/filters/terms.lua",

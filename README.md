@@ -37,13 +37,15 @@ course repository ──► course stage ──► .build/ (Quarto project) ─�
      key terms of all pages; the outcome map from the learning outcomes that
      pages name in their front matter.
    - Starter files are zipped.
-   - Widgets (```` ```widget ```` blocks) are checked, and their PDF form is
-     drawn, by the widget script itself, run in Quarto's Deno.
+   - Widgets (```` ```widget ```` blocks) and state machines
+     (```` ```statemachine ```` blocks) are checked, and their PDF form is
+     drawn, by their own scripts, run in Quarto's Deno.
    - The sidebar is generated, organised by week.
 3. Quarto renders every page to HTML and, with Typst, to PDF. The Lua filters
    in `src/course_tools/assets/filters` add the PDF button, the slides box
    and the starter-files box, turn self-checks, predictions and comparisons
-   into interactive blocks, add Compiler Explorer links and widgets, and
+   into interactive blocks, add Compiler Explorer links, widgets and state
+   machines, and
    make links absolute in PDFs.
 4. The result in `dist/` is a static website, which the workflow publishes to
    GitHub Pages.

@@ -40,8 +40,6 @@ DATA = "_course/widgets.json"           # in the stage, read by filters/widgets.
 CACHE = ".course-widgets-cache.json"    # in the stage, not published
 
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>`{3,}|~{3,})[ \t]*(?P<info>.*?)[ \t]*$")
-# ```widget, or ```{.widget} with other attributes (an id: ```{#id .widget})
-_WIDGET = re.compile(r"widget|\{[^}]*(?<![\w-])\.widget(?![\w-])[^}]*\}")
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _MAX_SAFE = 2 ** 53 - 1   # larger integers lose precision as JSON numbers in JavaScript
 
@@ -76,15 +74,24 @@ def key(text: str) -> str:
     return hashlib.sha1(normalize(text).encode("utf-8")).hexdigest()
 
 
-def blocks(body: str) -> list[str]:
-    """The texts of the widget blocks of a page (other code blocks are skipped)."""
+def _info(name: str) -> re.Pattern:
+    """The info string of a ```name block, or ```{.name} with other attributes (an id: ```{#id .name})."""
+    return re.compile(rf"{name}|\{{[^}}]*(?<![\w-])\.{name}(?![\w-])[^}}]*\}}")
+
+
+def blocks(body: str, name: str = "widget") -> list[str]:
+    """The texts of the ```name blocks of a page (other code blocks are skipped).
+
+    State machines use it too (statemachine.py).
+    """
+    wanted = _info(name)
     found, current, fence = [], None, None
     for line in body.splitlines():
         m = _FENCE.match(line)
         if fence is None:
             if m:
                 fence = m.group("fence")
-                current = [] if _WIDGET.fullmatch(m.group("info")) else None
+                current = [] if wanted.fullmatch(m.group("info")) else None
         elif m and not m.group("info") and m.group("fence")[0] == fence[0] and len(m.group("fence")) >= len(fence):
             if current is not None:
                 found.append("\n".join(current))
@@ -140,32 +147,40 @@ def runtime_version() -> str:
     return h.hexdigest()[:12]
 
 
-def _print(items: list[dict]) -> dict | None:
-    """Run print.js on the widgets (one Deno process for all); None if that fails."""
+def run_print(script: Path, items: list[dict], what: str = "widgets") -> dict | None:
+    """Run a print.js on the blocks (one Deno process for all); None if that fails."""
     try:
         quarto = tools.quarto()
     except tools.ToolError as e:
-        _warn(f"widgets are not checked and have no PDF form: {e}")
+        _warn(f"{what} are not checked and have no PDF form: {e}")
         return None
-    with tempfile.TemporaryDirectory(prefix="course-widgets-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="course-print-") as tmp:
         inp, out = Path(tmp) / "in.json", Path(tmp) / "out.json"
         inp.write_text(json.dumps(items), encoding="utf-8")
         try:
-            result = subprocess.run([quarto, "run", str(_runtime_dir() / "print.js"), str(inp), str(out)],
+            result = subprocess.run([quarto, "run", str(script), str(inp), str(out)],
                                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         except (OSError, subprocess.TimeoutExpired) as e:
-            _warn(f"widgets could not be checked: {e}")
+            _warn(f"{what} could not be checked: {e}")
             return None
         if result.returncode != 0 or not out.is_file():
             last = _ANSI.sub("", result.stderr).strip().splitlines()[-3:]
-            _warn("widgets could not be checked: " + (" ".join(line.strip() for line in last) or "quarto run failed"))
+            _warn(f"{what} could not be checked: " + (" ".join(line.strip() for line in last) or "quarto run failed"))
             return None
         return json.loads(out.read_text(encoding="utf-8"))
 
 
-def results(widgets: list[Widget], cache: Path | None) -> dict[str, dict]:
-    """Check and draw the widgets (key -> result of Widget.print), reusing earlier results."""
-    version = runtime_version()
+def _print(items: list[dict]) -> dict | None:
+    return run_print(_runtime_dir() / "print.js", items)
+
+
+def results(widgets: list[Widget], cache: Path | None, version: str | None = None, run=None) -> dict[str, dict]:
+    """Check and draw the widgets (key -> result of Widget.print), reusing earlier results.
+
+    State machines use it with their own `version` (of their scripts) and `run` (their print.js).
+    """
+    version = version or runtime_version()
+    run = run or _print
     known: dict[str, dict] = {}
     if cache is not None and cache.is_file():
         try:
@@ -176,7 +191,7 @@ def results(widgets: list[Widget], cache: Path | None) -> dict[str, dict]:
             pass
     todo = {w.key: w.config for w in widgets if w.config is not None and w.key not in known}
     if todo:
-        printed = _print([{"id": k, "config": c} for k, c in todo.items()])
+        printed = run([{"id": k, "config": c} for k, c in todo.items()])
         if printed is not None:
             known.update(printed)
             if cache is not None:

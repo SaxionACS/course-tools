@@ -9,6 +9,8 @@ The test course is copied to a temporary directory and committed there with a
 fixed author and date, so that the page footers are predictable. Then `course
 doctor`, `course build` and `course stage` run, and the output in dist/ is
 checked: pages, PDFs, links, private files, zips, footers and the build log.
+The state machines of the test course are also run in Chrome Headless Shell
+(from `course setup`).
 
 The `course` command under test is the one on PATH; after
 `./install.sh --local` that is this checkout. To test this checkout without
@@ -71,8 +73,16 @@ WIDGET_MESSAGES = (
     "warning: lessons/week_02/lesson3.md: widget 20 (number): goal: unsigned: 300 does not fit in 8 bits",
     "warning: lessons/week_02/lesson3.md: widget 21: the YAML cannot be read: ",
 )
+# State machines with mistakes (lessons/week_02/lesson4.md): each line must start with one of these.
+STATEMACHINE_MESSAGES = (
+    "warning: lessons/week_02/lesson4.md: state machine 4: state A, on presed: presed is not an input, a timer "
+    "or an event that a machine sends.",
+    "warning: lessons/week_02/lesson4.md: state machine 5: input unused is not used in any state",
+    "warning: lessons/week_02/lesson4.md: state machine 5: output LED is never switched",
+    "warning: lessons/week_02/lesson4.md: state machine 6: the YAML cannot be read: ",
+)
 # Other lines that look like a warning or an error fail the check, except these.
-ALLOWED_MESSAGES = REQUIRED_MESSAGES + WIDGET_MESSAGES + (
+ALLOWED_MESSAGES = REQUIRED_MESSAGES + WIDGET_MESSAGES + STATEMACHINE_MESSAGES + (
     # Quarto, for tabsets in Typst (shown one after the other in the PDF).
     "Warning: couldn't recognize format, using default tabset rendering",
 )
@@ -85,7 +95,7 @@ PAGES = [
     "lessons/week_01/index.html", "lessons/week_01/lesson1.html",
     "lessons/week_01/lesson2.html", "lessons/week_01/lesson10.html",
     "lessons/week_02/index.html", "lessons/week_02/lesson1.html", "lessons/week_02/lesson2.html",
-    "lessons/week_02/lesson3.html",
+    "lessons/week_02/lesson3.html", "lessons/week_02/lesson4.html",
     "assignments/week_01/index.html", "assignments/week_01/assignment1.html",
     "assignments/week_01/assignment2/index.html",
     "exams/index.html", "exams/exam1.html",
@@ -189,6 +199,9 @@ def check_build(c: Checks, course_cmd: list[str], course: Path, html_only: bool)
     c.ok(REQUIRED_MESSAGES[4] in lines, "a learning outcome that no page covers is reported")
     missing = [m for m in WIDGET_MESSAGES if not any(line.startswith(m) for line in lines)]
     c.ok(not missing, "widgets with mistakes are reported, with the page and the widget's number", "\n        ".join(missing))
+    missing = [m for m in STATEMACHINE_MESSAGES if not any(line.startswith(m) for line in lines)]
+    c.ok(not missing, "state machines with mistakes are reported, with the page and the machine's number",
+         "\n        ".join(missing))
 
     # A second stage with the same options must not change any file.
     stage = run(course_cmd + ["stage", "--source", str(course), "--site-url", SITE_URL] + extra, cwd=course)
@@ -211,6 +224,10 @@ def check_preview_stage(c: Checks, course_cmd: list[str], course: Path) -> None:
     yaml = [e["yaml"] for e in data["widgets"].values() if "yaml" in e]
     c.ok(len(yaml) == 2 and any(y.startswith("type: number\ntitle: WIDGET-TITLE\neditable: true") for y in yaml),
          "editable widgets have their YAML in the preview", f"found {len(yaml)}")
+    data = json.loads((build / "_course" / "statemachines.json").read_text(encoding="utf-8"))
+    yaml = [e["yaml"] for e in data["machines"].values() if "yaml" in e]
+    c.ok(len(yaml) == 1 and yaml[0].startswith("title: SM-TITLE\ntask: SM-TASK\neditable: true"),
+         "editable state machines have their YAML in the preview", f"found {len(yaml)}")
 
 
 def compiler_explorer_links(html: str) -> list[tuple[str, dict]]:
@@ -357,6 +374,55 @@ def check_widget_logic(c: Checks) -> None:
          + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
 
 
+def check_statemachine_logic(c: Checks) -> None:
+    c.section("State machine logic and layout (quarto run tests/statemachine.js)")
+    try:
+        out, lines = run([tools.quarto(), "run", str(REPO / "tests" / "statemachine.js")]), []
+        lines = ANSI.sub("", out.stdout).strip().splitlines()
+    except tools.ToolError as e:
+        out, lines = None, [str(e)]
+    c.ok(out is not None and out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
+         "machines run as the examples say, mistakes are reported, layouts do not overlap"
+         + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
+
+
+def check_statemachines(c: Checks, read, dist: Path) -> None:
+    c.section("State machines (lessons/week_02/lesson4)")
+    html = read("lessons/week_02/lesson4.html")
+    p = main_content(html)
+    divs = re.findall(r'<div class="course-statemachine" id="([\w-]+)"(?: data-config="([^"]*)")?>', p)
+    configs = [json.loads(htmllib.unescape(cfg)) if cfg else {} for _, cfg in divs]
+    c.ok(len(divs) == 6, "a state machine for every ```statemachine block, not for one shown inside a code block",
+         f"found {len(divs)}")
+    if len(divs) == 6:
+        c.ok([d[0] for d in divs[:3]] == ["statemachine-1", "debouncer", "statemachine-3"],
+             "every state machine has an id: the block's own, or statemachine-<n>")
+        states = configs[0].get("states", {})
+        c.ok(configs[0].get("initial") == "OFF" and states.get("OFF", {}).get("on") == {"pressed": "ON / LED on"},
+             "on:, ON and OFF stay text (YAML 1.2 booleans: only true and false)", json.dumps(configs[0])[:200])
+        c.ok(configs[2]["states"]["STOPPED"]["entry"] == "LED on stop limit print \"stopped\"",
+             "lines without dashes are one line, as in the browser's YAML reader", configs[2]["states"]["STOPPED"]["entry"])
+    c.ok("NOT-A-STATEMACHINE" in p and p.count('class="sm-error"') == 1,
+         "a state machine in a code block is shown as code; unreadable YAML is reported on the page")
+    c.ok("data-yaml" not in p, "editable state machines have no YAML on the published site")
+    lib = re.search(r'<script src="[^"]*site_libs/quarto-contrib/(course-statemachine-\w+)/dagre\.min\.js"></script>\s*'
+                    r'<script src="[^"]*site_libs/quarto-contrib/course-statemachine-\w+/statemachine\.js"', html)
+    c.ok(lib and (dist / "site_libs" / "quarto-contrib" / lib.group(1) / "dagre.min.js.LEGAL.txt").is_file()
+         and "course-statemachine" not in read("lessons/week_02/lesson3.html"),
+         "dagre, its licence and the state machine script, only on pages with state machines")
+    try:
+        chrome = str(tools.installed("chrome"))
+    except tools.ToolError as e:
+        c.skip("state machines in a browser", str(e))
+        return
+    out = run([tools.quarto(), "run", str(REPO / "tests" / "statemachine_browser.js"), chrome,
+               str(dist / "lessons" / "week_02" / "lesson4.html")])
+    lines = ANSI.sub("", out.stdout).strip().splitlines()
+    c.ok(out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
+         "in a browser: clicks move the machines, bounces, timers, text and log (tests/statemachine_browser.js)"
+         + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
+
+
 def check_widgets(c: Checks, read) -> None:
     c.section("Widgets (lessons/week_02/lesson3)")
     html = read("lessons/week_02/lesson3.html")
@@ -483,6 +549,7 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     check_terms(c, read)
     check_outcomes(c, read)
     check_widgets(c, read)
+    check_statemachines(c, read, dist)
     # the PDF pictures, drawn at build time (the stage, before `stage --preview` changes it)
     data = json.loads((dist.parent / ".build" / "_course" / "widgets.json").read_text(encoding="utf-8"))
     svgs = [e.get("svg", "") for e in data["widgets"].values() if '"bit_values":true' in e.get("config", "")]
@@ -557,6 +624,12 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("This widget cannot be shown: unknown type" in questions, "widget PDF: a widget with a mistake says so")
     c.ok("'\\r' 0x0D" in questions and "'\\n' 0x0A" in questions,
          "widget PDF: C escapes in text data (Hi\\r\\n), frames named by their escapes")
+    t = text("lessons/week_02/lesson4.pdf")
+    c.ok("SM-TITLE SM-TASK" in t and "State pressed OFF ON / LED on ON OFF / LED off" in t
+         and "Try it on the website." in t, "state machine PDF: title, task, picture and transition table, and a link")
+    c.ok("btn_just_pressed()" in t and "PRESSED / send pressed – PRESSED – RELEASED" in t and 'RUNNING STOPPED / print "lap"' in t,
+         "state machine PDF: machines side by side, a dash for an ignored event, an internal action")
+    c.ok("This state machine cannot be shown: state A, on presed" in t, "state machine PDF: a machine with a mistake says so")
 
 
 def main() -> int:
@@ -582,6 +655,7 @@ def main() -> int:
 
     c = Checks()
     check_widget_logic(c)
+    check_statemachine_logic(c)
     if check_tools(c, course_cmd) and check_build(c, course_cmd, course, args.html_only):
         check_site(c, course / "dist", args.html_only)
         check_preview_stage(c, course_cmd, course)

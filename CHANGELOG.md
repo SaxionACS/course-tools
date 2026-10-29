@@ -14,6 +14,48 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.2.0 (unreleased)
+
+State machines: ```` ```statemachine ```` blocks (see
+[docs/statemachines.md](docs/statemachines.md)).
+
+- A block of YAML declares inputs (buttons, hold buttons, pins, bouncy ones),
+  outputs (coloured LEDs, buzzers) and states with entry actions, a `blink`
+  activity and arrows: `event: TARGET / actions`, or `/ actions` for an
+  internal action. Events are inputs, held conditions (`pin high for 50 ms`,
+  the counter of `btn_just_pressed()`), `after` timeouts, named timers and
+  events that machines `send` each other. Times can be random (`2..5 s`).
+- On the website the machine runs: input buttons, LEDs, a display or a
+  terminal for `print`, the timers, a log of every event (`log: open`,
+  `folded` or `hidden`), speeds down to 1/100 and *Skip ahead* to the next
+  bounce or timeout. Ignored events are shown. Machines side by side
+  (`machines:`) can be folded to what they react to and send.
+- In the PDF: per machine a picture and a transition table, and a link.
+- The build reports mistakes (an event that comes from nowhere, an unknown
+  output, state or action) and warnings (a timer nobody reacts to, a state
+  that cannot be reached), with the page and the machine's number.
+  `editable: true` shows the YAML in `course preview`, with the same checks.
+- The YAML of a state machine is read with only `true` and `false` as
+  booleans, as in the browser: `on:`, `ON` and `OFF` are text. Two equal keys
+  are a mistake.
+- dagre 3.1.1 (MIT) lays out the diagrams; it comes with course-tools and is
+  only loaded on pages with state machines.
+- `widgets.py` can find other blocks than widgets and run another
+  `print.js` (no change for widgets).
+- Tests: `tests/statemachine.js` (logic, mistakes, layouts that must not
+  overlap, the PDF form) and `tests/statemachine_browser.js` (the test
+  course's machines in Chrome Headless Shell), both run by `check.py`.
+
+Platform notes:
+
+- **Dependencies:** none (dagre is part of course-tools; the browser test
+  uses the Chrome Headless Shell of `course setup`).
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 141
+  checks (new: state machines in HTML, PDF, the preview and a browser).
+- **macOS:** untested.
+- **Windows:** untested; the browser test turns Windows paths into `file:///`
+  URLs, nothing else is platform-specific.
+
 ## 2.1.0 (unreleased)
 
 Windows: course-tools runs natively on Windows 10/11 (x64).

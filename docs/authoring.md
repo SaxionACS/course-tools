@@ -784,6 +784,53 @@ widget's number, for example
 On the website, a widget with a mistake shows the same message instead of the
 widget.
 
+## State machines
+
+A ```` ```statemachine ```` block draws a state diagram from YAML. On the
+website students run it: they press the inputs and watch the current state,
+LEDs, a display, timers and a log of every event. Several machines can run
+side by side and send each other events, for example a button debouncer that
+feeds a bigger machine. In the PDF, every machine becomes a picture with a
+transition table.
+
+````markdown
+```statemachine
+title: The staircase light
+inputs:
+  pressed: button
+outputs:
+  LED: amber led
+states:
+  LIGHT_OFF:
+    entry: LED off
+    on:
+      pressed: LIGHT_ON
+  LIGHT_ON:
+    entry: LED on
+    on:
+      pressed: LIGHT_ON
+      after 10 s: LIGHT_OFF
+```
+````
+
+- `inputs:` and `outputs:` declare buttons, pins, LEDs and buzzers by name.
+- Each state has `entry:` actions (`LED on`, `print "Ready"`,
+  `start T 10 s`, `send pressed`), an optional `do: blink LED 500 ms`, and
+  `on:` with its arrows: `event: TARGET`, `event: TARGET / actions`, or
+  `event: / actions` (an internal action).
+- Events are inputs (`pressed`, `KEY released`, `pin high for 50 ms`), timers
+  that run out, `after 10 s`, and events that another machine sends.
+
+Everything a state machine can do, and how it behaves, is in
+[State machines](statemachines.md). The course template has a gallery of
+machines to try and change:
+[`references/statemachines.md`](https://github.com/SaxionACS/course_template/blob/main/references/statemachines.md)
+(a [draft](#draft-pages): run `course preview` in the template).
+
+The build checks every machine and reports mistakes and doubtful things (a
+timer nobody reacts to, a state that can never be reached) with the page and
+the machine's number.
+
 ## Page footer: dates from git
 
 Every page ends with a footer that says when its source file was added to the
