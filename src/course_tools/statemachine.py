@@ -71,6 +71,10 @@ _Loader.yaml_implicit_resolvers = {
 _Loader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF"))
 
 
+# YAML reads a value that starts with | as a block of text: `LAP: | print "lap"` cannot be read
+_BAR = re.compile(r":[ \t]*\|[ \t]*[^\s#|>+\-\d]", re.MULTILINE)
+
+
 def load(text: str):
     """A block's YAML, read as the browser reads it (only true and false are booleans)."""
     return yaml.load(text, Loader=_Loader)  # noqa: S506 (a SafeLoader)
@@ -91,6 +95,8 @@ def find(body: str, source: str) -> list[Widget]:
             mark = getattr(e, "problem_mark", None)
             where = f" (line {mark.line + 1} of the state machine)" if mark else ""
             machine.error = f"the YAML cannot be read: {getattr(e, 'problem', None) or e}{where}"
+            if _BAR.search(text):
+                machine.error += ". An arrow that starts with | needs quotes: LAP: '| print \"lap\"' (or write / print \"lap\")"
         found.append(machine)
     return found
 

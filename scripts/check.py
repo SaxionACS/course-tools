@@ -625,9 +625,9 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("'\\r' 0x0D" in questions and "'\\n' 0x0A" in questions,
          "widget PDF: C escapes in text data (Hi\\r\\n), frames named by their escapes")
     t = text("lessons/week_02/lesson4.pdf")
-    c.ok("SM-TITLE SM-TASK" in t and "State pressed OFF ON / LED on ON OFF / LED off" in t
+    c.ok("SM-TITLE SM-TASK" in t and "State pressed OFF ON | LED on ON OFF | LED off" in t
          and "Try it on the website." in t, "state machine PDF: title, task, picture and transition table, and a link")
-    c.ok("btn_just_pressed()" in t and "PRESSED / send pressed – PRESSED – RELEASED" in t and 'RUNNING STOPPED / print "lap"' in t,
+    c.ok("btn_just_pressed()" in t and "PRESSED | send pressed – PRESSED – RELEASED" in t and 'RUNNING STOPPED | print "lap"' in t,
          "state machine PDF: machines side by side, a dash for an ignored event, an internal action")
     c.ok("This state machine cannot be shown: state A, on presed" in t, "state machine PDF: a machine with a mistake says so")
 

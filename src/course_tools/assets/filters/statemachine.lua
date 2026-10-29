@@ -93,11 +93,6 @@ end
 local function transitions(t)
   local function cell(text, strong)
     local inlines = pandoc.Inlines(text)
-    if text:sub(1, 1) == '/' then
-      -- an internal action; at the start of a cell, Typst reads "/ " as a term list
-      inlines = pandoc.Inlines({pandoc.RawInline('typst', '\\/')})
-      inlines:extend(pandoc.Inlines(text:sub(2)))
-    end
     return {pandoc.Plain(strong and {pandoc.Strong(inlines)} or inlines)}
   end
   local head, aligns, widths = {}, {}, {}

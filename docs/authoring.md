@@ -817,7 +817,8 @@ states:
 - Each state has `entry:` actions (`LED on`, `print "Ready"`,
   `start T 10 s`, `send pressed`), an optional `do: blink LED 500 ms`, and
   `on:` with its arrows: `event: TARGET`, `event: TARGET / actions`, or
-  `event: / actions` (an internal action).
+  `event: / actions` (an internal action). The diagram shows `|` instead of
+  `/`: `pressed | LED on`.
 - Events are inputs (`pressed`, `KEY released`, `pin high for 50 ms`), timers
   that run out, `after 10 s`, and events that another machine sends.
 

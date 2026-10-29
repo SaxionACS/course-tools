@@ -83,7 +83,9 @@ Settings of the block:
 | `machines` | instead of `states`: several machines side by side ([Several machines](#several-machines-side-by-side)) |
 | `direction` | `LR` (left to right, the default) or `TB` (top to bottom) |
 | `text` | `display` (the default) or `terminal`: what `print` writes on ([Actions](#actions)) |
-| `speed` | the speed the machine starts at: `1` (real time, the default), or slower: `1/4`, `1/10`, `1/100`, … down to `1/1000` |
+| `speed` | the speed the machine starts at: `1` (real time, the default), slower (`1/4`, `1/10`, `1/100`, down to `1/1000`) or faster (`2`, `10`, up to `100`) |
+| `speeds` | the speed buttons, for example `[1, 2, 10]` or `[1/100, 1/10, 1]`. By default they are chosen from the machine's times ([On the website](#on-the-website)) |
+| `clock` | `true` or `false`: show the time and its controls (*Pause*, *Speed*, *Skip ahead*). By default only for machines that use time ([On the website](#on-the-website)) |
 | `log` | `open` (the default), `folded` (closed until the student opens it) or `hidden` (no log) |
 | `editable` | `true`: in `course preview`, the YAML under the machine, to change and apply ([Trying things out](#trying-things-out-editable-true)) |
 
@@ -209,11 +211,17 @@ See [the debouncer](#the-debouncer-btn_just_pressed).
 | `LIGHT_ON / LED on` | go to LIGHT_ON, running the actions after the `/` on the way |
 | `/ print "lap"` | an *internal action*: run the actions and stay, without leaving the state |
 
+The diagram shows a `|` between the event and the actions:
+`pressed | LED on`. In the YAML, `|` works as well as `/`
+(`LIGHT_ON | LED on`), but a value that *starts* with `|` needs quotes, because
+YAML reads it as the start of a block of text: `LAP: '| print "lap"'`. With
+`/`, no quotes are needed.
+
 An arrow to the state itself (`pressed: LIGHT_ON` in LIGHT_ON) leaves the
 state and enters it again: its entry actions run again and its `after` timers
 start over. An internal action does neither; the state's `after` timers keep
 running. Internal actions are drawn inside the state's box, under its
-entry and do lines, as `LAP / print "lap"`.
+entry and do lines, as `LAP | print "lap"`.
 
 ## Actions
 
@@ -347,9 +355,12 @@ full speed.
 
 From top to bottom:
 
-- **The diagram**, with the current state in green. A transition flashes its
-  arrow orange and sends a dot along it. A state with a running `after` or
-  held condition shows a bar at its bottom that fills up.
+- **The diagram**, centred, with the current state in green. A transition
+  flashes its arrow orange and sends a dot along it; when the dot arrives,
+  the entry actions of the new state light up for a moment. That shows the
+  order: first the arrow's actions, then the entry actions. An internal
+  action lights up when it runs. A state with a running `after` or held
+  condition shows a bar at its bottom that fills up.
 - **Inputs**: a button per input, in the order of `inputs:`. Buttons always
   work, also when the current state ignores them: that is something to see.
 - **Outputs**: the LEDs and buzzers.
@@ -357,11 +368,29 @@ From top to bottom:
 - **Timers**, if the machines use time: every named timer (running or not),
   and every `after` and held condition of the current states, with the time
   left.
-- **Controls**: *Reset* (back to the start), *Pause*/*Run*, *Speed* (1×,
-  1/10×, 1/100×, and the `speed` of the YAML if it is another one), *Skip
-  ahead* and the time since the start. *Skip ahead* jumps to the next bounce
-  or timeout, so students do not wait 10 s for a timer, and can step through
-  the bounces of a button one by one (with *Pause*).
+- **Controls**: *Reset* (back to the start), and for a machine that uses
+  time also *Pause*/*Run*, *Speed*, *Skip ahead* and the time since the start. *Skip
+  ahead* jumps to the next bounce or timeout, so students do not wait 10 s for
+  a timer, and can step through the bounces of a button one by one (with
+  *Pause*); it says what it jumped to.
+
+  A machine uses time when it has an `after`, a named timer, a held condition
+  (`… for 50 ms`), a `blink` or a bouncy input. A light switch that only
+  reacts to clicks shows only *Reset*. `clock: true` or `clock: false`
+  overrides this.
+
+  The *Speed* buttons are those of `speeds:`. Without it, they follow the
+  times of the machine:
+
+  - a time under 100 ms (a `blink`, an `after`, a held condition) adds 1/10×,
+    and a time under 20 ms or a bouncy input adds 1/100× too;
+  - long times add speed-ups: 2×, 5×, 10×, 20×, 50× or 100×, as long as the
+    longest time still takes a second or more, at most three of them. A 10 s
+    timeout gets 2×, 5× and 10×; a 60 s one 10×, 20× and 50×;
+  - with only 1× left (times between 100 ms and 2 s), there are no speed
+    buttons.
+
+  The `speed` of the YAML is always one of the buttons.
 - **Log**: every event with its time, the transition it caused or that it was
   ignored. With several machines, each line names the machine.
 
@@ -375,8 +404,8 @@ A PDF cannot run a machine. Every block becomes:
 - its title and task;
 - per machine: its title (with several machines), the diagram as a picture,
   and a **transition table**: a row per state, a column per event, and in
-  every cell the target state and the actions (`LIGHT_ON / LED on`), an
-  internal action (`/ print "lap"`), or a dash when the state ignores the
+  every cell the target state and the actions (`LIGHT_ON | LED on`), an
+  internal action (`| print "lap"`), or a dash when the state ignores the
   event;
 - a link to the machine on the website.
 

@@ -100,14 +100,14 @@
     return w * size / 1000;
   }
   // the text of the diagrams: [style, size in px]
-  const FONT = {name: ['bold', 13], action: ['italic', 11.5], internal: ['regular', 11.5], label: ['regular', 12]};
+  const FONT = {name: ['bold', 15], action: ['italic', 13], internal: ['regular', 13], label: ['regular', 14]};
   const measure = (text, kind) => textWidth(text, FONT[kind][0], FONT[kind][1]);
 
   // ========================================================================
   // Reading the YAML: read(config) -> model, or an Error with a message for the author
   // ========================================================================
   const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-  const TOP_KEYS = ['title', 'task', 'direction', 'text', 'log', 'speed', 'inputs', 'outputs', 'initial', 'states', 'machines', 'editable'];
+  const TOP_KEYS = ['title', 'task', 'direction', 'text', 'log', 'speed', 'speeds', 'clock', 'inputs', 'outputs', 'initial', 'states', 'machines', 'editable'];
   const MACHINE_KEYS = ['title', 'direction', 'initial', 'states', 'folded'];
   const STATE_KEYS = ['entry', 'do', 'on'];
   const LEDS = ['red', 'green', 'amber', 'yellow', 'blue', 'white'];
@@ -139,30 +139,40 @@
     return {min, max, text: `${m[1]}${m[2] != null ? `..${m[2]}` : ''} ${m[3]}`};
   }
 
-  // speed: 1, 1/4, 1/100, 0.5 -> {value, label}
-  function speedOf(v) {
-    const s = clean(v ?? '1');
+  // a speed: 1 (real time), slower 1/4, 1/100, 0.5, faster 2, 10 -> the factor, 1/1000 to 100
+  function speedOf(v, where) {
+    const s = clean(v);
     let m, x = NaN;
     if ((m = /^1 ?\/ ?(\d+)$/.exec(s))) x = 1 / Number(m[1]);
-    else if (/^(?:0?\.\d+|1(?:\.0*)?)$/.test(s)) x = Number(s);
-    if (!(x >= 0.001 && x <= 1)) fail('speed: is 1 (real time) or slower, e.g. 1/4, 1/10 or 1/100 (1/1000 at the slowest)');
-    return {value: x, label: speedLabel(x)};
+    else if (/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(s)) x = Number(s);
+    if (!(x >= 0.001 && x <= 100)) fail(`${where}: "${s}" is not a speed. Write 1 (real time), slower 1/10 or 1/100, faster 2 or 10 (1/1000 to 100)`);
+    return x;
   }
   function speedLabel(x) {
-    if (x === 1) return '1×';
+    if (x >= 1) return `${Number(x.toFixed(2))}×`;
     const n = Math.round(1 / x);
     return Math.abs(1 / n - x) < 1e-9 ? `1/${n}×` : `${x}×`;
   }
+  // The speed buttons when the YAML has no speeds: slower for times under 100 ms
+  // (under 20 ms, bounces: 1/100 too), faster for long times, up to three speeds
+  // at which the longest time still takes a second or more.
+  function autoSpeeds(times) {
+    if (!times.length) return [1];
+    const min = Math.min(...times), max = Math.max(...times);
+    const slower = min < 20 ? [0.01, 0.1] : min < 100 ? [0.1] : [];
+    const faster = [2, 5, 10, 20, 50, 100].filter(f => max / f >= 1000).slice(-3);
+    return [...slower, 1, ...faster];
+  }
 
-  // split at `sep`, but not inside "double quotes"
-  function splitOutside(s, sep) {
+  // split at any of `seps`, but not inside "double quotes"
+  function splitOutside(s, seps) {
     const out = [];
     let cur = '', quoted = false;
     for (let i = 0; i < s.length; i++) {
       const ch = s[i];
       if (ch === '\\' && quoted && i + 1 < s.length) { cur += ch + s[++i]; continue; }
       if (ch === '"') quoted = !quoted;
-      if (ch === sep && !quoted) { out.push(cur); cur = ''; } else cur += ch;
+      if (seps.includes(ch) && !quoted) { out.push(cur); cur = ''; } else cur += ch;
     }
     out.push(cur);
     return out;
@@ -253,6 +263,7 @@
       case 'start': {
         const t = time(m[2], where);
         ctx.timers.add(m[1]);
+        ctx.times.push(t.min, t.max);
         return {kind, timer: m[1], time: t, src: `start ${m[1]} ${t.text}`};
       }
       case 'stop': ctx.stops.add(m[1]); return {kind, timer: m[1], src: `stop ${m[1]}`};
@@ -261,6 +272,7 @@
         if (!isDo) fail(`${where}: blink is a do activity: write it under do:`);
         useOutput(m[1], ctx, where);
         const t = time(m[2], where, false);
+        ctx.times.push(t.min);
         return {kind, out: m[1], period: t.min, src: `blink ${m[1]} ${t.text}`};
       }
       default:
@@ -269,7 +281,8 @@
     }
   }
   function notAnAction(rest, ctx, where, isDo) {
-    const piece = clean(splitOutside(rest, ',')[0]);
+    if (/^[|/]/.test(rest)) return `${where}: one / per arrow, between the state and its actions; separate the actions with commas`;
+    const piece = clean(splitOutside(rest, ',|/')[0]);
     const shown = piece.length > 48 ? piece.slice(0, 45) + '…' : piece;
     const word = /^\S*/.exec(piece)[0];
     if (isDo) return `${where}: "${shown}" cannot be a do activity. The only one is blink <output> <time>, e.g. blink LED 500 ms`;
@@ -289,6 +302,7 @@
     if (k.startsWith('[')) fail(`${where}: guards ([…]) come in a later version`);
     if ((m = /^after (.+)$/.exec(k))) {
       const t = time(m[1], where);
+      ctx.times.push(t.min, t.max);
       return {kind: 'after', time: t, label: `after ${t.text}`};
     }
     if ((m = /^([A-Za-z_]\w*) (\w+)(?: for (.+))?$/.exec(k)) && ctx.inputs[m[1]]) {
@@ -299,6 +313,7 @@
       ctx.usedInputs.add(m[1]);
       if (m[3] != null) {
         const t = time(m[3], where, false);
+        ctx.times.push(t.min);
         return {kind: 'held', input: m[1], level: i === 0, time: t, label: `[${m[1]} ${m[2]} for ${t.text}]`};
       }
       return {kind: 'event', event: `${m[1]} ${m[2]}`, edge: true, label: k};
@@ -311,14 +326,16 @@
     fail(`${where}: "${k}" is not an event. Write an input (pressed), a timer (exit_delay), after 10 s, or for an input that is held down: KEY pressed, KEY released, KEY pressed for 1 s`);
   }
 
-  // the right side of on: TARGET, TARGET / actions, / actions
+  // the right side of on: TARGET, TARGET / actions, / actions. | works as / too; the
+  // diagram shows |. The first / or | outside quotes ends the target.
   function readArrow(value, names, ctx, where) {
     if (value == null || typeof value === 'object' || clean(value) === '') {
       fail(`${where}: where to? Write a state (LIGHT_ON), a state and actions (LIGHT_ON / LED on), or only actions for an internal action (/ print "lap")`);
     }
-    const parts = splitOutside(String(value), '/');
+    const text = String(value);
+    const parts = splitOutside(text, '|/');
     const target = clean(parts[0]);
-    const actions = parts.length > 1 ? readActions(parts.slice(1).join('/'), ctx, where, false) : [];
+    const actions = parts.length > 1 ? readActions(text.slice(parts[0].length + 1), ctx, where, false) : [];
     if (target && !names.includes(target)) {
       fail(/\s/.test(target) ? `${where}: "${target}": write the state, then / and the actions: LIGHT_ON / LED on`
         : `${where}: there is no state ${target} (states: ${names.join(', ')})`);
@@ -371,14 +388,14 @@
     if (!isMap(config)) fail('the YAML must be a mapping: title:, inputs:, outputs:, states: …');
     keysOf(config, TOP_KEYS, 'statemachine');
     const ctx = {inputs: {}, outputs: {}, timers: new Set(), stops: new Set(), sent: new Set(), handled: new Set(),
-      usedOutputs: new Set(), usedInputs: new Set(), prints: false};
+      usedOutputs: new Set(), usedInputs: new Set(), prints: false, times: []};
     readInputs(config.inputs, ctx);
     readOutputs(config.outputs, ctx);
     const text = clean(config.text ?? 'display');
     if (!['display', 'terminal'].includes(text)) fail('text: is display (a print replaces the text) or terminal (a print adds a line)');
     const log = clean(config.log ?? 'open');
     if (!['open', 'folded', 'hidden'].includes(log)) fail('log: is open, folded or hidden');
-    const speed = speedOf(config.speed);
+    if (config.clock != null && typeof config.clock !== 'boolean') fail('clock: is true or false');
     const direction = clean(config.direction ?? 'LR');
     if (!['LR', 'TB'].includes(direction)) fail('direction: is LR (left to right) or TB (top to bottom)');
     let machines;
@@ -416,8 +433,20 @@
       while (todo.length) for (const tr of m.states[todo.pop()].on) if (tr.target && !seen.has(tr.target)) { seen.add(tr.target); todo.push(tr.target); }
       for (const n of Object.keys(m.states)) if (!seen.has(n)) warnings.push(`${machines.length > 1 ? `machine ${m.name}: ` : ''}state ${n} can never be reached`);
     }
+    // the speed buttons, and the speed at the start (also a button)
+    if (Object.values(ctx.inputs).some(i => i.bouncy)) ctx.times.push(1);   // bounces: within 12 ms
+    let speeds;
+    if (config.speeds != null) {
+      if (!Array.isArray(config.speeds) || !config.speeds.length || config.speeds.length > 8) fail('speeds: is a list of 1 to 8 speeds, e.g. [1, 2, 10] or [1/100, 1/10, 1]');
+      speeds = config.speeds.map(v => speedOf(v, 'speeds'));
+    } else speeds = autoSpeeds(ctx.times);
+    const speed = config.speed != null ? speedOf(config.speed, 'speed') : speeds.includes(1) ? 1 : speeds[0];
+    speeds = [...new Set([...speeds, speed])].sort((a, b) => a - b);
+    // the clock and its controls (pause, speed, skip ahead): for machines that use time, unless clock: says otherwise
+    const timed = ctx.timers.size > 0 || Object.values(ctx.inputs).some(i => i.bouncy) || machines.some(m => Object.values(m.states).some(st =>
+      st.do.length || st.on.some(tr => tr.trigger.kind === 'after' || tr.trigger.kind === 'held')));
     return {title: config.title != null ? String(config.title) : '', task: config.task != null ? String(config.task) : '',
-      text, log, speed, direction, inputs: ctx.inputs, outputs: ctx.outputs, timers: [...ctx.timers],
+      text, log, speed, speeds, clock: config.clock ?? timed, direction, inputs: ctx.inputs, outputs: ctx.outputs, timers: [...ctx.timers],
       prints: ctx.prints, machines, warnings};
   }
 
@@ -587,31 +616,32 @@
   function stateLines(st) {
     const out = [];
     const add = (prefix, items, kind, id) => wrapItems(prefix, items, 30).forEach(text => out.push({text, kind, id}));
-    if (st.entry.length) add('entry: ', st.entry.map(a => a.src), 'action');
+    if (st.entry.length) add('entry: ', st.entry.map(a => a.src), 'action', 'entry');
     if (st.do.length) add('do: ', st.do.map(a => a.src), 'action');
-    for (const tr of st.on) if (tr.internal) add(`${tr.trigger.label} / `, tr.actions.map(a => a.src), 'internal', tr.id);
+    for (const tr of st.on) if (tr.internal) add(`${tr.trigger.label} | `, tr.actions.map(a => a.src), 'internal', tr.id);
     return out;
   }
-  // the label of an arrow: the event, and its actions after a /
+  // the label of an arrow: the event, and its actions after a |
   function edgeLines(tr) {
     const acts = tr.actions.map(a => a.src);
     if (!acts.length) return [tr.trigger.label];
-    const one = `${tr.trigger.label} / ${acts.join(', ')}`;
-    return one.length <= 24 ? [one] : [tr.trigger.label, ...wrapItems('/ ', acts, 26)];
+    const one = `${tr.trigger.label} | ${acts.join(', ')}`;
+    return one.length <= 24 ? [one] : [tr.trigger.label, ...wrapItems('| ', acts, 26)];
   }
 
   const INIT = '•init';   // not a valid state name
-  const LINE = 15, LABEL_LINE = 14;
+  // sizes in px: the name area of a box, a line of actions, a line of an arrow's label
+  const HEAD = 30, LINE = 17, LABEL_LINE = 16;
   function layoutMachine(m) {
     const g = new root.dagre.graphlib.Graph({multigraph: true});
-    g.setGraph({rankdir: m.direction, nodesep: 28, ranksep: 34, edgesep: 14, marginx: 8, marginy: 8});
+    g.setGraph({rankdir: m.direction, nodesep: 30, ranksep: 36, edgesep: 16, marginx: 8, marginy: 8});
     g.setDefaultEdgeLabel(() => ({}));
-    g.setNode(INIT, {width: 14, height: 14});
+    g.setNode(INIT, {width: 16, height: 16});
     const nodes = {};
     for (const st of Object.values(m.states)) {
       const lines = stateLines(st);
-      const w = Math.ceil(Math.max(92, measure(st.name, 'name') + 28, ...lines.map(l => measure(l.text, l.kind) + 26)));
-      const hh = lines.length ? 26 + 6 + lines.length * LINE + 9 : 38;
+      const w = Math.ceil(Math.max(100, measure(st.name, 'name') + 32, ...lines.map(l => measure(l.text, l.kind) + 28)));
+      const hh = lines.length ? HEAD + 9 + lines.length * LINE + 7 : 42;
       nodes[st.name] = {name: st.name, lines, w, h: hh};
       g.setNode(st.name, {width: w, height: hh});
     }
@@ -620,8 +650,8 @@
     for (const st of Object.values(m.states)) for (const tr of st.on) {
       if (tr.internal) continue;
       const lines = edgeLines(tr);
-      const lw = Math.ceil(Math.max(...lines.map(l => measure(l, 'label')))) + 12;
-      const lh = lines.length * LABEL_LINE + 4;
+      const lw = Math.ceil(Math.max(...lines.map(l => measure(l, 'label')))) + 14;
+      const lh = lines.length * LABEL_LINE + 6;
       labels[tr.id] = {tr, lines, lw, lh};
       g.setEdge(st.name, tr.target, {width: lw, height: lh, labelpos: 'c'}, tr.id);
     }
@@ -692,14 +722,14 @@
   const INK = {fg: '#494c4e', muted: '#6c757d', box: '#9aa6ad', sep: '#cdd5dc', edge: '#7d878d', paper: '#ffffff'};
   const PRINT_STYLE = [
     `.box{fill:${INK.paper};stroke:${INK.box};stroke-width:1.3}`,
-    `.name{font-size:13px;font-weight:bold;fill:${INK.fg}}`,
+    `.name{font-size:15px;font-weight:bold;fill:${INK.fg}}`,
     `.sep{stroke:${INK.sep};stroke-width:1}`,
-    `.act{font-size:11.5px;font-style:italic;fill:${INK.muted}}`,
+    `.act{font-size:13px;font-style:italic;fill:${INK.muted}}`,
     `.act.internal{font-style:normal;fill:${INK.fg}}`,
     `.line{fill:none;stroke:${INK.edge};stroke-width:1.4}`,
     `.head{fill:${INK.edge}}`,
     `.lbl-bg{fill:${INK.paper}}`,
-    `.lbl{font-size:12px;fill:${INK.fg}}`,
+    `.lbl{font-size:14px;fill:${INK.fg}}`,
     `.init{fill:${INK.fg}}`,
   ].join('');
 
@@ -709,7 +739,7 @@
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     const box = (x, y, w, hh) => { x0 = Math.min(x0, x - w / 2); x1 = Math.max(x1, x + w / 2); y0 = Math.min(y0, y - hh / 2); y1 = Math.max(y1, y + hh / 2); };
     for (const n of Object.values(geo.nodes)) box(n.x, n.y, n.w, n.h);
-    box(geo.init.x, geo.init.y, 14, 14);
+    box(geo.init.x, geo.init.y, 16, 16);
     const routes = geo.edges.map(e => (e.self ? selfLoop(geo.nodes[e.from], e) : route(e.points)));
     geo.edges.forEach((e, k) => {
       if (!e.init) box(e.lx, e.ly, e.lw, e.lh);
@@ -732,24 +762,24 @@
       if (e.init) return;
       const label = make('g', {class: 'sm-edge'},
         make('rect', {class: 'lbl-bg', x: r1(e.lx - e.lw / 2), y: r1(e.ly - e.lh / 2), width: e.lw, height: e.lh, rx: 3}),
-        e.lines.map((line, i) => make('text', {class: 'lbl', x: r1(e.lx), y: r1(e.ly - e.lh / 2 + 13 + i * LABEL_LINE), 'text-anchor': 'middle', text: line})));
+        e.lines.map((line, i) => make('text', {class: 'lbl', x: r1(e.lx), y: r1(e.ly - e.lh / 2 + 15.5 + i * LABEL_LINE), 'text-anchor': 'middle', text: line})));
       labelLayer.append(label);
       pic.edges[e.id] = {g, label, path};
     });
-    nodeLayer.append(make('circle', {class: 'init', cx: r1(geo.init.x), cy: r1(geo.init.y), r: 6.5}));
+    nodeLayer.append(make('circle', {class: 'init', cx: r1(geo.init.x), cy: r1(geo.init.y), r: 7}));
     for (const n of Object.values(geo.nodes)) {
       const x = n.x - n.w / 2, y = n.y - n.h / 2;
       const g = make('g', {class: 'sm-state'});
       g.append(make('rect', {class: 'box', x: r1(x), y: r1(y), width: n.w, height: n.h, rx: 9}));
       if (n.lines.length) {
-        g.append(make('text', {class: 'name', x: r1(n.x), y: r1(y + 18), 'text-anchor': 'middle', text: n.name}));
-        g.append(make('line', {class: 'sep', x1: r1(x), x2: r1(x + n.w), y1: r1(y + 26), y2: r1(y + 26)}));
+        g.append(make('text', {class: 'name', x: r1(n.x), y: r1(y + 20.5), 'text-anchor': 'middle', text: n.name}));
+        g.append(make('line', {class: 'sep', x1: r1(x), x2: r1(x + n.w), y1: r1(y + HEAD), y2: r1(y + HEAD)}));
         n.lines.forEach((l, i) => {
-          const t = make('text', {class: l.kind === 'internal' ? 'act internal' : 'act', x: r1(x + 11), y: r1(y + 26 + 17 + i * LINE), text: l.text});
+          const t = make('text', {class: l.kind === 'internal' ? 'act internal' : 'act', x: r1(x + 12), y: r1(y + HEAD + 18 + i * LINE), text: l.text});
           g.append(t);
-          if (l.id) (pic.lines[l.id] ||= []).push(t);
+          if (l.id) (pic.lines[l.id === 'entry' ? `${n.name}|entry` : l.id] ||= []).push(t);   // an internal action's lines, or the entry lines
         });
-      } else g.append(make('text', {class: 'name', x: r1(n.x), y: r1(n.y + 4.5), 'text-anchor': 'middle', text: n.name}));
+      } else g.append(make('text', {class: 'name', x: r1(n.x), y: r1(n.y + 5.3), 'text-anchor': 'middle', text: n.name}));
       const st = {g, w: n.w - 16};
       if (!isStatic) {
         g.append(make('rect', {class: 'bar-bg', x: r1(x + 8), y: r1(y + n.h - 6), width: n.w - 16, height: 3, rx: 1.5}));
@@ -774,7 +804,7 @@
       const tr = st.on.find(x => x.trigger.label === label);
       if (!tr) return '–';
       const acts = tr.actions.map(a => a.src).join(', ');
-      return tr.internal ? `/ ${acts}` : tr.target + (acts ? ` / ${acts}` : '');
+      return tr.internal ? `| ${acts}` : tr.target + (acts ? ` | ${acts}` : '');
     })]);
     return {head: ['State', ...events], rows};
   }
@@ -832,12 +862,12 @@
     return h('div', {class: 'sm-buzz', title: 'buzzer (no sound)'}, icon, h('span', {text: o.name}));
   }
 
-  const SPEEDS = [1, 0.1, 0.01];
+  const TOKEN_MS = 420;   // the dot along an arrow
 
   function mount(host, model) {
     const n = ++uid;
     const multi = model.machines.length > 1;
-    let sim = null, paused = false, speed = model.speed.value, alive = true, visible = true;
+    let sim = null, paused = false, speed = model.speed, alive = true, visible = true;
     const bouncy = {};
     const views = model.machines.map(m => machineView(m, multi));
     const top = h('div', {class: 'sm'});
@@ -877,7 +907,7 @@
       pauseBtn.textContent = paused ? 'Run' : 'Pause';
       pauseBtn.setAttribute('aria-pressed', String(paused));
     }}, 'Pause');
-    const speeds = SPEEDS.includes(speed) ? SPEEDS : [...SPEEDS, speed].sort((a, b) => b - a);
+    const speeds = model.speeds;
     const speedBtns = speeds.map(value => h('button', {type: 'button', 'aria-pressed': String(value === speed), onClick: () => {
       speed = value;
       speedBtns.forEach((b, k) => b.setAttribute('aria-pressed', String(speeds[k] === value)));
@@ -888,11 +918,12 @@
       else status(to.kind === 'bounce' ? `A bounce: ${to.what}.` : to.kind === 'timer' ? `Skipped to the end of timer ${to.what}.` : `Skipped to ${to.what}.`);
     }}, 'Skip ahead');
     const clock = h('span', {class: 'sm-clock'});
-    top.append(h('div', {class: 'sm-ctl'},
-      h('button', {class: 'sm-btn', type: 'button', onClick: reset}, 'Reset'), pauseBtn,
-      h('span', {class: 'sm-lbl', text: 'Speed'}), h('div', {class: 'sm-seg', role: 'group', 'aria-label': 'Speed'}, speedBtns),
-      timed || holdViews.some(v => v.input.bouncy) ? skipBtn : null, clock));
-    const statusEl = h('div', {class: 'sm-status', 'aria-live': 'polite'});
+    const resetBtn = h('button', {class: 'sm-btn', type: 'button', onClick: () => reset(true)}, 'Reset');
+    top.append(h('div', {class: 'sm-ctl'}, model.clock ? [resetBtn, pauseBtn,
+      speeds.length > 1 ? [h('span', {class: 'sm-lbl', text: 'Speed'}), h('div', {class: 'sm-seg', role: 'group', 'aria-label': 'Speed'}, speedBtns)] : null,
+      timed || holdViews.some(v => v.input.bouncy) ? skipBtn : null, clock] : resetBtn));
+    // without a log under it, an empty status line takes no space (saxion.scss)
+    const statusEl = h('div', {class: model.log === 'hidden' ? 'sm-status sm-last' : 'sm-status', 'aria-live': 'polite'});
     top.append(statusEl);
     const logEl = h('div', {class: 'sm-log'});
     if (model.log !== 'hidden') top.append(h('details', {class: 'sm-logbox', open: model.log === 'open'}, h('summary', {text: 'Log'}), logEl));
@@ -947,33 +978,43 @@
       el.classList.add(cls);
       el._smTimer = setTimeout(() => el.classList.remove(cls), ms);
     }
+    // lines in a box (entry actions, an internal action) light up for a moment
+    function glow(v, key, delay) {
+      const lines = v.pic.lines[key];
+      if (!lines || v.folded || reduceMotion()) return;
+      const go = () => lines.forEach(t => pulse(t, 'glow', 1300));
+      if (delay) setTimeout(go, delay); else go();
+    }
+    // a dot along the arrow; false if there is none (reduced motion)
     function token(edge) {
-      if (reduceMotion()) return;
+      if (reduceMotion()) return false;
       let len = 0;
-      try { len = edge.path.getTotalLength(); } catch (e) { return; }
-      if (!len) return;
+      try { len = edge.path.getTotalLength(); } catch (e) { return false; }
+      if (!len) return false;
       const t0 = performance.now();
       edge.anim = t0;
       if (!edge.dot) { edge.dot = sv('circle', {class: 'sm-token', r: 4.5}); edge.g.append(edge.dot); }
       const step = now => {
         if (edge.anim !== t0) return;
-        const k = Math.min(1, (now - t0) / 420);
+        const k = Math.min(1, (now - t0) / TOKEN_MS);
         const p = edge.path.getPointAtLength(len * k);
         edge.dot.setAttribute('cx', r1(p.x)); edge.dot.setAttribute('cy', r1(p.y));
         if (k < 1) requestAnimationFrame(step); else { edge.dot.remove(); edge.dot = null; }
       };
       requestAnimationFrame(step);
+      return true;
     }
     const hooks = {
       log: addLog,
       fired: (s, tr) => {
         const v = views.find(x => x.m === s.m);
-        if (tr.internal) { for (const t of v.pic.lines[tr.id] || []) pulse(t, 'fired', 900); return; }
+        if (tr.internal) { glow(v, tr.id, 0); return; }
         const e = v.pic.edges[tr.id];
         if (!e) return;
         pulse(e.g, 'fired', 1000);
         pulse(e.label, 'fired', 1000);
-        if (!v.folded) token(e);
+        // the entry actions light up when the dot arrives: after the arrow's actions
+        glow(v, `${tr.target}|entry`, !v.folded && token(e) ? TOKEN_MS : 0);
       },
       ignored: (e, ms) => {
         if (e.source !== 'input' && e.source !== 'edge') return;
@@ -1061,7 +1102,8 @@
       holdViews.forEach(paintTrace);
       clock.textContent = `t = ${(sim.t / 1000).toFixed(3)} s`;
     }
-    function reset() {
+    // back to the start; after a click on Reset, the entry actions of the first states light up
+    function reset(clicked = false) {
       logEl.replaceChildren();
       statusEl.textContent = '';
       holdViews.forEach(hv => hv.release());
@@ -1069,6 +1111,7 @@
       for (const name of Object.keys(bouncy)) sim.holds[name].bouncy = bouncy[name];
       shownText = -1;
       paint();
+      if (clicked) views.forEach((v, k) => glow(v, `${sim.ms[k].state}|entry`, 0));
     }
     reset();
 
@@ -1103,6 +1146,9 @@
     });
     return yamlReader;
   }
+  // YAML reads a value that starts with | as a block of text: `LAP: | print "lap"` cannot be read
+  const barHint = text => (/:[ \t]*\|[ \t]*[^\s#|>+\-\d]/m.test(text)
+    ? `\nAn arrow that starts with | needs quotes: LAP: '| print "lap"' (or write / print "lap").` : '');
   function editor(el, show, original) {
     const area = h('textarea', {class: 'sm-editor', spellcheck: 'false', 'aria-label': 'The state machine (YAML)'});
     area.value = original;
@@ -1115,7 +1161,7 @@
     };
     const apply = async () => {
       try { done(show((await readYaml())(area.value))); }
-      catch (e) { error.textContent = e.message; warnings.replaceChildren(); }
+      catch (e) { error.textContent = e.message + (e.name === 'YAMLException' ? barHint(area.value) : ''); warnings.replaceChildren(); }
     };
     const reset = () => {
       area.value = original;
@@ -1147,7 +1193,7 @@
 
   root.CourseStatemachines = {read, Sim, print, fmt,
     // for the tests (tests/statemachine.js)
-    internals: {layoutMachine, drawMachine, selfLoop, transitionTable, textWidth, stateLines, edgeLines, svgText, speedOf}};
+    internals: {layoutMachine, drawMachine, selfLoop, transitionTable, textWidth, measure, stateLines, edgeLines, svgText, speedOf, speedLabel, autoSpeeds}};
 
   if (hasDom) {
     const mountAll = () => document.querySelectorAll('.course-statemachine[data-config]').forEach(el => {

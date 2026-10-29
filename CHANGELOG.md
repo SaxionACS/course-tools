@@ -14,6 +14,37 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.3.0 (2026-10-29)
+
+State machines, after their first use in a lesson:
+
+- The clock, *Pause*, *Speed* and *Skip ahead* appear only for machines that
+  use time (`after`, named timers, held conditions, `blink`, bouncy inputs).
+  A light switch shows only *Reset*. `clock: true` or `clock: false`
+  overrides this.
+- Diagrams, internal actions and the PDF's transition tables show `|` between
+  the event and the actions (`pressed | LED on`). The YAML takes `/`, as
+  before, or `|`. A value that starts with an unquoted `|` (which YAML reads as
+  a block of text) is reported with a hint.
+- Two `/` on one arrow are reported as such.
+- Bigger text in the diagrams (state names 15px, actions 13px, arrow labels
+  14px), also in the PDF; diagrams are centred in their block.
+- When a state is entered, its entry actions light up for a moment, after
+  the dot along the arrow; an internal action lights up when it runs.
+- Speed buttons follow the machine's times: slower ones for short times and
+  bounces, faster ones (2× to 100×) for long times, none when only 1× makes
+  sense. `speeds: [1, 2, 10]` sets them by hand; `speed:` can be faster than
+  1 now.
+- A block without a log no longer ends with an empty line.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 141 checks
+  (`tests/statemachine.js`: 122, in the browser: 23).
+- **macOS:** untested.
+- **Windows:** untested; nothing platform-specific.
+
 ## 2.2.0 (2026-10-29)
 
 State machines: ```` ```statemachine ```` blocks (see

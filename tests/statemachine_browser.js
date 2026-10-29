@@ -103,11 +103,19 @@ try {
   ok(await js(`T.state(0)`) === 'ON' && await js(`T.led(0, 'LED')`) === true && (await js(`T.log(0)`)).includes('pressed: OFF -> ON'),
     'switch: a click moves it to ON, the LED goes on, the log says so', await js(`T.log(0)`));
   ok(await js(`!!T.block(0).querySelector('.sm-source textarea')`) === false, 'switch: no YAML editor on the published site');
+  ok(await js(`T.block(0).querySelector('.sm-ctl').textContent`) === 'Reset' && await js(`!!T.block(4).querySelector('.sm-ctl .sm-clock')`),
+    'switch: no clock, pause or speed without time (only Reset); clock: true shows them', await js(`T.block(0).querySelector('.sm-ctl').textContent`));
+  const labels = await js(`[...T.block(0).querySelectorAll('.sm-edge .lbl')].map(t => t.textContent).sort().join()`);
+  ok(labels === 'pressed | LED off,pressed | LED on', 'switch: | between the event and the actions, whether the YAML has / or |', labels);
 
   // the debouncer: a bouncy pin, skip ahead through the bounces to the press; the folded switch reacts
   ok(await js(`T.block(1).querySelectorAll('.sm-panel.folded').length`) === 1 && await js(`!T.block(1).querySelector('.sm-log')?.isConnected`),
     'side by side: folded: true folds the switch; log: hidden has no log');
-  ok(await js(`T.block(1).querySelector('.sm-seg [aria-pressed="true"]').textContent`) === '1/100×', 'side by side: starts at 1/100 speed');
+  ok(await js(`T.block(1).querySelector('.sm-seg [aria-pressed="true"]').textContent`) === '1/100×'
+    && await js(`T.block(1).querySelector('.sm-seg').textContent`) === '1/100×1/10×1×', 'side by side: starts at 1/100 speed; speed buttons for bounces');
+  ok(await js(`getComputedStyle(T.block(1).querySelector('.sm-status')).display`) === 'none'
+    && await js(`getComputedStyle(T.block(2).querySelector('.sm-status')).display`) !== 'none',
+    'an empty status line takes no space when it is the last line (log: hidden), and keeps it above a log');
   await js(`T.click(1, 'Pause')`);
   await js(`T.click(1, 'pin')`);
   ok(await js(`T.block(1).querySelector('.sm-tracecap').textContent.startsWith('pin high')`), 'side by side: a click sets the pin high');
@@ -127,7 +135,12 @@ try {
   ok(await js(`T.status(2)`) === 'LAP is ignored: RESET has no arrow for it.' && (await js(`T.log(2)`)).includes('LAP ignored in RESET'),
     'stopwatch: an ignored event is shown and logged', await js(`T.status(2)`));
   await js(`T.click(2, 'START')`);
+  await sleep(600);
+  ok(await js(`[...T.block(2).querySelectorAll('.act.glow')].map(t => t.textContent).join(' | ')`) === 'entry: print "running", | start limit 50..60 s',
+    'stopwatch: the entry actions light up when RUNNING is entered', await js(`[...T.block(2).querySelectorAll('.act.glow')].map(t => t.textContent).join(' | ')`));
   await js(`T.click(2, 'LAP')`);
+  ok(await js(`[...T.block(2).querySelectorAll('.act.internal.glow')].map(t => t.textContent).join()`) === 'LAP | print "lap"',
+    'stopwatch: an internal action lights up when it runs');
   ok(await js(`T.text(2)`) === 'reset\nrunning\nlap' && await js(`T.state(2)`) === 'RUNNING', 'stopwatch: an internal action prints and stays', await js(`T.text(2)`));
   ok((await js(`T.block(2).querySelector('.sm-timers').textContent`)).includes('limit'), 'stopwatch: the timer limit is shown');
   await js(`T.click(2, 'START')`);

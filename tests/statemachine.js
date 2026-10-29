@@ -91,9 +91,29 @@ for (const [id, config] of Object.entries(EX)) {
   ok(q.length === 3 && q[0].text === 'say "hi"', 'quotes in a print; empty items are skipped', JSON.stringify(q));
   const t = read({inputs: {b: 'button'}, states: {A: {on: {b: 'A / start T 2..5s', T: 'A'}}}}).machines[0].states.A.on[0].actions[0];
   ok(t.time.min === 2000 && t.time.max === 5000 && t.src === 'start T 2..5 s', 'a random time, written without a space', JSON.stringify(t));
-  ok(read(EX.button).speed.value === 0.01 && read(EX.button).speed.label === '1/100×', 'speed 1/100');
-  ok(I.speedOf(0.5).label === '1/2×' && I.speedOf('1').value === 1, 'speed 0.5 and 1');
+  ok(read(EX.button).speed === 0.01, 'speed 1/100');
+  ok(I.speedOf(0.5, 'speed') === 0.5 && I.speedOf('1', 'speed') === 1 && I.speedOf(10, 'speed') === 10, 'speed 0.5, 1 and 10');
+  ok(['1/100', 0.5, 1, 2, 2.5].map(v => I.speedLabel(I.speedOf(v, 'speed'))).join() === '1/100×,1/2×,1×,2×,2.5×', 'speed labels');
+  // the speed buttons: from the times of the machine, or from speeds:
+  const auto = Object.fromEntries(Object.keys(EX).map(id => [id, read(EX[id]).speeds.map(I.speedLabel).join(' ')]));
+  const want = {switch: '1×', staircase: '1× 2× 5× 10×', staircase2: '1× 2× 5× 10×', alarm: '1× 2× 5× 10×', button: '1/100× 1/10× 1×',
+    side: '1×', stopwatch: '1×', long: '1×', kitchen: '1× 2× 5×', traffic: '1× 2× 5×'};
+  ok(JSON.stringify(auto) === JSON.stringify(want), 'speed buttons: slower for short times and bounces, faster for long times', JSON.stringify(auto));
+  ok(I.autoSpeeds([50]).join() === '0.1,1' && I.autoSpeeds([60000]).join() === '1,10,20,50' && I.autoSpeeds([1500, 2500]).join() === '1,2',
+    'speed buttons: 1/10 under 100 ms, up to three speed-ups', [I.autoSpeeds([50]), I.autoSpeeds([60000]), I.autoSpeeds([1500, 2500])].join(' / '));
+  const sp = c => { const m = read(Object.assign(copy(EX.switch), c)); return `${m.speeds.map(I.speedLabel).join(' ')} @${I.speedLabel(m.speed)}`; };
+  ok(sp({speeds: [1, 2, 10]}) === '1× 2× 10× @1×' && sp({speeds: ['1/10', 1], speed: 5}) === '1/10× 1× 5× @5×' && sp({speeds: [2, 10]}) === '2× 10× @2×'
+    && sp({speed: '1/4'}) === '1/4× 1× @1/4×', 'speeds: by hand; the start speed is one of them', [sp({speeds: [1, 2, 10]}), sp({speeds: ['1/10', 1], speed: 5}), sp({speeds: [2, 10]}), sp({speed: '1/4'})].join(' / '));
   ok(read(Object.assign(copy(EX.switch), {log: 'hidden'})).log === 'hidden' && read(EX.switch).log === 'open', 'log: hidden; open by default');
+  const clocks = ['switch', 'staircase', 'staircase2', 'alarm', 'button', 'stopwatch', 'long', 'kitchen'].map(id => read(EX[id]).clock);
+  ok(clocks.join() === 'false,true,true,true,true,true,true,true', 'the clock and its controls only for machines that use time (after, timers, blink, held, bounces)', clocks.join());
+  ok(read(Object.assign(copy(EX.switch), {clock: true})).clock === true && read(Object.assign(copy(EX.staircase), {clock: false})).clock === false,
+    'clock: true and clock: false override that');
+  const bar = read({inputs: {b: 'button'}, outputs: {L: 'led'}, states: {A: {on: {b: 'B | L on, send x'}}, B: {on: {b: '| L off', x: 'A'}}}}).machines[0].states;
+  ok(bar.A.on[0].target === 'B' && bar.A.on[0].actions.map(a => a.src).join() === 'L on,send x' && bar.B.on[0].internal && bar.B.on[0].actions[0].src === 'L off',
+    '| separates the state from the actions, as / does', JSON.stringify(bar.A.on[0]));
+  const slash = read({inputs: {b: 'button'}, outputs: {L: 'led'}, states: {A: {on: {b: 'A / print "a/b|c"'}}}}).machines[0].states.A.on[0];
+  ok(slash.target === 'A' && slash.actions[0].text === 'a/b|c', '/ and | inside a print are text', JSON.stringify(slash.actions));
 }
 
 // ---- mistakes are reported, with what to write instead -------------------
@@ -114,11 +134,14 @@ c = alarm(); c.states.ARMED.entry = 'LED on print Ready'; bad(c, /print needs it
 c = alarm(); c.states.ARMED.entry = 'LED onn'; bad(c, /write LED on, LED off or LED toggle/, 'on with a typo');
 c = alarm(); c.states.ARMED.entry = 'beep'; bad(c, /"beep" is not an action. Actions are: LED on/, 'an unknown action');
 c = alarm(); c.states.ARMED.on.door_opened = 'ALARM LED on'; bad(c, /write the state, then \/ and the actions/, 'actions without a /');
+c = alarm(); c.states.ARMED.on.door_opened = 'ALARM / LED on / LED off'; bad(c, /one \/ per arrow/, 'two / on one arrow');
 c = copy(EX.long); c.states.IDLE.on = {KEY: 'DOWN'}; bad(c, /KEY is a hold button: write KEY pressed or KEY released/, 'a hold button without pressed or released');
 c = copy(EX.switch); c.states.LIGHT_OFF.on = {'pressed released': 'LIGHT_ON'}; bad(c, /click button/, 'released of a click button');
 c = copy(EX.switch); c.outputs = {LED: 'purple led'}; bad(c, /"purple led" is not an output/, 'an LED colour that does not exist');
 c = copy(EX.switch); c.inputs = {start: 'button'}; bad(c, /"start" is a word of the state machine language/, 'an input named like an action');
-c = copy(EX.switch); c.speed = '2'; bad(c, /speed: is 1 \(real time\) or slower/, 'speed above 1');
+c = copy(EX.switch); c.speed = '200'; bad(c, /speed: "200" is not a speed/, 'speed above 100');
+c = copy(EX.switch); c.speeds = []; bad(c, /speeds: is a list of 1 to 8 speeds/, 'speeds: empty');
+c = copy(EX.switch); c.speeds = [1, 'fast']; bad(c, /speeds: "fast" is not a speed/, 'speeds: a word');
 c = copy(EX.switch); c.log = 'closed'; bad(c, /log: is open, folded or hidden/, 'log: closed');
 c = copy(EX.switch); c.colour = 'red'; bad(c, /unknown key "colour"/, 'an unknown key');
 c = copy(EX.staircase); c.states.LIGHT_ON.on = {'after 10': 'LIGHT_OFF'}; bad(c, /"10" is not a time/, 'a time without a unit');
@@ -230,7 +253,7 @@ for (const [id, config] of Object.entries(EX)) {
       if (to && !(end.x >= to.x0 - 1 && end.x <= to.x1 + 1 && end.y >= to.y0 - 1 && end.y <= to.y1 + 1)) problems.push(`arrow ${e.from} -> ${e.to} ends away from its state`);
     }
     for (const a of nodes) for (const l of a.n.lines) {
-      if (I.textWidth(l.text, l.kind === 'internal' ? 'regular' : 'italic', 11.5) + 22 > a.n.w) problems.push(`text "${l.text}" wider than ${a.n.name}`);
+      if (I.measure(l.text, l.kind) + 24 > a.n.w) problems.push(`text "${l.text}" wider than ${a.n.name}`);
     }
     ok(!problems.length, `${where}: nothing overlaps`, problems.join('; '));
     const pic = I.drawMachine(geo, m, I.svgText, true);
@@ -260,10 +283,13 @@ for (const [id, config] of Object.entries(EX)) {
     && t.rows.map(row => row.join('|')).join('\n') === 'DISARMED|ARMING|–|–\nARMING|DISARMED|ARMED|–\nARMED|DISARMED|–|ALARM\nALARM|DISARMED|–|–',
   'print: the transition table', JSON.stringify(t));
   const s = print(EX.stopwatch).machines[0].table.rows.find(row => row[0] === 'SW_RUNNING');
-  ok(s.join('|') === 'SW_RUNNING|SW_STOPPED|/ print "lap"', 'print: an internal action in the table', s.join('|'));
+  ok(JSON.stringify(s) === JSON.stringify(['SW_RUNNING', 'SW_STOPPED', '| print "lap"']), 'print: an internal action in the table', JSON.stringify(s));
+  ok(print(EX.stopwatch).machines[0].svg.includes('>LAP | print &quot;lap&quot;<') && print(EX.switch).machines[0].svg.includes('>pressed | LED on<')
+    && JSON.stringify(print(EX.switch).machines[0].table.rows[0]) === JSON.stringify(['LIGHT_OFF', 'LIGHT_ON | LED on']),
+  'print: | between the event and the actions, in the boxes, on the arrows and in the table');
   const b = print(EX.button);
   ok(b.machines.map(x => x.title).join('|') === 'btn_just_pressed()|light switch' && b.machines[0].svg.includes('>[pin high for 50 ms]<')
-    && b.machines[0].svg.includes('>/ send pressed<'), 'print: machines side by side, each with its title; a held condition in brackets');
+    && b.machines[0].svg.includes('>| send pressed<'), 'print: machines side by side, each with its title; a held condition in brackets');
   ok(print({states: {A: {entry: 'X on'}}}).error === 'state A, entry: there is no output X. Add it under outputs:, e.g. outputs: {X: red led}',
     'print: a mistake is the error, with no picture');
   ok(print(EX.kitchen).machines[0].svg.includes('print &quot;Cooking, wait...&quot;'), 'print: quotes in the SVG are escaped');

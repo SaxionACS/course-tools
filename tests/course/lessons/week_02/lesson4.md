@@ -6,7 +6,8 @@ build reports them.
 ## A switch
 
 States named ON and OFF, and the key `on:`: YAML 1.1 would read them as
-booleans.
+booleans. One arrow separates its actions with `|`, the other with `/`. No
+timers: no clock.
 
 ```statemachine
 title: SM-TITLE
@@ -23,7 +24,7 @@ states:
       pressed: ON / LED on
   ON:
     on:
-      pressed: OFF / LED off
+      pressed: OFF | LED off
 ```
 
 ## Two machines side by side
@@ -119,6 +120,7 @@ states:
 ```
 
 ```statemachine
+clock: true
 inputs:
   pressed: button
   unused: button
