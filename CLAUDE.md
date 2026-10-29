@@ -100,8 +100,9 @@ what changed recently.
   maintainer's Mac brings macOS up to date when asked (see "Syncing macOS").
 - **Windows 10/11** (x64), natively, is best effort too, with no CI. WSL
   (Ubuntu) is the recommended way on Windows: it is 2-4 times faster. The
-  maintainer's Windows laptop runs WSL; from WSL, a Claude agent can test
-  native Windows with `powershell.exe`, in a folder in `%TEMP%` with uv's
+  maintainer's Windows laptop runs WSL; from WSL, a Claude agent brings native
+  Windows up to date when asked (see "Syncing Windows"). It tests native
+  Windows with `powershell.exe`, in a folder in `%TEMP%` with uv's
   folders, `COURSE_TOOLS_HOME`, `DENO_DIR` and `TEMP` pointed into it and
   `UV_NO_MODIFY_PATH=1` (else `uv tool update-shell` changes the user's PATH).
 - Keep things working on all three:
@@ -141,7 +142,7 @@ what changed recently.
 ## Branches, CI and merging
 
 - Never work directly on `main`. Use a branch: `feature/<topic>`,
-  `fix/<topic>` or `macos/<topic>`.
+  `fix/<topic>`, `macos/<topic>` or `windows/<topic>`.
 - Push the branch. The Check workflow runs `scripts/check.py` on Ubuntu for
   every push. It builds, but publishes nothing.
 - Merge the branch into `main` only when the Check workflow has passed on the
@@ -178,6 +179,37 @@ course-tools to v2.1.0 on this Mac"):
    `macos/v<version>`. Don't change how things work on Ubuntu. Update the
    macOS line of the platform notes: `verified on macOS <version> (<chip>),
    <date>`, or what is still broken.
+6. Push the branch and merge it into `main` when the Check workflow has passed.
+   If nothing needed fixing, only update the platform notes, on the same kind
+   of branch.
+
+## Syncing Windows
+
+course-tools is developed in WSL. A second clone on the Windows drive
+(`C:\...`, `/mnt/c/...` in WSL) is only for bringing native Windows up to date,
+by a Claude agent in WSL opened in that clone, when asked (for example "sync
+course-tools to v2.3.0 on Windows"). Don't develop anything else there.
+
+1. `git fetch --tags` and check out `main` (`git pull`: this clone is often
+   behind).
+2. Read the Windows line of the platform notes of every `CHANGELOG.md` entry
+   after the last one verified on Windows.
+3. Make a sandbox folder in `%TEMP%`. Point `UV_TOOL_DIR`, `UV_TOOL_BIN_DIR`,
+   `UV_PYTHON_INSTALL_DIR`, `UV_CACHE_DIR`, `COURSE_TOOLS_HOME`, `DENO_DIR`,
+   `TEMP` and `TMP` into it, set `UV_PYTHON_PREFERENCE=only-managed` and
+   `UV_NO_MODIFY_PATH=1`, and put its `UV_TOOL_BIN_DIR` first on `PATH`. The
+   maintainer's own Windows installation and `PATH` stay as they are.
+4. In that environment, run `install.ps1 -Local` from the clone, then
+   `scripts\check.py` with the installed tool's Python
+   (`<UV_TOOL_DIR>\saxion-course-tools\Scripts\python.exe`). Run the
+   PowerShell scripts with `powershell.exe -NoProfile -ExecutionPolicy Bypass
+   -File <script>`, write their output to a file and read it from WSL
+   (`tr -d '\r'`). It takes 2-4 times as long as in WSL.
+5. If something fails because of Windows, fix it in this clone on a branch
+   `windows/v<version>`. Don't change how things work on Ubuntu or macOS.
+   Update the Windows line of the platform notes: `verified on Windows
+   <edition> (x64), <date>, natively, in a sandbox folder`, or what is still
+   broken.
 6. Push the branch and merge it into `main` when the Check workflow has passed.
    If nothing needed fixing, only update the platform notes, on the same kind
    of branch.
