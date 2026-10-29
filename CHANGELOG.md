@@ -14,7 +14,7 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.2.0 (unreleased)
+## 2.2.0 (2026-10-29)
 
 State machines: ```` ```statemachine ```` blocks (see
 [docs/statemachines.md](docs/statemachines.md)).
@@ -56,7 +56,7 @@ Platform notes:
 - **Windows:** untested; the browser test turns Windows paths into `file:///`
   URLs, nothing else is platform-specific.
 
-## 2.1.0 (unreleased)
+## 2.1.0 (2026-10-29)
 
 Windows: course-tools runs natively on Windows 10/11 (x64).
 
