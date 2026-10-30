@@ -46,6 +46,16 @@ main.content :is(p, li, td, dd) a:not(.btn):not(.nav-link) {
 .callout.callout-style-simple .callout-body {
   font-size: 1rem;
 }
+// A closed callout with teaser="..." shows it under its title (filters/course.lua).
+.callout-teaser { display: none; }
+.callout-header.collapsed .callout-teaser {
+  display: block;
+  font-size: 1rem;
+  font-weight: 400;
+  margin-top: .15rem;
+}
+// the icon and the toggle stay next to the title, not halfway down the teaser
+.callout .callout-header.collapsed:has(.callout-teaser) { align-items: flex-start; }
 
 .sidebar-title a {
   color: $saxion-green;

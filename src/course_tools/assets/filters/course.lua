@@ -446,6 +446,24 @@ local function annotations(blocks)
   if changed then return blocks end
 end
 
+-- Callouts with a teaser ----------------------------------------------------
+
+-- `::: {.callout-tip collapse="true" teaser="..."}`: while the callout is
+-- closed, the teaser (Markdown) shows under its title; saxion.scss hides it
+-- when the callout is open. Not in the PDF, where callouts are always open.
+local function teaser(callout)
+  local text = callout.attr.attributes.teaser
+  if not text then return nil end
+  callout.attr.attributes.teaser = nil
+  if is_html and callout.collapse ~= nil and callout.title and callout.title.content then
+    local first = pandoc.read(text, 'markdown').blocks[1]
+    callout.title.content:insert(pandoc.Span(first and first.content or {}, pandoc.Attr('', {'callout-teaser'})))
+  elseif is_html then
+    quarto.log.warning('teaser="' .. text .. '": only a callout with a title and collapse="true" or "false" shows a teaser')
+  end
+  return callout
+end
+
 -- Images (PDF) ------------------------------------------------------------
 
 -- Width of the text area of an A4 page with the margins from _quarto.yml.
@@ -468,5 +486,6 @@ return {
   {Div = align_cell, CodeBlock = align_plantuml},
   {Pandoc = decorate},
   {Link = link},
+  {Callout = teaser},
   is_typst and {Image = fit_image} or {},
 }
