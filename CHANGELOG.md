@@ -14,10 +14,13 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.5.0 (unreleased)
+## 2.5.0 (2026-10-30)
 
 - Callouts on the website: their text and code are as big as in the rest of
   the page (Quarto made them 90 %). The PDF had them right already.
+- A callout that opens and closes (`collapse="true"`) can have a
+  `teaser="..."`: a line under its title while it is closed, to say what is
+  inside. See Callouts in [docs/authoring.md](docs/authoring.md).
 
 State machines:
 
@@ -28,7 +31,7 @@ State machines:
 Platform notes:
 
 - **Dependencies:** none.
-- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 142 checks
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 145 checks
   (`tests/statemachine.js`: 133, in the browser: 27).
 - **macOS:** untested; nothing platform-specific.
 - **Windows:** untested; nothing platform-specific.

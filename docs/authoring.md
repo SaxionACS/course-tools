@@ -203,6 +203,20 @@ Text of the tip.
 The types are `callout-note`, `callout-tip`, `callout-warning`,
 `callout-important` and `callout-caution`.
 
+With `collapse="true"` a callout starts closed, and a click on its title
+opens it (`collapse="false"`: it starts open and can be closed). Such a
+callout can have a `teaser`: a line shown under the title while the callout
+is closed, to say what is inside. It is Markdown.
+
+```markdown
+::: {.callout-note collapse="true" teaser="Why the compiler may *remove* this loop."}
+## For the curious
+Text for who wants to know more.
+:::
+```
+
+In the PDF, callouts are always open and have no teaser.
+
 ### Tabs
 
 ```markdown

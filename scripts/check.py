@@ -501,6 +501,10 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     css = "".join(p.read_text(encoding="utf-8") for p in (dist / "site_libs" / "bootstrap").glob("bootstrap*.min.css"))
     sizes = re.findall(r"\.callout\.callout-style-simple \.callout-body\{[^}]*?font-size:([^;}]+)", css)
     c.ok(sizes[-1:] == ["1rem"], "callout text and code as big as the rest of the page", f"font-size of the callout body: {sizes}")
+    c.ok('<span class="callout-teaser">CALLOUT-TEASER-TEXT, <em>in Markdown</em></span>' in m
+         and "CALLOUT-FOLDED-TEXT" in m and "teaser=" not in m, "a closed callout with a teaser (Markdown) under its title")
+    c.ok(re.search(r"\.callout-header\.collapsed \.callout-teaser\{display:block", css) is not None,
+         "the teaser shows only while the callout is closed")
     c.ok("panel-tabset" in m, "tabs")
     c.ok(m.count('class="code-annotation-anchor') == 2 and "&lt;1&gt;" not in m,
          "C code annotations (// <1>) become annotation numbers")
@@ -599,6 +603,7 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
 
     t = text("lessons/week_01/lesson1.pdf")
     c.ok("Superloops" in t and "CALLOUT-TIP-TEXT" in t and "Open the slides" in t, "lesson PDF: title, callout, slides")
+    c.ok("CALLOUT-FOLDED-TEXT" in t and "CALLOUT-TEASER-TEXT" not in t, "lesson PDF: a closed callout is open, without its teaser")
     c.ok("// ①" in t and "① Configure the hardware once." in t, "lesson PDF: code annotations as circled numbers")
     c.ok(all(line in t for line in FOOTER), "lesson PDF: footer from git")
     c.ok("GENAI-NOTE-TEXT" in text("assignments/week_01/assignment1.pdf"), "assignment PDF: GenAI box")

@@ -31,6 +31,11 @@ A superloop is the simplest structure for embedded software.
 CALLOUT-TIP-TEXT
 :::
 
+::: {.callout-note collapse="true" teaser="CALLOUT-TEASER-TEXT, *in Markdown*"}
+## For the curious
+CALLOUT-FOLDED-TEXT
+:::
+
 ::: {.panel-tabset}
 ### C
 ```c
