@@ -63,6 +63,8 @@ REQUIRED_MESSAGES = (
     "warning: exams/exam1.md: outcomes: LO9 is not a learning outcome in general.yaml",
     "warning: general.yaml: learning outcome LO3 is not covered by any page "
     "(`outcomes` in the front matter of a page)",
+    "warning: templates/genAI/not-alowed.md replaces no template of course-tools, so it is not used "
+    "(see `course template list`)",
 )
 # Widgets with mistakes (lessons/week_02/lesson3.md): each line must start with one of these.
 WIDGET_MESSAGES = (
@@ -197,6 +199,7 @@ def check_build(c: Checks, course_cmd: list[str], course: Path, html_only: bool)
     c.ok(REQUIRED_MESSAGES[2] in lines, "a key term defined twice is reported")
     c.ok(REQUIRED_MESSAGES[3] in lines, "an unknown learning outcome in the front matter is reported")
     c.ok(REQUIRED_MESSAGES[4] in lines, "a learning outcome that no page covers is reported")
+    c.ok(REQUIRED_MESSAGES[5] in lines, "a file in templates/ that replaces no template is reported")
     missing = [m for m in WIDGET_MESSAGES if not any(line.startswith(m) for line in lines)]
     c.ok(not missing, "widgets with mistakes are reported, with the page and the widget's number", "\n        ".join(missing))
     missing = [m for m in STATEMACHINE_MESSAGES if not any(line.startswith(m) for line in lines)]
@@ -228,6 +231,23 @@ def check_preview_stage(c: Checks, course_cmd: list[str], course: Path) -> None:
     yaml = [e["yaml"] for e in data["machines"].values() if "yaml" in e]
     c.ok(len(yaml) == 1 and yaml[0].startswith("title: SM-TITLE\ntask: SM-TASK\neditable: true"),
          "editable state machines have their YAML in the preview", f"found {len(yaml)}")
+
+
+def check_template_command(c: Checks, course_cmd: list[str], course: Path) -> None:
+    """`course template list` and `copy` (after the build: the copy adds a file to the course)."""
+    c.section("Templates (course template)")
+    listed = run(course_cmd + ["template", "list"]).stdout.split()
+    c.ok({"genAI/not-allowed.md", "genAI/custom.md", "genAI/assignment-tutor.md"} <= set(listed) and len(listed) == 9,
+         "`course template list`: the policy pages and the assignment boxes", " ".join(listed))
+    copy = run(course_cmd + ["template", "copy", "genai/Tutor", "--source", str(course)])
+    target = course / "templates" / "genAI" / "tutor.md"
+    builtin = REPO / "src" / "course_tools" / "assets" / "templates" / "genAI" / "tutor.md"
+    c.ok(copy.returncode == 0 and target.is_file() and target.read_bytes() == builtin.read_bytes(),
+         "`course template copy` puts the template in the course's templates/ (any case, .md may be left out)",
+         copy.stdout.strip())
+    again = run(course_cmd + ["template", "copy", "genAI/tutor.md", "--source", str(course)])
+    c.ok(again.returncode != 0 and "--force" in again.stdout, "a second copy is refused, unless --force", again.stdout.strip())
+    target.unlink()
 
 
 def compiler_explorer_links(html: str) -> list[tuple[str, dict]]:
@@ -451,6 +471,7 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     missing = [rel for rel in PAGES + FILES if not (dist / rel).is_file()]
     c.ok(not missing, "all pages and files are there", f"missing: {missing}")
     c.ok(not (dist / "lessons" / "week1").exists(), "a wrongly named week directory is not published")
+    c.ok(not (dist / "templates").exists(), "the course's templates/ is not published")
 
     c.section("Private files")
     private = [p.relative_to(dist).as_posix() for p in dist.rglob("*") if "private" in p.relative_to(dist).parts]
@@ -534,6 +555,8 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("Generative AI: allowed, with citation" in a1 and "GENAI-NOTE-TEXT" in a1,
          "an assignment can allow GenAI, with a note")
     c.ok("Generative AI: not allowed" in a2, "other assignments follow the course policy")
+    c.ok("GENAI-OWN-BOX-TEXT" in a2 and 'href="../../../info/genai.html"' in a2 and "GENAI-COMMENT-NOT-SHOWN" not in a2,
+         "the course's own template of the GenAI box (templates/genAI/), with the link to the policy page")
     c.ok('href="logbook1.md"' in a1 and "logbook1.html" in a1, "logbook box: download and preview")
     c.ok('href="week_01-assignment2.zip"' in a2, "starter files box with the zip")
     c.ok("assignment1.html" in main_content(logbook) and 'class="course-pdf"' not in logbook,
@@ -668,6 +691,7 @@ def main() -> int:
     if check_tools(c, course_cmd) and check_build(c, course_cmd, course, args.html_only):
         check_site(c, course / "dist", args.html_only)
         check_preview_stage(c, course_cmd, course)
+        check_template_command(c, course_cmd, course)
 
     print(f"\n{c.passed} passed, {len(c.failed)} failed" + (f", {len(c.skipped)} skipped" if c.skipped else ""))
     if c.failed or args.keep:

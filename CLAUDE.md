@@ -15,6 +15,7 @@ what changed recently.
 | `src/course_tools/stage.py` | writes the Quarto project in `.build/`: pages as `.qmd`, generated pages, zips, sidebar, `_quarto.yml`; rewrites only changed files |
 | `src/course_tools/markdown.py` | GitHub Markdown → Quarto: code fences, titles, `---` rules |
 | `src/course_tools/info.py`, `models.py`, `genai.py` | pages generated from `info/general.yaml`, `assessment.yaml`, `genAI.yaml` |
+| `src/course_tools/templates.py` | templates: built-in Markdown texts a course replaces with its own `templates/<group>/<name>.md`; `course template list` / `copy` |
 | `src/course_tools/history.py` | page footer dates, from one `git log` |
 | `src/course_tools/tools.py` | the pinned Quarto, PlantUML and Chrome Headless Shell (versions and SHA-256), `course setup` (downloads them into a per-user folder) and the lookups the build uses; Java from jdk4py |
 | `src/course_tools/compiler_explorer.py` | course and page settings for Compiler Explorer links (validated, passed to the filter) |
@@ -36,7 +37,7 @@ what changed recently.
 | `src/course_tools/assets/theme/` | `head.html` (browser script), `practice.html` (self-checks, predictions, comparisons), `terms.html` (definitions on first use, review deck; reads the glossary page) and `saxion.scss` (theme) |
 | `src/course_tools/assets/typst/header.typ` | PDF styling |
 | `src/course_tools/assets/fonts/` | Lato (OFL), the body font of the PDFs: staged into `_course/fonts`, found by Typst through `font-paths` |
-| `src/course_tools/assets/texts/genai/` | texts of the GenAI policy page |
+| `src/course_tools/assets/templates/genAI/` | templates: the GenAI policy page per level, and the GenAI box of an assignment per use |
 | `src/course_tools/assets/_extensions/pandoc-ext/diagram` | vendored PlantUML filter (don't edit) |
 | `.github/workflows/publish-course.yml` | reusable workflow that course repositories call as `@v2` |
 | `.github/workflows/check.yml` | CI for this repository: runs `scripts/check.py` |

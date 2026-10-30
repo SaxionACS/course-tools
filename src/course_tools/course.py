@@ -6,6 +6,7 @@ Expected layout (all parts optional except ``info/general.yaml``)::
     info/general.yaml                 course information
     info/assessment.yaml              assessment components and matrices
     info/genAI.yaml                   generative-AI policy for the assignments
+    templates/<group>/<name>.md       the course's own texts instead of course-tools' (templates.py)
     lessons/week_NN/README.md         week overview
     lessons/week_NN/*.md              lectures
     assignments/week_NN/README.md     assignments overview of the week

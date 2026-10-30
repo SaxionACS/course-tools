@@ -14,6 +14,30 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.6.0 (2026-10-30)
+
+Templates: texts of course-tools that a course can replace.
+
+- The GenAI policy page of each level is one Markdown template
+  (`genAI/not-allowed.md`, `genAI/tutor.md`, ...), and so is the GenAI box of an
+  assignment (`genAI/assignment-allowed.md`, ...). A course replaces one with
+  its own copy in `templates/` (not published). The built-in pages are the
+  same as before.
+- `course template list` lists the templates; `course template copy
+  genAI/not-allowed.md` copies one into the course, to change it there
+  (`--force` replaces an earlier copy).
+- `description` in `info/genAI.yaml` is no longer used, and the build warns
+  about it: a course's own rules go into its copy of the policy page. Level
+  `custom` warns until the course has its own `templates/genAI/custom.md`.
+- A file in `templates/` that replaces no template (a typo) is reported.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 151 checks.
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; template names are compared with `/` and in any case.
+
 ## 2.5.0 (2026-10-30)
 
 - Callouts on the website: their text and code are as big as in the rest of

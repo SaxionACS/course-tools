@@ -287,7 +287,10 @@ rendered as the page *Generative AI and academic integrity*, which contains:
 | Field | Description |
 |:--|:--|
 | `level` | **Required.** One of the five levels below. |
-| `description` | Rules specific to the course (Markdown). Required for `custom`; for the other levels it is added as "Additional rules for this course". |
+
+Rules specific to the course go into the course's own copy of the policy
+page (see [The texts](#the-texts-templates) below). The `description` field of
+earlier versions is no longer used: the build warns if it is there.
 
 | `level` | Meaning | Assignment default | Assignment can deviate? |
 |:--|:--|:--|:--|
@@ -295,7 +298,7 @@ rendered as the page *Generative AI and academic integrity*, which contains:
 | `tutor` | GenAI may only be used as a tutor, to explain things; nothing it generates may be handed in. | tutor | yes |
 | `not-allowed-unless-stated` | Not allowed, unless an assignment explicitly allows it. | not allowed | yes |
 | `allowed-with-citation` | Allowed, if every use is cited. This is Saxion's default when a module guide says nothing. | allowed | yes |
-| `custom` | The course's own rules, in `description`. | see the rules | yes |
+| `custom` | The course's own rules, in its own `templates/genAI/custom.md`. | see the rules | yes |
 
 The numbers `1` to `5` also work as levels, in the order of the table.
 
@@ -320,8 +323,42 @@ genai:
 ---
 ```
 
-The texts of the policy page are in `src/course_tools/assets/texts/genai/` in
-course-tools. Changes there apply to all courses.
+### The texts: templates
+
+The texts are templates of course-tools, one Markdown file each:
+
+| Template | What it is |
+|:--|:--|
+| `genAI/<level>.md` | the whole policy page of a level, for example `genAI/not-allowed.md` (its title, *Generative AI and academic integrity*, is added) |
+| `genAI/assignment-<use>.md` | the box of an assignment: `assignment-allowed.md`, `assignment-tutor.md`, `assignment-not-allowed.md`, and `assignment-custom.md` for an assignment of a `custom` course that says nothing itself |
+
+A course replaces a template with a file of the same name in its own
+`templates/` directory, at the top of the course (next to `info/`). Copy the
+template there and change it:
+
+```sh
+course template list                         # the templates
+course template copy genAI/not-allowed.md    # -> templates/genAI/not-allowed.md
+```
+
+`copy` does not replace a copy the course already has, unless you add
+`--force`. The course's `templates/` is not published.
+
+- In a box template, the heading on the first line is the box's title, and
+  `{policy}` is the link to the policy page:
+  `See the [rules for generative AI]({policy}).`
+- Comments (`<!-- ... -->`) are left out of the page: every template starts
+  with one that says what it is for.
+- A file in `templates/` with a name that is no template (a typo) is not used,
+  and the build warns.
+- With level `custom`, the build warns until the course has its own
+  `templates/genAI/custom.md`: the built-in one has no rules, only a line
+  that says to write them.
+- The page footer's dates are those of the course's own policy page, if it has
+  one; otherwise those of `info/genAI.yaml`.
+
+Changes to the built-in templates (`src/course_tools/assets/templates/` in
+course-tools) apply to every course that has no copy of its own.
 
 Without `info/genAI.yaml`, the build warns, and there is no policy page and
 no boxes on the assignments. Saxion's general rule then applies: GenAI is

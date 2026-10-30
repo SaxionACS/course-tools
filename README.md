@@ -79,6 +79,8 @@ course preview --pdf   # the same, with the PDFs (slower)
 course build           # website + PDFs in dist/
 course doctor          # check the installed tools
 course setup           # download the tools again after an update of course-tools
+course template list   # texts a course can replace, e.g. genAI/not-allowed.md
+course template copy genAI/not-allowed.md   # into the course's templates/, to change it
 course clean           # remove .build/ and dist/
 ```
 

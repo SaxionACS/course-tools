@@ -147,8 +147,9 @@ GRADED = {"individual": "Individual", "individually": "Individual", "group": "Gr
 # Generative-AI policy levels for the assignments of a course (genAI.yaml),
 # in order. `default` is what applies to an assignment unless it says
 # otherwise; `override` says whether an assignment may deviate from it (front
-# matter `genai: allowed | tutor | not-allowed`). The texts of the policy page
-# are in assets/texts/genai/.
+# matter `genai: allowed | tutor | not-allowed`). The texts are templates:
+# the policy page genAI/<level>.md, the box of an assignment
+# genAI/assignment-<use>.md (assets/templates/, templates.py).
 # --------------------------------------------------------------------------
 
 # What an assignment allows: GenAI may be used (with citation), only as a
@@ -156,38 +157,11 @@ GRADED = {"individual": "Individual", "individually": "Individual", "group": "Gr
 GENAI_USES = ("allowed", "tutor", "not-allowed")
 
 GENAI_LEVELS = {
-    "not-allowed": {
-        "summary": "Generative AI is **not allowed** in the assignments of this course.",
-        "callout": "warning",
-        "default": "not-allowed",
-        "override": False,
-    },
-    "tutor": {
-        "summary": "Generative AI may only be used **as a tutor**: to explain things to you. "
-                   "**Nothing it generates may be handed in.**",
-        "callout": "note",
-        "default": "tutor",
-        "override": True,
-    },
-    "not-allowed-unless-stated": {
-        "summary": "Generative AI is **not allowed** in the assignments, **unless an assignment "
-                   "explicitly allows it**.",
-        "callout": "warning",
-        "default": "not-allowed",
-        "override": True,
-    },
-    "allowed-with-citation": {
-        "summary": "Generative AI is **allowed** in the assignments, **provided that you cite every use**.",
-        "callout": "tip",
-        "default": "allowed",
-        "override": True,
-    },
-    "custom": {
-        "summary": "This course has **its own rules** for generative AI in the assignments; see below.",
-        "callout": "note",
-        "default": None,
-        "override": True,
-    },
+    "not-allowed": {"default": "not-allowed", "override": False},
+    "tutor": {"default": "tutor", "override": True},
+    "not-allowed-unless-stated": {"default": "not-allowed", "override": True},
+    "allowed-with-citation": {"default": "allowed", "override": True},
+    "custom": {"default": None, "override": True},
 }
 
 GENAI_ALIASES = {str(i): key for i, key in enumerate(GENAI_LEVELS, start=1)}

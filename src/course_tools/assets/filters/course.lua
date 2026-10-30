@@ -115,39 +115,21 @@ local function history_footer(h)
   return pandoc.Div(blocks, pandoc.Attr('', {'course-history'}))
 end
 
--- Box at the top of an assignment: is generative AI allowed in it?
+-- Markdown from the metadata, already parsed by Pandoc: one paragraph is Inlines.
+local function meta_blocks(v)
+  if pandoc.utils.type(v) == 'Inlines' then return pandoc.Blocks({pandoc.Para(v)}) end
+  if pandoc.utils.type(v) == 'Blocks' then return v end
+  if v ~= nil then return pandoc.Blocks({pandoc.Para(pandoc.Inlines(str(v)))}) end
+  return pandoc.Blocks({})
+end
+
+-- Box at the top of an assignment: is generative AI allowed in it? Its title
+-- and text come from the template genAI/assignment-<use>.md (genai.py).
+local KINDS = {allowed = 'tip', tutor = 'note', ['not-allowed'] = 'warning'}
 local function genai_box(rule)
-  local T = pandoc.Inlines
-  local rules = pandoc.Link('rules for generative AI', str(rule.policy))
-  local kind, title, inlines
-  local use = str(rule.use)
-  if use == 'allowed' then
-    kind, title = 'tip', 'Generative AI: allowed, with citation'
-    inlines = T('You may use generative AI in this assignment if you cite every use: a comment '
-      .. 'with the tool and your prompt for a short piece of code, otherwise a ')
-      .. {pandoc.Code('GENAI.md')} .. T(' file. See the ') .. {rules} .. T('.')
-  elseif use == 'tutor' then
-    kind, title = 'note', 'Generative AI: as a tutor only'
-    inlines = T('You may use generative AI to have things explained to you, but nothing it '
-      .. 'generates may be handed in: write all code and text yourself. See the ') .. {rules} .. T('.')
-  elseif use == 'not-allowed' then
-    kind, title = 'warning', 'Generative AI: not allowed'
-    inlines = T('You may not use generative AI in this assignment. See the ') .. {rules} .. T('.')
-  else
-    kind, title = 'note', 'Generative AI'
-    inlines = T('See the ') .. {rules} .. T(' of this course.')
-  end
-  local blocks = pandoc.Blocks({pandoc.Para(inlines)})
-  -- The note is Markdown in the front matter, already parsed by Pandoc.
-  local note = rule.note
-  if pandoc.utils.type(note) == 'Inlines' then
-    blocks:insert(pandoc.Para(note))
-  elseif pandoc.utils.type(note) == 'Blocks' then
-    blocks:extend(note)
-  elseif note ~= nil then
-    blocks:insert(pandoc.Para(T(str(note))))
-  end
-  return callout(kind, title, blocks)
+  local blocks = meta_blocks(rule.text)
+  blocks:extend(meta_blocks(rule.note))
+  return callout(KINDS[str(rule.use)] or 'note', rule.title, blocks)
 end
 
 local function html_escape(s)

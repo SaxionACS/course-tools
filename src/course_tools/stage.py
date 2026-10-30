@@ -24,7 +24,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from . import compiler_explorer, genai, history, info, outcomes, statemachine, terms, widgets
+from . import compiler_explorer, genai, history, info, outcomes, statemachine, templates, terms, widgets
 from .course import Course, Page, Week, is_ignored
 from .markdown import join_front_matter, natural_key, rewrite_fences, separate_thematic_breaks, split_front_matter
 
@@ -134,7 +134,8 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
         files[str(f)] = root / f
 
     # 2. Pages (Markdown sources replaced by their .qmd version).
-    genai_level = genai.level(course.genai) if course.genai is not None else None
+    templates.check(root)
+    genai_level = genai.level(course.genai, root) if course.genai is not None else None
     if course.genai is None:
         print("warning: no info/genAI.yaml: the course has no generative-AI policy "
               "(Saxion's default applies: allowed, with citation)", file=sys.stderr)
@@ -184,9 +185,10 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
         if ce:
             extra["compiler-explorer"] = compiler_explorer.encode(ce)
         if page.kind == "assignment":
-            rule = genai.assignment_rule(genai_level, page.meta.get("genai"), page.src.relative_to(root).as_posix())
+            rule = genai.assignment_rule(genai_level, page.meta.get("genai"), page.src.relative_to(root).as_posix(), root)
             if rule is not None:
-                extra["genai"] = {**rule, "policy": _rel_link(page.rel, PurePosixPath("info/genai.qmd"))}
+                policy = _rel_link(page.rel, PurePosixPath("info/genai.qmd"))
+                extra["genai"] = {**rule, "text": rule["text"].replace("{policy}", policy), "policy": policy}
         body = separate_thematic_breaks(rewrite_fences(page.body))
         source = page.src.relative_to(root).as_posix() if page.src else str(page.rel)
         found_widgets += widgets.find(body, source)
@@ -223,8 +225,9 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
         files["info/assessment.qmd"] = _generated(info.assessment_page(course.assessment, course.general),
                                                   "info", page_history(root / "info" / "assessment.yaml"))
     if "info/genai.qmd" in generated:
-        files["info/genai.qmd"] = _generated(genai.policy_page(course.genai, genai_level),
-                                             "info", page_history(course.genai_file))
+        # the footer's dates: of the course's own policy page, if it has one
+        files["info/genai.qmd"] = _generated(genai.policy_page(genai_level, root), "info",
+                                             page_history(genai.policy_file(genai_level, root) or course.genai_file))
     if terms.GLOSSARY in generated:
         files[terms.GLOSSARY] = _generated(terms.glossary_page(course.terms), "glossary", kind="glossary")
         # The review deck works in the browser only: no PDF.

@@ -1,4 +1,5 @@
-"""Command-line interface: ``course build``, ``course preview``, ``course setup``, ``course doctor``, ``course clean``."""
+"""Command-line interface: ``course build``, ``course preview``, ``course setup``, ``course doctor``,
+``course template``, ``course clean``."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import __version__, tools
+from . import __version__, templates, tools
 from .course import CourseError, is_ignored, scan
 from .stage import Options, desired_files, sync
 from .statemachine import CACHE as STATEMACHINE_CACHE
@@ -178,6 +179,19 @@ def cmd_stage(args) -> int:
     return 0
 
 
+def cmd_template(args) -> int:
+    if args.action == "list":
+        for name in templates.names():
+            print(name)
+        return 0
+    source = Path(args.source).resolve()
+    if not (source / "info" / "general.yaml").is_file():
+        raise CourseError(f"{source} has no info/general.yaml - is this a course repository?")
+    target = templates.copy(args.name, source, force=args.force)
+    print(f"Copied to {target.relative_to(source).as_posix()}: the course uses it instead of the built-in text.")
+    return 0
+
+
 def cmd_clean(args) -> int:
     source = Path(args.source).resolve()
     for name in (STAGE_DIR, OUTPUT_DIR):
@@ -271,6 +285,15 @@ def main(argv=None) -> int:
     p.add_argument("--site-url", default=os.environ.get("COURSE_SITE_URL"))
     p.add_argument("--html-only", action="store_true")
     p.add_argument("--preview", action="store_true", help="stage as `course preview` does (draft pages, editable widgets)")
+
+    p = add("template", cmd_template, "List the texts of course-tools that a course can replace, or copy one into the "
+                                      "course's templates/ to change it.")
+    actions = p.add_subparsers(dest="action", required=True)
+    actions.add_parser("list", help="list the templates, e.g. genAI/not-allowed.md")
+    c = actions.add_parser("copy", help="copy a template into the course's templates/, to change it there")
+    c.add_argument("name", help="the template, as `course template list` shows it, e.g. genAI/not-allowed.md")
+    c.add_argument("--force", action="store_true", help="replace the course's copy if it has one")
+    c.add_argument("--source", default=argparse.SUPPRESS, help="course repository (default: current directory)")
 
     add("clean", cmd_clean, "Remove .build/ and dist/.")
     add("doctor", cmd_doctor, "Check that the required tools are installed.")

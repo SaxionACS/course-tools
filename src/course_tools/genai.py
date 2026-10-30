@@ -1,17 +1,19 @@
 """The generative-AI policy of a course (``info/genAI.yaml``).
 
-The policy page is assembled from the Markdown texts in
-``assets/texts/genai/``, depending on the chosen level (see
-``models.GENAI_LEVELS``). Assignments can deviate from the course default with
-``genai: allowed``, ``genai: tutor`` or ``genai: not-allowed`` in their front
-matter, where the level permits it.
+The policy page is the template ``genAI/<level>.md`` (the levels are in
+``models.GENAI_LEVELS``), and the box at the top of an assignment the template
+``genAI/assignment-<use>.md``: the built-in ones, or the course's own in its
+``templates/genAI/`` (see templates.py). Assignments can deviate from the
+course default with ``genai: allowed``, ``genai: tutor`` or
+``genai: not-allowed`` in their front matter, where the level permits it.
 """
 
 from __future__ import annotations
 
 import sys
-from importlib import resources
+from pathlib import Path
 
+from . import templates
 from .models import GENAI_ALIASES, GENAI_LEVELS, GENAI_USES
 
 # Front matter values accepted for an assignment's `genai` (besides GENAI_USES).
@@ -21,65 +23,51 @@ USE_ALIASES = {
     "false": "not-allowed", "no": "not-allowed", "not allowed": "not-allowed",
 }
 
-TEXTS = resources.files("course_tools") / "assets" / "texts" / "genai"
-
 
 def _warn(msg: str) -> None:
     print(f"warning: {msg}", file=sys.stderr)
 
 
-def _text(name: str) -> str:
-    return (TEXTS / f"{name}.md").read_text(encoding="utf-8").strip()
-
-
-def level(policy: dict) -> str | None:
+def level(policy: dict, root: Path | None = None) -> str | None:
     """The policy level of a genAI.yaml mapping, or None if it is invalid."""
     raw = str(policy.get("level", "")).strip().lower()
     key = GENAI_ALIASES.get(raw, raw)
     if key not in GENAI_LEVELS:
         _warn(f"genAI.yaml: level `{policy.get('level')}` is not one of {', '.join(GENAI_LEVELS)}")
         return None
-    if key == "custom" and not policy.get("description"):
-        _warn("genAI.yaml: level `custom` needs a `description` of the rules")
+    if policy.get("description"):
+        _warn(f"genAI.yaml: `description` is no longer used: write the course's rules in its own copy of "
+              f"the policy page (`course template copy genAI/{key}.md`)")
+    if key == "custom" and (root is None or templates.course_file(root, "genAI/custom.md") is None):
+        _warn("genAI.yaml: level `custom` needs the course's rules: write them in templates/genAI/custom.md "
+              "(`course template copy genAI/custom.md`)")
     return key
 
 
-def policy_page(policy: dict, key: str | None) -> str:
+def policy_file(key: str | None, root: Path | None) -> Path | None:
+    """The course's own policy page (templates/genAI/<level>.md), if it has one."""
+    return templates.course_file(root, f"genAI/{key}.md") if key and root is not None else None
+
+
+def policy_page(key: str | None, root: Path | None = None) -> str:
     """The policy page; ``key`` is the result of ``level(policy)``."""
     out = ["---", "title: Generative AI and academic integrity", "---", ""]
     if key is None:
         out += ["The generative-AI policy of this course is not available.", ""]
         return "\n".join(out)
-    spec = GENAI_LEVELS[key]
-    description = str(policy.get("description") or "").strip()
-
-    out += [f"::: {{.callout-{spec['callout']} appearance=\"simple\" icon=false}}",
-            f"**In short:** {spec['summary']} Whatever you hand in, you must be able to explain it.",
-            ":::", ""]
-
-    out += ["## Generative AI in this course", "", _text(f"level-{key}"), ""]
-    if description:
-        if key != "custom":
-            out += ["Additional rules for this course:", ""]
-        out += [description, ""]
-    out += [_text("scope"), ""]
-    if key in ("not-allowed", "not-allowed-unless-stated"):
-        out += [_text("not-allowed-examples"), ""]
-    if key == "tutor":
-        out += [_text("tutor-examples"), ""]
-    if key != "not-allowed":
-        out += [_text("citing"), "", _text("responsible-use"), ""]
-    out += [_text("integrity"), "", _text("oral-check"), ""]
+    out += [templates.text(f"genAI/{key}.md", root), ""]
     return "\n".join(out)
 
 
-def assignment_rule(key: str | None, value, where: str) -> dict | None:
-    """GenAI rule for one assignment: ``{"use": ..., "note": ...}``.
+def assignment_rule(key: str | None, value, where: str, root: Path | None = None) -> dict | None:
+    """GenAI rule for one assignment: ``{"use": ..., "note": ..., "title": ..., "text": ...}``.
 
     ``key`` is the course's policy level (None: no valid policy). ``value`` is
     the ``genai`` front matter of the assignment: ``allowed``, ``tutor`` or
     ``not-allowed``, or ``{use: ..., note: ...}``. ``use`` is one of
     ``GENAI_USES``; without it, the course rules decide (level ``custom``).
+    ``title`` and ``text`` are the box's, from ``genAI/assignment-<use>.md``;
+    ``{policy}`` in the text is for the link to the policy page.
     """
     if key is None:
         if value is not None:
@@ -110,4 +98,12 @@ def assignment_rule(key: str | None, value, where: str) -> dict | None:
         rule["use"] = use
     if note:
         rule["note"] = str(note).strip()
+    # the box: its title is the heading on the first line
+    name = f"genAI/assignment-{use or 'custom'}.md"
+    first, _, rest = templates.text(name, root).partition("\n")
+    if first.startswith("#"):
+        rule["title"], rule["text"] = first.lstrip("#").strip(), rest.strip()
+    else:
+        _warn(f"{name}: the first line must be the box's title, as a heading (## Generative AI: ...)")
+        rule["title"], rule["text"] = "Generative AI", f"{first}\n{rest}".strip()
     return rule
