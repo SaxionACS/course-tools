@@ -86,6 +86,9 @@ CI.
   then it installs Git for Windows with winget. From a clone:
   `powershell -ExecutionPolicy Bypass -File install.ps1` (`-Local` installs the
   clone, editable). Use `course preview` without `--pdf` where you can.
+- Natively, `course preview --pdf` once did not come up (in 13 tries): its
+  output stopped at a page with Mermaid diagrams, while Quarto waited for
+  Chrome Headless Shell. Stop it (Ctrl+C) and start it again.
 - Git for Windows checks files out with Windows line endings (CRLF); that is
   fine for course-tools.
 

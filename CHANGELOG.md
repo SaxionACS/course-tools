@@ -36,7 +36,15 @@ Platform notes:
 - **Dependencies:** none.
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 151 checks.
 - **macOS:** untested; nothing platform-specific.
-- **Windows:** untested; template names are compared with `/` and in any case.
+- **Windows:** verified on Windows 11 Enterprise (x64), 2026-10-30, natively,
+  in a sandbox folder: `install.ps1 -Local` and the `irm | iex` form,
+  `scripts/check.py` (151 checks, the browser test included), and with the
+  template, checked out with CRLF line endings: `course template list` and
+  `copy`, `course build`, and `course preview` with and without `--pdf`.
+  Once in 13 starts, `course preview --pdf` did not come up: Quarto waited
+  for Chrome Headless Shell (the Mermaid diagrams of a page's PDF) for more
+  than 25 minutes. Starting it again worked. Not seen in 11 starts on Ubuntu
+  (WSL).
 
 ## 2.5.0 (2026-10-30)
 
@@ -58,7 +66,7 @@ Platform notes:
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 145 checks
   (`tests/statemachine.js`: 133, in the browser: 27).
 - **macOS:** untested; nothing platform-specific.
-- **Windows:** untested; nothing platform-specific.
+- **Windows:** verified on Windows 11 Enterprise (x64), 2026-10-30, with 2.6.0.
 
 ## 2.4.0 (2026-10-29)
 
@@ -79,7 +87,7 @@ Platform notes:
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 141 checks
   (`tests/statemachine.js`: 132, in the browser: 27).
 - **macOS:** untested; nothing platform-specific.
-- **Windows:** untested; nothing platform-specific.
+- **Windows:** verified on Windows 11 Enterprise (x64), 2026-10-30, with 2.6.0.
 
 ## 2.3.0 (2026-10-29)
 
@@ -110,7 +118,7 @@ Platform notes:
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 141 checks
   (`tests/statemachine.js`: 122, in the browser: 23).
 - **macOS:** untested.
-- **Windows:** untested; nothing platform-specific.
+- **Windows:** verified on Windows 11 Enterprise (x64), 2026-10-30, with 2.6.0.
 
 ## 2.2.0 (2026-10-29)
 
@@ -151,8 +159,8 @@ Platform notes:
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 141
   checks (new: state machines in HTML, PDF, the preview and a browser).
 - **macOS:** untested.
-- **Windows:** untested; the browser test turns Windows paths into `file:///`
-  URLs, nothing else is platform-specific.
+- **Windows:** verified on Windows 11 Enterprise (x64), 2026-10-30, with
+  2.6.0: the browser test (Windows paths as `file:///` URLs) passes natively.
 
 ## 2.1.0 (2026-10-29)
 
