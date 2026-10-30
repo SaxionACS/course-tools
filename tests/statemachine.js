@@ -114,6 +114,19 @@ for (const [id, config] of Object.entries(EX)) {
     '| separates the state from the actions, as / does', JSON.stringify(bar.A.on[0]));
   const slash = read({inputs: {b: 'button'}, outputs: {L: 'led'}, states: {A: {on: {b: 'A / print "a/b|c"'}}}}).machines[0].states.A.on[0];
   ok(slash.target === 'A' && slash.actions[0].text === 'a/b|c', '/ and | inside a print are text', JSON.stringify(slash.actions));
+  // a list of actions over several lines: the lines after the first start under its first item
+  const box = read({inputs: {b: 'button'}, outputs: {L: 'led', M: 'led', N: 'led'},
+    states: {A: {entry: 'L on, M on, N on, print "a long text here"', do: 'blink L 500 ms, blink M 1 s, blink N 2 s',
+      on: {b: '| L toggle, M toggle, N toggle, print "x"'}}}}).machines[0].states.A;
+  const lines = I.stateLines(box);
+  let prefix = null, starts = 0, aligned = true;
+  for (const l of lines) {
+    const p = ['entry: ', 'do: ', 'b | '].find(x => l.text.startsWith(x));
+    if (p) { prefix = p; starts++; aligned &&= l.indent === 0; }
+    else aligned &&= l.indent === I.measure(prefix, l.kind) && !l.text.startsWith(' ');
+  }
+  ok(starts === 3 && lines.length >= 6 && aligned, 'entry, do and internal actions over several lines: the next lines start under the first item',
+    lines.map(l => `${Math.round(l.indent)}:${l.text}`).join(' / '));
   const tr = v => read(Object.assign(copy(EX.switch), v == null ? {} : {transition: v})).transition;
   ok([tr(), tr('600 ms'), tr('1.5 s'), tr(0), tr('0 ms'), tr('5 s')].join() === '420,600,1500,0,0,5000',
     'transition: the time of the dot, 420 ms unless set; 0 for none', [tr(), tr('600 ms'), tr('1.5 s'), tr(0), tr('0 ms'), tr('5 s')].join());
@@ -282,7 +295,7 @@ for (const [id, config] of Object.entries(EX)) {
       if (to && !(end.x >= to.x0 - 1 && end.x <= to.x1 + 1 && end.y >= to.y0 - 1 && end.y <= to.y1 + 1)) problems.push(`arrow ${e.from} -> ${e.to} ends away from its state`);
     }
     for (const a of nodes) for (const l of a.n.lines) {
-      if (I.measure(l.text, l.kind) + 24 > a.n.w) problems.push(`text "${l.text}" wider than ${a.n.name}`);
+      if (l.indent + I.measure(l.text, l.kind) + 24 > a.n.w) problems.push(`text "${l.text}" wider than ${a.n.name}`);
     }
     ok(!problems.length, `${where}: nothing overlaps`, problems.join('; '));
     const pic = I.drawMachine(geo, m, I.svgText, true);

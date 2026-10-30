@@ -14,6 +14,25 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.5.0 (unreleased)
+
+- Callouts on the website: their text and code are as big as in the rest of
+  the page (Quarto made them 90 %). The PDF had them right already.
+
+State machines:
+
+- When the entry actions, the `do` activities or an internal action of a
+  state take more than one line, the next lines start under the first item,
+  not under `entry:`, `do:` or the event. Also in the PDF.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 142 checks
+  (`tests/statemachine.js`: 133, in the browser: 27).
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
+
 ## 2.4.0 (2026-10-29)
 
 State machines:

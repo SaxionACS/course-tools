@@ -497,6 +497,10 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
         c.ok(f'href="{target}"' in m, f"a link to {what} leads to its page")
     c.ok('class="math inline"' in m and 'class="math display"' in m, "inline and display math")
     c.ok("callout-tip" in m and "CALLOUT-TIP-TEXT" in m, "callout")
+    # Quarto makes a callout's text 90 % (.9rem); the theme sets it back, later in the same file
+    css = "".join(p.read_text(encoding="utf-8") for p in (dist / "site_libs" / "bootstrap").glob("bootstrap*.min.css"))
+    sizes = re.findall(r"\.callout\.callout-style-simple \.callout-body\{[^}]*?font-size:([^;}]+)", css)
+    c.ok(sizes[-1:] == ["1rem"], "callout text and code as big as the rest of the page", f"font-size of the callout body: {sizes}")
     c.ok("panel-tabset" in m, "tabs")
     c.ok(m.count('class="code-annotation-anchor') == 2 and "&lt;1&gt;" not in m,
          "C code annotations (// <1>) become annotation numbers")

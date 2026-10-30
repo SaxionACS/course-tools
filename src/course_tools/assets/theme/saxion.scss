@@ -41,6 +41,12 @@ main.content :is(p, li, td, dd) a:not(.btn):not(.nav-link) {
   &:hover { text-decoration-style: solid; }
 }
 
+// Callouts: text and code as big as in the rest of the page (Quarto makes them 90 %).
+.callout.callout-style-default .callout-body,
+.callout.callout-style-simple .callout-body {
+  font-size: 1rem;
+}
+
 .sidebar-title a {
   color: $saxion-green;
   font-weight: 700;

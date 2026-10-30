@@ -637,21 +637,26 @@
   // Layout (dagre) and drawing
   // ========================================================================
   // items joined with commas, wrapped at about `max` characters
-  function wrapItems(prefix, items, max) {
+  // With `hang`, the lines after the first go under the first item, so they have
+  // the prefix's length less room.
+  function wrapItems(prefix, items, max, hang = false) {
     const lines = [];
     let cur = prefix;
     items.forEach((it, i) => {
       const piece = it + (i < items.length - 1 ? ',' : '');
-      if (cur !== prefix && cur.length + piece.length > max) { lines.push(cur.trimEnd()); cur = ''; }
+      const room = hang && lines.length ? max - prefix.length : max;
+      if (cur !== prefix && cur.length + piece.length > room) { lines.push(cur.trimEnd()); cur = ''; }
       cur += piece + ' ';
     });
     lines.push(cur.trimEnd());
     return lines;
   }
-  // the lines in a state's box: entry and do actions, internal actions
+  // the lines in a state's box: entry and do actions, internal actions. A line
+  // after the first of its list starts `indent` px in, under the first item.
   function stateLines(st) {
     const out = [];
-    const add = (prefix, items, kind, id) => wrapItems(prefix, items, 30).forEach(text => out.push({text, kind, id}));
+    const add = (prefix, items, kind, id) => wrapItems(prefix, items, 30, true).forEach((text, i) =>
+      out.push({text, kind, id, indent: i ? measure(prefix, kind) : 0}));
     if (st.entry.length) add('entry: ', st.entry.map(a => a.src), 'action', 'entry');
     if (st.do.length) add('do: ', st.do.map(a => a.src), 'action');
     for (const tr of st.on) if (tr.internal) add(`${tr.trigger.label} | `, tr.actions.map(a => a.src), 'internal', tr.id);
@@ -676,7 +681,7 @@
     const nodes = {};
     for (const st of Object.values(m.states)) {
       const lines = stateLines(st);
-      const w = Math.ceil(Math.max(100, measure(st.name, 'name') + 32, ...lines.map(l => measure(l.text, l.kind) + 28)));
+      const w = Math.ceil(Math.max(100, measure(st.name, 'name') + 32, ...lines.map(l => l.indent + measure(l.text, l.kind) + 28)));
       const hh = lines.length ? HEAD + 9 + lines.length * LINE + 7 : 42;
       nodes[st.name] = {name: st.name, lines, w, h: hh};
       g.setNode(st.name, {width: w, height: hh});
@@ -811,7 +816,7 @@
         g.append(make('text', {class: 'name', x: r1(n.x), y: r1(y + 20.5), 'text-anchor': 'middle', text: n.name}));
         g.append(make('line', {class: 'sep', x1: r1(x), x2: r1(x + n.w), y1: r1(y + HEAD), y2: r1(y + HEAD)}));
         n.lines.forEach((l, i) => {
-          const t = make('text', {class: l.kind === 'internal' ? 'act internal' : 'act', x: r1(x + 12), y: r1(y + HEAD + 18 + i * LINE), text: l.text});
+          const t = make('text', {class: l.kind === 'internal' ? 'act internal' : 'act', x: r1(x + 12 + l.indent), y: r1(y + HEAD + 18 + i * LINE), text: l.text});
           g.append(t);
           if (l.id) (pic.lines[l.id === 'entry' ? `${n.name}|entry` : l.id] ||= []).push(t);   // an internal action's lines, or the entry lines
         });
