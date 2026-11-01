@@ -846,6 +846,54 @@ The build checks every machine and reports mistakes and doubtful things (a
 timer nobody reacts to, a state that can never be reached) with the page and
 the machine's number.
 
+## Superloop blocks
+
+A ```` ```superloop ```` block runs a short C program from a lesson against
+simulated time. On the website students press the buttons and watch the
+program run: the line that runs or sleeps, the LEDs, the variables, and a
+timeline that shows every moment the program read an input, and marks a
+press it never read. In the PDF the block becomes the code and the timeline
+of one run with scripted presses.
+
+````markdown
+```superloop
+title: The LED follows the button
+inputs:
+  BUTTON_PIN: hold button
+outputs:
+  LED_PIN: red led
+code: |
+  while (true) {
+    bool pressed = gpio_get(BUTTON_PIN);
+    gpio_put(LED_PIN, pressed);
+  }
+script:
+  - BUTTON_PIN press at 0.5 s for 1 s
+```
+````
+
+- `code:` is a whole program (with `main()`) or a fragment as lessons show
+  code. The C is as on a Pico: `int` and `long` 32 bits, plain `char`
+  unsigned, C's integer rules; undefined behaviour stops the program with a
+  message (`undefined_behavior: permit` lets it go on as on a Pico, with a
+  warning).
+- `inputs:` and `outputs:` are named like the code's pin constants. A
+  constant the code does not declare is declared by the block (outputs GP15,
+  14, …; inputs GP16, 17, …); `setup: code` makes the program set its pins
+  up itself.
+- `variants:` instead of `code:` gives tabs that all run on the same presses;
+  `params: [DELAY_MS]` lets students change a constant in the code;
+  `watch:` shows variables; `goal:` makes a challenge.
+
+Everything a block can do is in [Superloop](superloop.md). The course
+template has a gallery of blocks to try and change:
+[`references/superloop.md`](https://github.com/SaxionACS/course_template/blob/main/references/superloop.md)
+(a [draft](#draft-pages): run `course preview` in the template).
+
+The build runs every program with its script, in the block's own sandboxed
+interpreter (no compiler), and reports mistakes with the page, the block's
+number and the line and column of the program.
+
 ## Page footer: dates from git
 
 Every page ends with a footer that says when its source file was added to the

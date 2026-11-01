@@ -24,7 +24,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from . import compiler_explorer, genai, history, info, outcomes, statemachine, templates, terms, widgets
+from . import compiler_explorer, genai, history, info, outcomes, statemachine, superloop, templates, terms, widgets
 from .course import Course, Page, Week, is_ignored
 from .markdown import join_front_matter, natural_key, rewrite_fences, separate_thematic_breaks, split_front_matter
 
@@ -47,7 +47,8 @@ class Options:
     plantuml: list[str] | None = None  # command used to run PlantUML
     widget_cache: Path | None = None   # results of the widget checks, kept between builds
     statemachine_cache: Path | None = None   # the same for state machines
-    preview: bool = False              # course preview: draft pages, and editable widgets and state machines
+    superloop_cache: Path | None = None      # and for superloop blocks
+    preview: bool = False              # course preview: draft pages, and editable widgets, state machines and superloop blocks
 
 
 # --------------------------------------------------------------------------
@@ -149,6 +150,7 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
     covered = []   # (page, its learning outcomes), for the outcome map
     found_widgets = []
     found_machines = []
+    found_loops = []
     for page in course.pages():
         if page.src is not None:
             files.pop(page.src.relative_to(root).as_posix(), None)
@@ -193,6 +195,7 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
         source = page.src.relative_to(root).as_posix() if page.src else str(page.rel)
         found_widgets += widgets.find(body, source)
         found_machines += statemachine.find(body, source)
+        found_loops += superloop.find(body, source)
         if page.meta.get("draft") is True:
             body = DRAFT_NOTE + body
         if page.kind == "week" and page.meta.get("materials", True) is not False:
@@ -208,6 +211,8 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
         files[widgets.DATA] = widgets.data(found_widgets, opts.widget_cache, editable=opts.preview)
     if found_machines:
         files[statemachine.DATA] = statemachine.data(found_machines, opts.statemachine_cache, editable=opts.preview)
+    if found_loops:
+        files[superloop.DATA] = superloop.data(found_loops, opts.superloop_cache, editable=opts.preview)
 
     # 3. Generated pages.
     generated = generated_pages(course)
@@ -413,9 +418,10 @@ def quarto_config(course: Course, opts: Options) -> dict:
         "lang": general.get("lang", "en"),
         "format": formats,
         "filters": [
-            # widgets.lua before practice.lua: a challenge widget becomes an exercise in the PDF.
+            # widgets.lua and superloop.lua before practice.lua: a challenge becomes an exercise in the PDF.
             f"{ASSETS_DIR}/filters/widgets.lua",
             f"{ASSETS_DIR}/filters/statemachine.lua",
+            f"{ASSETS_DIR}/filters/superloop.lua",
             f"{ASSETS_DIR}/filters/practice.lua",
             f"{ASSETS_DIR}/filters/compiler-explorer.lua",
             f"{ASSETS_DIR}/filters/terms.lua",

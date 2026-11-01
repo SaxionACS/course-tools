@@ -83,8 +83,13 @@ STATEMACHINE_MESSAGES = (
     "warning: lessons/week_02/lesson4.md: state machine 5: output LED is never switched",
     "warning: lessons/week_02/lesson4.md: state machine 6: the YAML cannot be read: ",
 )
+# Superloop blocks with mistakes (lessons/week_02/lesson5.md).
+SUPERLOOP_MESSAGES = (
+    'warning: lessons/week_02/lesson5.md: superloop 6: "flavour" is not a setting of a superloop block',
+    "warning: lessons/week_02/lesson5.md: superloop 7: the YAML cannot be read: ",
+)
 # Other lines that look like a warning or an error fail the check, except these.
-ALLOWED_MESSAGES = REQUIRED_MESSAGES + WIDGET_MESSAGES + STATEMACHINE_MESSAGES + (
+ALLOWED_MESSAGES = REQUIRED_MESSAGES + WIDGET_MESSAGES + STATEMACHINE_MESSAGES + SUPERLOOP_MESSAGES + (
     # Quarto, for tabsets in Typst (shown one after the other in the PDF).
     "Warning: couldn't recognize format, using default tabset rendering",
 )
@@ -231,6 +236,10 @@ def check_preview_stage(c: Checks, course_cmd: list[str], course: Path) -> None:
     yaml = [e["yaml"] for e in data["machines"].values() if "yaml" in e]
     c.ok(len(yaml) == 1 and yaml[0].startswith("title: SM-TITLE\ntask: SM-TASK\neditable: true"),
          "editable state machines have their YAML in the preview", f"found {len(yaml)}")
+    data = json.loads((build / "_course" / "superloops.json").read_text(encoding="utf-8"))
+    yaml = [e["yaml"] for e in data["blocks"].values() if "yaml" in e]
+    c.ok(len(yaml) == 1 and yaml[0].startswith("title: SL-TITLE\ntask: SL-TASK\neditable: true"),
+         "editable superloop blocks have their YAML in the preview", f"found {len(yaml)}")
 
 
 def check_template_command(c: Checks, course_cmd: list[str], course: Path) -> None:
@@ -403,6 +412,73 @@ def check_statemachine_logic(c: Checks) -> None:
         out, lines = None, [str(e)]
     c.ok(out is not None and out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
          "machines run as the examples say, mistakes are reported, layouts do not overlap"
+         + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
+
+
+def check_superloop_logic(c: Checks) -> None:
+    c.section("Superloop interpreter (quarto run tests/superloop.js)")
+    try:
+        out, lines = run([tools.quarto(), "run", str(REPO / "tests" / "superloop.js")]), []
+        lines = ANSI.sub("", out.stdout).strip().splitlines()
+    except tools.ToolError as e:
+        out, lines = None, [str(e)]
+    c.ok(out is not None and out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
+         "C's integer rules, undefined behaviour as on a Pico, the lesson programs, goals and the PDF form"
+         + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
+
+
+def check_superloop_gcc(c: Checks, course: Path) -> None:
+    """The interpreter against gcc: random expressions, and the programs of the test course's blocks (from the build)."""
+    c.section("Superloop interpreter against gcc (quarto run tests/superloop_gcc.js)")
+    cc = os.environ.get("CC", "gcc")
+    if not shutil.which(cc):
+        if os.environ.get("CI"):
+            c.ok(False, "gcc is installed (CI installs gcc-multilib)", f"{cc} not found")
+        else:
+            c.skip("the superloop interpreter against gcc", f"{cc} not installed")
+        return
+    data = json.loads((course / ".build" / "_course" / "superloops.json").read_text(encoding="utf-8"))
+    blocks = [{"where": f"block {k[:8]}", "config": json.loads(e["config"])} for k, e in sorted(data["blocks"].items()) if "config" in e]
+    path = course.parent / "superloop-blocks.json"
+    path.write_text(json.dumps(blocks), encoding="utf-8")
+    env = dict(os.environ, SUPERLOOP_REQUIRE_M32="1") if os.environ.get("CI") else None
+    try:
+        out = run([tools.quarto(), "run", str(REPO / "tests" / "superloop_gcc.js"), str(path)], env=env)
+        lines = ANSI.sub("", out.stdout).strip().splitlines()
+    except tools.ToolError as e:
+        out, lines = None, [str(e)]
+    c.ok(out is not None and out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
+         "random expressions give gcc's values, and undefined behaviour where UBSan finds it; every block program compiles"
+         + (f" ({lines[0]}; {lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
+
+
+def check_superloops(c: Checks, read, dist: Path) -> None:
+    c.section("Superloop blocks (lessons/week_02/lesson5)")
+    html = read("lessons/week_02/lesson5.html")
+    p = main_content(html)
+    divs = re.findall(r'<div class="course-superloop" id="([\w-]+)"(?: data-config="([^"]*)")?>', p)
+    configs = [json.loads(htmllib.unescape(cfg)) if cfg else {} for _, cfg in divs]
+    c.ok(len(divs) == 7, "a block for every ```superloop, not for one shown inside a code block", f"found {len(divs)}")
+    if len(divs) == 7:
+        c.ok([d[0] for d in divs[:3]] == ["superloop-1", "alarm-challenge", "superloop-3"],
+             "every block has an id: the block's own, or superloop-<n>")
+        c.ok(configs[1].get("goal", {}).get("outputs") == {"LED_PIN": "off"} and "while (true)" in configs[0]["variants"]["checking"],
+             "off stays text (YAML 1.2 booleans: only true and false); the programs as text", json.dumps(configs[1].get("goal")))
+    c.ok("NOT-A-SUPERLOOP" in p and p.count('class="sl-error"') == 1 and len(divs) == 7 and not divs[6][1],
+         "a block in a code block is shown as code; unreadable YAML is reported on the page (a mistake in a readable block: by the script)")
+    c.ok("data-yaml" not in p, "editable blocks have no YAML on the published site")
+    c.ok(re.search(r'<script src="[^"]*site_libs/quarto-contrib/course-superloop-\w+/superloop\.js"', html)
+         and "course-superloop" not in read("lessons/week_02/lesson4.html"), "the superloop script, only on pages with superloop blocks")
+    try:
+        chrome = str(tools.installed("chrome"))
+    except tools.ToolError as e:
+        c.skip("superloop blocks in a browser", str(e))
+        return
+    out = run([tools.quarto(), "run", str(REPO / "tests" / "superloop_browser.js"), chrome,
+               str(dist / "lessons" / "week_02" / "lesson5.html")])
+    lines = ANSI.sub("", out.stdout).strip().splitlines()
+    c.ok(out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
+         "in a browser: presses on both variants, a challenge, stepping, undefined behaviour noted (tests/superloop_browser.js)"
          + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
 
 
@@ -581,6 +657,7 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     check_outcomes(c, read)
     check_widgets(c, read)
     check_statemachines(c, read, dist)
+    check_superloops(c, read, dist)
     # the PDF pictures, drawn at build time (the stage, before `stage --preview` changes it)
     data = json.loads((dist.parent / ".build" / "_course" / "widgets.json").read_text(encoding="utf-8"))
     svgs = [e.get("svg", "") for e in data["widgets"].values() if '"bit_values":true' in e.get("config", "")]
@@ -662,6 +739,20 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("btn_just_pressed()" in t and "PRESSED | send pressed – PRESSED – RELEASED" in t and 'RUNNING STOPPED | print "lap"' in t,
          "state machine PDF: machines side by side, a dash for an ignored event, an internal action")
     c.ok("This state machine cannot be shown: state A, on presed" in t, "state machine PDF: a machine with a mistake says so")
+    t = text("lessons/week_02/lesson5.pdf")
+    questions, _, key = t.partition(" Answers ")
+    c.ok("SL-TITLE" in questions and "Live on the website In the PDF, this is one run of the program" in questions and "Run it on the website." in questions
+         and "SL-TASK sleeping" in questions and "if (gpio_get(BUTTON_PIN)) {" in questions,
+         "superloop PDF: title, the note that it runs live (with a link), task, the variant's name and its code")
+    c.ok("With the script: BUTTON_PIN pressed at 0.3 s for 0.4 s. The press was never read. At the end: armed = true." in questions
+         and "The press was read. At the end: armed = false." in questions, "superloop PDF: the caption of each variant's run")
+    c.ok("Exercise 1. SL-CHALLENGE" in questions and "Live on the website This exercise is done on the website" in questions and "Do it on the website." in questions
+         and "SL-ANSWER" not in questions, "superloop PDF: a challenge is an exercise, without its answer")
+    c.ok("SL-ANSWER Press once, for longer than 50 ms. (BUTTON_PIN pressed at 0.1 s for 0.15 s: armed is false and LED_PIN is off at 0.15 s.)" in key,
+         "superloop PDF: the answer at the end, checked: when the goal was met")
+    c.ok("count = −2145967296" in questions and "This superloop cannot be shown: \"flavour\" is not a setting" in questions
+         and "This superloop cannot be shown: the YAML cannot be read" in questions,
+         "superloop PDF: undefined behaviour permitted (the counter wrapped); a block with a mistake says so")
 
 
 def main() -> int:
@@ -688,7 +779,9 @@ def main() -> int:
     c = Checks()
     check_widget_logic(c)
     check_statemachine_logic(c)
+    check_superloop_logic(c)
     if check_tools(c, course_cmd) and check_build(c, course_cmd, course, args.html_only):
+        check_superloop_gcc(c, course)   # the blocks as the build read them (before `stage --preview`)
         check_site(c, course / "dist", args.html_only)
         check_preview_stage(c, course_cmd, course)
         check_template_command(c, course_cmd, course)

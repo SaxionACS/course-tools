@@ -27,10 +27,13 @@ jobs:
       - name: Check out course-tools
         uses: actions/checkout@v7
 
-      - name: Install Graphviz and poppler (pdftotext, pdffonts)
+      # gcc-multilib: tests/superloop_gcc.js checks the superloop interpreter against
+      # gcc -m32 -funsigned-char (int and long 32 bits, char unsigned, as on the RP2040),
+      # with the 32-bit UndefinedBehaviorSanitizer. Only this check needs it.
+      - name: Install Graphviz, poppler (pdftotext, pdffonts) and gcc-multilib
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends graphviz poppler-utils
+          sudo apt-get install -y --no-install-recommends graphviz poppler-utils gcc-multilib
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.2   # no major-version tags: pin a release

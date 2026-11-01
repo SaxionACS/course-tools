@@ -116,6 +116,38 @@ def _jsonable(value):
     return str(value)
 
 
+class BlockLoader(yaml.SafeLoader):
+    """YAML as the browser reads it (js-yaml): only true and false are booleans, and keys are unique.
+
+    PyYAML follows YAML 1.1, which reads on, off, yes and no as booleans: the
+    key ``on:`` of every state machine state, states or outputs named ON and
+    OFF, and ``LED_PIN: off`` in a superloop goal. And it keeps the last of two
+    equal keys, where two entries for one name are a mistake. State machines
+    and superloop blocks read their YAML with it (statemachine.py, superloop.py).
+    """
+
+    def construct_mapping(self, node, deep=False):
+        seen = set()
+        for key_node, _ in node.value:
+            k = self.construct_object(key_node, deep=deep)
+            if isinstance(k, (str, int, float, bool)) and k in seen:
+                raise yaml.constructor.ConstructorError(None, None, f"{k} appears twice", key_node.start_mark)
+            seen.add(k)
+        return super().construct_mapping(node, deep)
+
+
+BlockLoader.yaml_implicit_resolvers = {
+    first: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+BlockLoader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF"))
+
+
+def load_block(text: str):
+    """A block's YAML, read as the browser reads it (BlockLoader)."""
+    return yaml.load(text, Loader=BlockLoader)  # noqa: S506 (a SafeLoader)
+
+
 def find(body: str, source: str) -> list[Widget]:
     """The widgets of a page, their YAML read (problems are reported later, with the results)."""
     found = []

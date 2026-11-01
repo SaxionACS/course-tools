@@ -14,6 +14,55 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.7.0 (unreleased)
+
+Superloop blocks: a short C program from a lesson, running against simulated
+time. See [docs/superloop.md](docs/superloop.md).
+
+- A ```` ```superloop ```` block with YAML: the program (`code:`, or
+  `variants:` as tabs), its `inputs:` (buttons, hold buttons, pins, bouncy or
+  not) and `outputs:` (LEDs, buzzers). On the website students press the
+  buttons and watch the program run: the line that runs or sleeps, the LEDs
+  (as bright as they look), the variables (`watch:`), the counters (`show:`)
+  and a timeline of the inputs, the outputs, the processor and deadlines.
+  Each read of an input is a dot on its signal; a press the program never
+  read is marked. Variants run at the same time, on the same presses.
+- The program is C as on a Pico: the RP2040's sizes (`int` and `long` 32
+  bits, plain `char` unsigned), C's integer promotions and conversions.
+  Undefined behaviour stops the program with a message;
+  `undefined_behavior: permit` lets it go on as a Pico does (measured on a
+  Pico), with a warning for students. A variable changed twice in one
+  expression is a build error.
+- Constants that students change in the code (`params:`), Pause, Step and
+  Next loop (`controls: [step]`), speeds, a switch for bouncing.
+- Challenges (`goal:`, with `max_presses`): checked live, with *Show the
+  answer*, which can play the `answer_script` on the widget.
+- The PDF: a note that the program runs live on the website (with a link),
+  the code with line numbers, and the timeline of a run with the block's
+  `script` and a caption. A challenge is an exercise; its answer, checked at
+  build time, is in the *Answers*.
+- The program runs at build time with its script, in the block's own
+  sandboxed interpreter (no compiler, no I/O, at most 50 million statements
+  per run): the one exception to "course code is never run".
+- The YAML reader of state machines moved into `widgets.py`; superloop blocks
+  use it too. Nothing changes for state machines.
+
+Platform notes:
+
+- **Dependencies:** none for course authors. The Check workflow installs
+  `gcc-multilib`: `tests/superloop_gcc.js` checks the interpreter against
+  `gcc -m32 -funsigned-char` and the 32-bit UndefinedBehaviorSanitizer.
+  Locally, without `gcc-multilib`, it runs 64-bit and leaves `long` out;
+  without gcc, `scripts/check.py` skips it.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 166
+  checks, with `CC=gcc-13` (13.4, `-m32`, as in the Check workflow) and with
+  gcc 16.2 (64-bit, without `long`). In extra runs, 94 000 random expressions
+  agreed with gcc 13 `-m32` and UBSan, and as many with gcc 16 64-bit. The
+  Check workflow itself has not run yet.
+- **macOS:** untested. There `gcc` is clang, which has no `-m32`: the gcc
+  check runs 64-bit.
+- **Windows:** untested; without gcc, the gcc check is skipped.
+
 ## 2.6.0 (2026-10-30)
 
 Templates: texts of course-tools that a course can replace.

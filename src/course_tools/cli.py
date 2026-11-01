@@ -16,6 +16,7 @@ from . import __version__, templates, tools
 from .course import CourseError, is_ignored, scan
 from .stage import Options, desired_files, sync
 from .statemachine import CACHE as STATEMACHINE_CACHE
+from .superloop import CACHE as SUPERLOOP_CACHE
 from .tools import ToolError
 from .widgets import CACHE as WIDGET_CACHE
 
@@ -59,7 +60,8 @@ GRAPHVIZ_HINT = {"darwin": "brew install graphviz", "win32": "run `course setup`
 def _stage(source: Path, opts: Options, verbose: bool = True, settle=None) -> Path:
     course = scan(source, drafts=opts.preview)
     stage = source / STAGE_DIR
-    opts = replace(opts, widget_cache=stage / WIDGET_CACHE, statemachine_cache=stage / STATEMACHINE_CACHE)
+    opts = replace(opts, widget_cache=stage / WIDGET_CACHE, statemachine_cache=stage / STATEMACHINE_CACHE,
+                   superloop_cache=stage / SUPERLOOP_CACHE)
     changed = sync(stage, desired_files(course, opts), settle)
     if verbose:
         print(f"Staged {course.title!r}: {len(course.weeks)} weeks, "

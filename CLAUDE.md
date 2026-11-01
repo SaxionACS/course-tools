@@ -21,7 +21,7 @@ what changed recently.
 | `src/course_tools/compiler_explorer.py` | course and page settings for Compiler Explorer links (validated, passed to the filter) |
 | `src/course_tools/terms.py` | key terms: reads `{.terms}` blocks from the Markdown, generates the glossary and review pages |
 | `src/course_tools/outcomes.py` | learning outcomes named in the front matter of pages (`outcomes:`), and the outcome map page |
-| `src/course_tools/widgets.py` | widgets: finds ```` ```widget ```` blocks, reads their YAML, runs `print.js` (cached) and writes `_course/widgets.json` |
+| `src/course_tools/widgets.py` | widgets: finds ```` ```widget ```` blocks, reads their YAML, runs `print.js` (cached) and writes `_course/widgets.json`; also the plumbing state machines and superloop blocks share (finding blocks, keys, the cache, running a `print.js`, the YAML reader `load_block`) |
 | `src/course_tools/assets/widgets/widgets.js` | the widgets: runs in the browser (`render`) and at build time (`print`, `exercise`); see below |
 | `src/course_tools/assets/widgets/print.js` | build-time entry point, run with `quarto run` (Quarto's Deno) |
 | `src/course_tools/assets/filters/practice.lua` | Lua filter: self-checks, predictions, comparisons; the "Answers" section of PDFs |
@@ -33,6 +33,10 @@ what changed recently.
 | `src/course_tools/assets/statemachine/print.js` | build-time entry point, run with `quarto run` |
 | `src/course_tools/assets/statemachine/dagre.min.js` | dagre 3.1.1 (MIT, vendored from npm unchanged, licence next to it): the layout of the diagrams |
 | `src/course_tools/assets/filters/statemachine.lua` | Lua filter: state machines as `<div class="course-statemachine" data-config>` (HTML) or pictures and transition tables (PDF) |
+| `src/course_tools/superloop.py` | superloop blocks: finds ```` ```superloop ```` blocks, reads their YAML (as state machines do), runs their `print.js` with the widgets' helpers and writes `_course/superloops.json` |
+| `src/course_tools/assets/superloop/superloop.js` | superloop blocks: a C interpreter (the RP2040's types and C's integer rules, undefined behaviour), the simulated Pico (GPIO, the SDK's time functions), the timeline and the page; in the browser and at build time (`print`) |
+| `src/course_tools/assets/superloop/print.js` | build-time entry point, run with `quarto run` |
+| `src/course_tools/assets/filters/superloop.lua` | Lua filter: superloop blocks as `<div class="course-superloop" data-config>` (HTML) or the code, timelines and exercises (PDF); before `practice.lua` |
 | `src/course_tools/assets/filters/course.lua` | Lua filter: PDF button, learning outcomes and reading time, slides/GenAI/logbook/starter boxes, links, code annotations, diagram alignment, footer, PDF header |
 | `src/course_tools/assets/theme/` | `head.html` (browser script), `practice.html` (self-checks, predictions, comparisons), `terms.html` (definitions on first use, review deck; reads the glossary page) and `saxion.scss` (theme) |
 | `src/course_tools/assets/typst/header.typ` | PDF styling |
@@ -46,14 +50,21 @@ what changed recently.
 | `tests/widgets.js` | tests of the widgets' logic and PDF answers (`quarto run tests/widgets.js`, also run by `check.py`) |
 | `tests/statemachine.js` | tests of the state machines: running, mistakes, layouts that must not overlap, the PDF form (`quarto run tests/statemachine.js`, also run by `check.py`) |
 | `tests/statemachine_browser.js` | the test course's state machines in Chrome Headless Shell, driven over the DevTools protocol (run by `check.py` after the build) |
-| `docs/authoring.md`, `docs/course-info.md` | documentation for course authors (state machines: `docs/statemachines.md`) |
+| `tests/superloop.js` | tests of the superloop interpreter: C's integer rules, every row of the undefined-behaviour table (the values a Pico gives), mistakes, the lesson programs with scripted presses, goals and the PDF form (`quarto run tests/superloop.js`, also run by `check.py`) |
+| `tests/superloop_gcc.js` | the interpreter against gcc: thousands of random expressions (values, and undefined behaviour against UBSan), and every superloop program of the test course compiled with gcc (run by `check.py` after the build; needs gcc, `-m32` with `gcc-multilib` as in CI) |
+| `tests/superloop_browser.js` | the test course's superloop blocks in Chrome Headless Shell (run by `check.py` after the build) |
+| `docs/authoring.md`, `docs/course-info.md` | documentation for course authors (state machines: `docs/statemachines.md`; superloop blocks: `docs/superloop.md`) |
 | `install.sh`, `install.ps1`, `requirements.md` | local installation: Ubuntu and macOS (`install.sh`: system packages, uv, `uv tool install`, `course setup`), Windows (`install.ps1`: the same without system packages) |
 
 ## Rules
 
 - Course repositories contain no build logic; every change happens here.
 - Course code is shown, never run (`engine: markdown`). Don't add anything
-  that executes course code at build time.
+  that executes course code at build time. The one exception: superloop
+  blocks run their program with the block's script at build time, in
+  `superloop.js`'s own sandboxed interpreter (no compiler or toolchain, no
+  I/O, no `eval`, at most 50 million statements per run), the same code as in
+  the browser.
 - Nothing in a `private` directory of a course is ever published: not as a
   page, not in a zip, not in the search index. Check paths *relative to the
   course root*: on macOS, temporary directories are under `/private/var`.
@@ -81,6 +92,15 @@ what changed recently.
   layout is the same in the browser, the PDF and the tests; `tests/statemachine.js`
   checks that nothing overlaps. Change the semantics only together with
   `docs/statemachines.md` ("How the machines behave").
+- Superloop blocks are not widgets either (the maintainer wants them apart):
+  their own block, script, filter, data file and styles (`sl-`), set up like
+  the state machines; they share only the plumbing in `widgets.py` and import
+  nothing from `widgets.js` or `statemachine.js`. `superloop.js` is one
+  script for the browser and the build; only `mount` and its helpers touch
+  the DOM. The C semantics are those of the RP2040 with arm-none-eabi-gcc;
+  the `permit` values of undefined behaviour were measured on a Pico. Change
+  them only together with `docs/superloop.md` and `tests/superloop.js`, and
+  run `tests/superloop_gcc.js`.
 - `course preview` writes changed pages one at a time (`stage.sync(settle=...)`,
   `cli._rendered`): Quarto's preview fails silently when it re-renders several
   pages at once, from the second time on. Keep it that way unless a Quarto
@@ -136,7 +156,9 @@ what changed recently.
    three minutes) and must end with `0 failed`. `--html-only` is faster;
    `--keep` keeps the build so you can look at it. For widget changes,
    `quarto run tests/widgets.js` checks the logic in seconds, and
-   `quarto run tests/statemachine.js` the state machines.
+   `quarto run tests/statemachine.js` the state machines, and
+   `quarto run tests/superloop.js` and `quarto run tests/superloop_gcc.js`
+   the superloop interpreter (`SUPERLOOP_CASES=30000` for more random cases).
 3. For changes that affect how pages look, also look at the pages: run
    `course preview` in a copy of `tests/course`, or build a real course.
 
