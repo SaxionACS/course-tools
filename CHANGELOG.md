@@ -14,7 +14,7 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.7.0 (unreleased)
+## 2.7.0 (2026-11-01)
 
 Superloop blocks: a short C program from a lesson, running against simulated
 time. See [docs/superloop.md](docs/superloop.md).
@@ -58,7 +58,7 @@ Platform notes:
   checks, with `CC=gcc-13` (13.4, `-m32`, as in the Check workflow) and with
   gcc 16.2 (64-bit, without `long`). In extra runs, 94 000 random expressions
   agreed with gcc 13 `-m32` and UBSan, and as many with gcc 16 64-bit. The
-  Check workflow itself has not run yet.
+  Check workflow passes (gcc 13 with `gcc-multilib`, `-m32`).
 - **macOS:** untested. There `gcc` is clang, which has no `-m32`: the gcc
   check runs 64-bit.
 - **Windows:** untested; without gcc, the gcc check is skipped.
