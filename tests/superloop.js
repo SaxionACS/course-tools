@@ -155,7 +155,8 @@ const ERR = [
   ['int main() { f(); } void f(void) { }', /f\(\) is called before it is declared/],
   ['int x = 1; int x = 2;', /x is declared twice/],
   ['switch (1) { }', /switch is not supported in this widget yet/],
-  ['printf("hi");', /strings\) is not supported/],
+  ['char buf[10]; sprintf(buf, "x");', /arrays are not supported/],
+  ['sprintf("x");', /sprintf\(\) is not supported in this widget yet/],
 ];
 for (const [src, pat] of ERR) { const e = err(() => compile(src)); ok(pat.test(e), `build error: ${src.replace(/\n/g, ' ')}`, e); }
 const cfg = extra => Object.assign({code: 'while (true) { gpio_put(LED_PIN, gpio_get(BUTTON_PIN)); }', inputs: {BUTTON_PIN: 'hold button'}, outputs: {LED_PIN: 'red led'}}, extra);
@@ -274,19 +275,19 @@ int main() {
     bool pressed = gpio_get(BUTTON_PIN);
     gpio_put(LED_PIN, pressed);
   }
-}`, setup: 'code', inputs: {BUTTON_PIN: 'hold button'}, outputs: {LED_PIN: 'red led'}, show: ['iterations'], script: ['BUTTON_PIN press at 50 ms'], run: '51 ms'});
+}`, io_setup: 'code', inputs: {BUTTON_PIN: 'hold button'}, outputs: {LED_PIN: 'red led'}, show: ['iterations'], script: ['BUTTON_PIN press at 50 ms'], run: '51 ms'});
   const m = I.runScript(c, c.script, 51 * MS).machines[0];
   ok(ledAt(m, 1) - 50 * MS >= 0 && ledAt(m, 1) - 50 * MS <= 3 * US, 'the LED follows the button within one round (3 us)', ledAt(m, 1));
   ok(m.iterations > 16000 && m.iterations < 17500, 'the superloop runs every 3 us', m.iterations);
   ok(c.devices.every(d => d.fromCode && !d.byWidget), 'pins from the code are not declared by the widget');
 }
 {
-  const m = new Machine(compile('int main() { gpio_init(15); while (true) { gpio_put(15, 1); sleep_ms(10); } }'), {ub: 'stop', setup: 'code', outputs: [{name: 'LED_PIN', gpio: 15}], inputs: []});
+  const m = new Machine(compile('int main() { gpio_init(15); while (true) { gpio_put(15, 1); sleep_ms(10); } }'), {ub: 'stop', ioSetup: 'code', outputs: [{name: 'LED_PIN', gpio: 15}], inputs: []});
   m.run(100 * MS, 1e6);
-  ok(m.outputs.LED_PIN.level === 0 && m.notes.some(n => /gpio_set_dir\(15, GPIO_OUT\) is missing/.test(n.text)), 'setup: code without gpio_set_dir: the LED stays off, with a note');
-  const w = print({code: 'const uint LED_PIN = 15; int main() { while (true) { gpio_put(LED_PIN, 1); } }', setup: 'code', outputs: {LED_PIN: 'red led'}});
-  ok(w.warnings.some(x => /never sets up LED_PIN \(GP15\): gpio_init\(LED_PIN\) is missing/.test(x)), 'setup: code: a pin never set up is a warning', w.warnings.join(' | '));
-  const f = new Machine(compile('int r; int main() { gpio_disable_pulls(17); r = gpio_get(17); }'), {ub: 'stop', setup: 'code', inputs: [{name: 'S', gpio: 17}], outputs: []});
+  ok(m.outputs.LED_PIN.level === 0 && m.notes.some(n => /gpio_set_dir\(15, GPIO_OUT\) is missing/.test(n.text)), 'io_setup: code without gpio_set_dir: the LED stays off, with a note');
+  const w = print({code: 'const uint LED_PIN = 15; int main() { while (true) { gpio_put(LED_PIN, 1); } }', io_setup: 'code', outputs: {LED_PIN: 'red led'}});
+  ok(w.warnings.some(x => /never sets up LED_PIN \(GP15\): gpio_init\(LED_PIN\) is missing/.test(x)), 'io_setup: code: a pin never set up is a warning', w.warnings.join(' | '));
+  const f = new Machine(compile('int r; int main() { gpio_disable_pulls(17); r = gpio_get(17); }'), {ub: 'stop', ioSetup: 'code', inputs: [{name: 'S', gpio: 17}], outputs: []});
   f.run(SEC, 1e6);
   ok(f.notes.some(n => /floats/.test(n.text)), 'a floating input: a note');
   const low = new Machine(compile('int r1; int r2; int main() { r1 = gpio_get(16); sleep_ms(10); r2 = gpio_get(16); }'), {ub: 'stop', active: 'low', inputs: [{name: 'B', gpio: 16}], outputs: []});
@@ -348,6 +349,210 @@ while (true) { gpio_put(LED_PIN, 1); sleep_ms(DELAY_MS); gpio_put(LED_PIN, 0); s
   ok(crash.warnings.some(x => /the program stops in the scripted run: Line 1: division by zero/.test(x)), 'a run that stops at build time: a warning', crash.warnings.join(' | '));
   const many = print({code: 'while (true) { }', run: '60 s', line_time: '10 ns'});
   ok(many.warnings.some(x => /ran 50.000.000 statements; the build stops it there/.test(x)), 'at most 50 million statements per run at build time', many.warnings.join(' | '));
+}
+
+// --- the terminal: text, printf and USB stdio ----------------------------------------------
+{
+  const text = m => m.screen.text();
+  const bytes = s => [...s].map(c => c.charCodeAt(0));
+  // text: string literals, escapes, UTF-8, "%" PRIu64
+  const t = run('const char *A = "a\\tb\\x41\\101\\0z"; const char *B = "µs"; const char *C = "%" PRIu64 "|" PRId32; char *D = "plain";');
+  ok(JSON.stringify(bytes(val(t, 'A'))) === JSON.stringify([97, 9, 98, 65, 65, 0, 122]), 'a string literal: its bytes, with escapes', JSON.stringify(bytes(val(t, 'A'))));
+  ok(JSON.stringify(bytes(val(t, 'B'))) === JSON.stringify([0xc2, 0xb5, 0x73]), 'a string literal: UTF-8 for letters beyond ASCII');
+  ok(val(t, 'C') === '%llu|ld' && val(t, 'D') === 'plain', '<inttypes.h>: "%" PRIu64 is "%llu" (newlib), literals side by side are one', val(t, 'C'));
+  ok(I.PRI.PRIu8 === 'hhu' && I.PRI.PRIx16 === 'hx' && I.PRI.PRIu32 === 'lu' && I.PRI.PRIdMAX === 'lld' && I.PRI.PRIuPTR === 'u', 'the PRI macros of arm-none-eabi-gcc');
+  const TERR = [
+    ['const char *s;', /s is text \(const char \*\), so it needs its text/],
+    ['const char *s = "a"; s = "b";', /s is text \(const char \*\): in this widget, it keeps the text it starts with/],
+    ['int x = "a";', /x is a number \(int\), but its value is text/],
+    ['const char *s = 5;', /s is text \(const char \*\), so its value must be text/],
+    ['int x = "a" + 1;', /text \(a string\) can only be printed in this widget/],
+    ['if ("a") { }', /text \(a string\) can only be printed/],
+    ['const char *s = "a"; int b = s == s;', /text \(a string\) can only be printed/],
+    ['unsigned char *p = "x";', /pointers are not supported in this widget \(only const char \* for text\)/],
+    ['const char **p;', /pointers are not supported/],
+    ['const char *s = "abc', /this text has no closing " on its line/],
+    ['const char *s = "\\q";', /"\\q" is not an escape sequence of C/],
+    ['puts(5);', /puts\(\) sends text, e.g. puts\("Hello"\)/],
+    ['putchar("a");', /putchar\(\) sends one character/],
+    ['fflush(stdin);', /fflush\(\) works on stdout only/],
+    // printf: the format and its values
+    ['printf("%d\\n", time_us_64());', /^Line 1, column 16: %d expects an int, but time_us_64\(\) is a uint64_t: use %llu \(or "%" PRIu64\)$/],
+    ['uint32_t x = 5; printf("%llu", x);', /%llu expects an unsigned long long, but x is a uint32_t: use %lu \(or "%" PRIu32\)/],
+    ['int32_t n = -1; printf("%lld", n);', /%lld expects a long long, but n is an int32_t: use %ld \(or "%" PRId32\)/],
+    ['printf("%x", get_absolute_time());', /%x expects an unsigned int, but get_absolute_time\(\) is an absolute_time_t: use %llx \(or "%" PRIx64\)/],
+    ['uint8_t b = 1; printf("%llu", b);', /%llu expects an unsigned long long, but b is a uint8_t: use %u/],
+    ['printf("%s", 5);', /%s expects text \(a string\), but 5 is an int: use %d/],
+    ['printf("%d", "a");', /%d expects an int, but "a" is text \(a string\): use %s/],
+    ['printf("%*d", 5ull, 3);', /the \* in %\*d \(the width\) expects an int, but 5ull is an unsigned long long$/],
+    ['printf("%d %s\\n", 1);', /^Line 1, column 1: the format needs 2 values after it, but printf\(\) gets 1: the value for %s is missing. That is undefined behaviour in C/],
+    ['printf("%f", 1);', /"%f" prints a float or double, which this widget does not support yet/],
+    ['printf("%p", 1);', /"%p" prints a pointer/],
+    ['printf("%q");', /"%q" is not a conversion of printf/],
+    ['printf("50%");', /the format ends with a single %: write %% to print a percent sign/],
+    ['printf("%5.");', /"%5\." at the end of the format is not finished/],
+    ['printf("%ls", "a");', /%l is for wide characters|l does not go with %s/],
+    ['printf("%llc", 65);', /"%llc": ll does not go with %c/],
+    ['void f(const char *fmt) { printf(fmt); } f("x");', /the format of printf\(\) must be text in double quotes/],
+    ['printf(5);', /the first value of printf\(\) is the format/],
+    ['printf();', /printf\(\) needs a format/],
+  ];
+  for (const [src, pat] of TERR) { const e = err(() => compile(src)); ok(pat.test(e), `build error: ${src}`, e); }
+  ok(compile('printf("%d\\n", 1, 2);').warnings.some(w => w === 'Line 1: printf() gets 2 values after the format, but the format uses 1; the rest is not printed'), 'printf: extra values are a warning');
+  ok(compile('const char *F = "%d|"; printf(F, 3);').warnings.length === 0, 'printf: a const char * constant as the format');
+  // the output: same-size mixes as the Pico prints them, pico_printf's quirks, return values
+  const P = (fmt, ...vals) => I.formatPrintf(I.readFormat(fmt).items, vals, 0);
+  const SAME = [
+    [['%u|%d|%x|%lld|%lu', -1, 4294967295, -1, 18446744073709551615n, -1], '4294967295|-1|ffffffff|-1|4294967295'],
+    [['%hhd|%hhu|%hd|%hu', -1, 257, 65535, -1], '255|1|-1|65535'],   // plain char is unsigned on the RP2040
+    [['%#4x|%#x|%#o|%#X', 0x1234, 0, 8, 255], '0x34|0|010|0XFF'],
+    [['%050d', 1], `${'0'.repeat(31)}1`],
+    [['%.40d', 7], `${'0'.repeat(31)}7`],
+    [['%+.0d|%.0d|%5.0d|% d|%+d', 0, 0, 0, 5, 5], '+||     | 5|+5'],
+    [['%-05d|%08.3d|%5%|%c%c', 3, 7, 65, 66], '3    |     007|%|AB'],
+    [['%*d|%-*d|%.*d', 4, 1, -4, 2, -3, 9], '   1|2   |9'],
+    [['%.3s|%5s|%-5s|%.0s', 'abcdef', 'ab', 'ab', 'xyz'], 'abc|   ab|ab   |'],
+    [['%b|%#b|%llx', 5, 5, 0xfedcba9876543210n], '101|0b101|fedcba9876543210'],
+    [['%lld|%llu', -9223372036854775808n, 18446744073709551615n], '-9223372036854775808|18446744073709551615'],
+    [['%zu|%jd|%td', 7, -1n, -2], '7|-1|-2'],
+  ];
+  for (const [[fmt, ...vals], want] of SAME) { const r = P(fmt, ...vals); ok(r.text === want, `printf("${fmt}") as pico_printf prints it`, JSON.stringify(r.text)); }
+  const nul = P('a%cb', 0);
+  ok(nul.text === 'ab' && nul.count === 3, 'printf: a 0 character is counted, not sent (pico_printf)', JSON.stringify(nul));
+  ok(P('%llu', 12345678n).digits64 === 8 && P('%lu', 5).digits64 === 0, 'printf: the digits of 64-bit numbers (they take time)');
+  ok(/more than the widget prints/.test(P('%*d', 2000000000, 1).error || ''), 'printf: a huge width from * stops the program');
+
+  // USB stdio: dropped before stdio_init_all(), before the Pico is on USB, without a terminal
+  const cfgT = extra => Object.assign({ub: 'stop', lineTime: US, terminal: 'manual', stdioSetup: 'code'}, extra);
+  const mt = (src, extra = {}) => new Machine(compile(src, {ub: 'stop'}), cfgT(extra));
+  let m = mt('int main() { printf("a\\n"); stdio_init_all(); printf("b\\n"); sleep_ms(300); printf("c\\n"); sleep_ms(500); printf("d\\n"); while (true) { } }');
+  m.queueEvent({t: 600 * MS, kind: 'open'});
+  m.run(SEC, 1e7);
+  ok(text(m) === 'd', 'only text printed while a terminal is open arrives', JSON.stringify(text(m)));
+  ok(JSON.stringify(m.term.prints.map(p => p.why)) === JSON.stringify(['the program has not started USB stdio (stdio_init_all())', 'the Pico was not on USB yet', 'no terminal was open', null]),
+    'each dropped print says why', JSON.stringify(m.term.prints.map(p => p.why)));
+  const conn = m.term.conn.ch.map(c => `${c.v}@${Math.round(c.t / US)}`).join(' ');
+  ok(conn === '0@0 1@250004 2@600000', 'the connection (µs): on USB 0.25 s after stdio_init_all() (at 4.04 µs), then open', conn);
+  // Open before the Pico is on USB; terminal: open
+  m = mt('int main() { while (true) { } }');
+  m.queueEvent({t: 100 * MS, kind: 'open'});
+  m.run(200 * MS, 1e7);
+  ok(m.usb.openError === 'The computer sees no Pico on USB: the program has not called stdio_init_all(), which starts its USB connection.' && !m.usb.open, 'Open without stdio_init_all(): the computer sees no Pico on USB', m.usb.openError);
+  m = mt('int main() { stdio_init_all(); while (true) { } }');
+  m.queueEvent({t: 100 * MS, kind: 'open'});
+  m.run(200 * MS, 1e7);
+  ok(m.usb.openError === 'The computer doesn\'t see the Pico on USB yet.', 'Open in the 0.25 s after stdio_init_all(): not on USB yet', m.usb.openError);
+  m = mt('bool c1; bool c2; c1 = stdio_usb_connected(); sleep_ms(300); c2 = stdio_usb_connected(); while (true) { }', {terminal: 'auto', stdioSetup: 'auto'});
+  m.run(SEC, 1e7);
+  ok(val(m, 'c1') === 0 && val(m, 'c2') === 1 && m.usb.open, 'terminal open: auto connects as soon as the Pico is on USB (stdio_setup: auto starts USB stdio)');
+  // the SDK's CR/LF rule, also across calls; puts and putchar
+  m = mt('printf("A\\nB\\r\\nC\\r"); printf("\\nD\\n"); putchar(\'\\n\'); puts("E"); while (true) { }', {terminal: 'auto', stdioSetup: 'auto'});
+  m.queueEvent({t: 0, kind: 'noop'});
+  m = mt('sleep_ms(300); printf("A\\nB\\r\\nC\\r"); printf("\\nD\\n"); putchar(\'\\n\'); puts("E"); while (true) { }', {terminal: 'auto', stdioSetup: 'auto'});
+  m.run(SEC, 1e7);
+  ok(m.usb.raw === 'A\r\nB\r\nC\r\nD\r\n\r\nE\r\n', 'CR/LF as the SDK sends it (measured on a Pico W)', JSON.stringify(m.usb.raw));
+  // getchar() waits; stdio_getchar_timeout_us(); keys typed while the program does not read
+  m = mt('int a; int b; int c; int d; sleep_ms(300); a = getchar(); b = stdio_getchar_timeout_us(100000); c = stdio_getchar_timeout_us(0); d = stdio_getchar_timeout_us(500000); while (true) { }', {terminal: 'auto', stdioSetup: 'auto'});
+  m.queueEvent({t: 2 * SEC, kind: 'type', bytes: '5'});
+  m.queueEvent({t: 2500 * MS, kind: 'type', bytes: 'x'});
+  m.run(1500 * MS, 1e7);
+  ok(m.state === 3 && m.line === 1, 'getchar() waits for a key (the cpu is waiting)', `${m.state} ${m.line}`);
+  m.run(5 * SEC, 1e7);
+  ok(val(m, 'a') === 53 && val(m, 'b') === -2 && val(m, 'c') === -2 && val(m, 'd') === 120, 'getchar() gets the key; the timeouts return PICO_ERROR_TIMEOUT (-2)', ['a', 'b', 'c', 'd'].map(n => val(m, n)).join(' '));
+  const wait = m.cpu.ch.filter(c => c.v === 3).map(c => Math.round(c.t / MS));
+  ok(JSON.stringify(wait) === JSON.stringify([300, 2000, 2100]), 'waiting: from the getchar(), and from the timeout of 100 ms', JSON.stringify(wait));
+  m = mt('int n = 0; int bad = 0; int c; sleep_ms(3000); while ((c = stdio_getchar_timeout_us(200000)) >= 0) { if (c != 65 + n % 26) bad++; n++; } while (true) { }', {terminal: 'auto', stdioSetup: 'auto'});
+  m.queueEvent({t: SEC, kind: 'type', bytes: Array.from({length: 1000}, (_, k) => String.fromCharCode(65 + k % 26)).join('')});
+  m.run(5 * SEC, 1e8);
+  ok(val(m, 'n') === 1000 && val(m, 'bad') === 0, 'keys typed while the program sleeps are kept, in order (measured: 1000 of 1000)', `${val(m, 'n')} ${val(m, 'bad')}`);
+  m = mt('int n = 0; sleep_ms(2000); while (stdio_getchar_timeout_us(100000) >= 0) n++; while (true) { }', {terminal: 'auto', stdioSetup: 'auto'});
+  m.queueEvent({t: SEC, kind: 'type', bytes: '0123456789'});
+  m.queueEvent({t: 1100 * MS, kind: 'close'});
+  m.queueEvent({t: 1500 * MS, kind: 'open'});
+  m.run(4 * SEC, 1e7);
+  ok(val(m, 'n') === 10, 'keys typed before the terminal closes stay (measured)', val(m, 'n'));
+  m = mt('sleep_ms(300); while (true) { }', {terminal: 'auto', stdioSetup: 'auto'});
+  m.queueEvent({t: 400 * MS, kind: 'type', bytes: 'x'.repeat(5000)});
+  m.run(SEC, 1e7);
+  ok(m.usb.rx.length === 4096 && m.notes.some(n => /stopped taking keys/.test(n.text)), 'at most 4 KB of keys wait; then the terminal stops taking them, with a note');
+  // the times measured on a Pico W
+  const cost = (src, extra) => { const mm = mt(`uint64_t t0; uint64_t t1; sleep_ms(300); t0 = time_us_64(); ${src}; t1 = time_us_64(); while (true) { }`, Object.assign({terminal: 'auto', stdioSetup: 'auto'}, extra)); mm.run(SEC, 1e8); return Number(val(mm, 't1') - val(mm, 't0')) - 2; };   // (- 2: the statements with t0 and t1)
+  ok(cost('printf("abcdefghi\\n")') === 41, 'printf of 10 characters with a terminal open: 40 µs + 0.15 µs a character', cost('printf("abcdefghi\\n")'));
+  ok(cost('putchar(\'x\')') === 13, 'putchar with a terminal open: 13 µs');
+  ok(cost('printf("abcdefghi\\n")', {terminal: 'manual'}) === 11, 'printf without a terminal (dropped): 10 µs + 0.15 µs a character', cost('printf("abcdefghi\\n")', {terminal: 'manual'}));
+  ok(cost('printf("%llu\\n", 12345678ull)', {terminal: 'manual'}) === 20, 'a 64-bit number: 1.1 µs a digit', cost('printf("%llu\\n", 12345678ull)', {terminal: 'manual'}));
+  const L64 = '"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-\\n"';
+  const flood = mt(`int n = 0; uint64_t t0; uint64_t t1; sleep_ms(300); t0 = time_us_64(); while (n < 1000) { printf(${L64}); n++; } t1 = time_us_64(); while (true) { }`, {terminal: 'auto', stdioSetup: 'auto'});
+  flood.run(2 * SEC, 1e8);
+  const per = Number(val(flood, 't1') - val(flood, 't0')) / 1000;
+  ok(per > 88 && per < 100, 'a flood of 64-character lines: about 0.1 ms a line (measured 98.7 µs; the USB packets set the pace)', per);
+  ok(flood.cpu.ch.some(c => c.v === 2), 'a flood waits for room in the USB buffer: busy on the cpu lane');
+  // the screen: \r, \b, \t, UTF-8, the last 1000 lines
+  const sc = new I.Screen();
+  sc.write('abc\rX\r\n\tY\bZ\r\n\xc2\xb5s \xff!\nnext');
+  ok(sc.text() === 'Xbc\n        Z\nµs �!\n     next', 'the screen: \\r, \\b, \\t, UTF-8, and a \\n alone keeps the column, as a terminal shows them', JSON.stringify(sc.text()));
+  const many = new I.Screen();
+  many.write(Array.from({length: 1500}, (_, k) => `${k}\r\n`).join(''));
+  ok(many.lines.length === 1000 && many.text().startsWith('501\n'), 'the screen keeps the last 1000 lines');
+  // the lesson's beeps, in a script, both variants on the same typing
+  const BEEPS = 'int main() {\n  stdio_init_all();\n  while (true) {\n    printf("Enter a number (1-9): ");\n    int n = getchar();\n    if (n < \'1\' || n > \'9\') {\n      printf("\\nInvalid input.\\n");\n      continue;\n    }\n    printf("\\nPlaying %d beeps.\\n", n - \'0\');\n  }\n}\n';
+  const WAITING = BEEPS.replace('stdio_init_all();', 'stdio_init_all();\n  while (!stdio_usb_connected()) sleep_ms(10);');
+  const beeps = {terminal: {}, stdio_setup: 'manual', variants: {'as is': BEEPS, 'waiting for the terminal': WAITING}, timeline: ['cpu', 'terminal'],
+    script: ['terminal open at 1.5 s', 'type "5" at 2 s', 'type "x" at 2.5 s'], run: '3 s'};
+  const pb = print(beeps);
+  ok(!pb.error && pb.variants[0].terminal === '\nPlaying 5 beeps.\nEnter a number (1-9):\nInvalid input.\nEnter a number (1-9):', 'the beeps, as is: the first prompt is lost', JSON.stringify(pb.variants[0] && pb.variants[0].terminal));
+  ok(!pb.error && pb.variants[1].terminal === 'Enter a number (1-9):\nPlaying 5 beeps.\nEnter a number (1-9):\nInvalid input.\nEnter a number (1-9):', 'the beeps, waiting for the terminal: every prompt arrives', JSON.stringify(pb.variants[1] && pb.variants[1].terminal));
+  ok(!pb.error && pb.variants[0].caption === 'With the script: the terminal opened at 1.5 s, typed "5" at 2 s, typed "x" at 2.5 s. One print was dropped (the Pico was not on USB yet).',
+    'the caption: the terminal steps and the dropped print', pb.variants[0] && pb.variants[0].caption);
+  ok(!pb.error && pb.variants[0].svg.includes('sl-tl-dropx') && pb.variants[0].svg.includes('sl-tl-key') && pb.variants[0].svg.includes('terminal open'), 'the PDF timeline has the terminal lane');
+  const echo = print(Object.assign({}, beeps, {terminal: {echo: true}, print: 'one', variant: 'waiting for the terminal'}));
+  ok(echo.variants[0].terminal === 'Enter a number (1-9): 5\nPlaying 5 beeps.\nEnter a number (1-9): x\nInvalid input.\nEnter a number (1-9):', 'echo: true shows the keys typed', JSON.stringify(echo.variants[0].terminal));
+  // settings and scripts
+  const tcfg = extra => Object.assign({code: 'while (true) { printf("x"); sleep_ms(100); }', terminal: {}}, extra);
+  const TCERR = [
+    [{terminal: true}, /terminal: write its settings under it, e.g. terminal: \{open: manual\}/],
+    [{terminal: 'auto'}, /terminal: write its settings under it/],
+    [{terminal: {open: 'maybe'}}, /terminal, open: "maybe" is not allowed. Write auto, manual or button/],
+    [{terminal: {enter: 'tab'}}, /terminal, enter: "tab" is not allowed/],
+    [{terminal: {echo: 'yes'}}, /terminal, echo: write true or false/],
+    [{terminal: {setup: 'auto'}}, /USB stdio is set up with stdio_setup, at the top level/],
+    [{terminal: {flavour: 1}}, /terminal: "flavour" is not a setting of the terminal \(open, enter, echo\)/],
+    [{enter: 'cr'}, /"enter" is not a setting of a superloop block: enter belongs in the terminal block/],
+    [{echo: true}, /"echo" is not a setting of a superloop block: echo belongs in the terminal block/],
+    [{setup: 'code'}, /"setup" is not a setting of a superloop block: setup is called io_setup \(the pins\); USB stdio has stdio_setup/],
+    [{stdio_setup: 'maybe'}, /stdio_setup: "maybe" is not allowed. Write auto, code or manual/],
+    [{io_setup: 'yes'}, /io_setup: "yes" is not allowed/],
+    [{terminal: undefined, timeline: ['cpu', 'terminal']}, /timeline: terminal needs a terminal/],
+    [{terminal: undefined, script: ['terminal open at 1 s']}, /the block has no terminal/],
+    [{script: ['type "5" at 1 s']}, /the terminal is closed at 1 s: open it first/],
+    [{script: ['terminal open at 2 s', 'terminal close at 1 s']}, /the steps of the terminal must be in time order/],
+    [{script: ['terminal open at 1 s', 'type 5 at 2 s']}, /is not a step. Write e.g. terminal open at 1.5 s/],
+    [{script: ['terminal open at 1 s', 'type "" at 2 s']}, /types nothing/],
+    [{goal: {shows: 'x'}, terminal: undefined}, /goal, shows: the block has no terminal/],
+    [{goal: {terminal: 'x'}}, /goal: "terminal" is not part of a goal \(variant, vars, outputs, shows, max_presses\)/],
+  ];
+  for (const [extra, pat] of TCERR) { const e = err(() => readConfig(tcfg(extra))); ok(pat.test(e), `settings: ${JSON.stringify(extra).slice(0, 70)}`, e); }
+  const sc2 = readConfig(tcfg({script: ['terminal open at 1 s', 'type "12\\r" at 2 s', 'terminal close at 2.5 s'], terminal: {enter: 'crlf'}}));
+  ok(JSON.stringify(sc2.script.map(st => st.bytes || st.action)) === JSON.stringify(['open', '12\r', 'close']) && sc2.enter === '\r\n', 'script: terminal open, type "12\\r" (C escapes), terminal close; enter: crlf');
+  ok(readConfig(tcfg({terminal: {open: 'auto'}, script: ['type "5" at 1 s']})).script.length === 1, 'terminal open: auto: a script may type without opening');
+  // the defaults: io_setup auto, stdio_setup manual (the program calls stdio_init_all()), terminal open manual; the synonyms
+  const dflt = readConfig(tcfg({}));
+  ok(dflt.ioSetup === 'auto' && dflt.stdioSetup === 'code' && dflt.terminal === 'manual' && dflt.enter === '\r' && dflt.echo === false,
+    'defaults: io_setup auto, stdio_setup manual, terminal: open manual, enter cr, echo false', JSON.stringify([dflt.ioSetup, dflt.stdioSetup, dflt.terminal]));
+  const syn = readConfig(tcfg({io_setup: 'manual', stdio_setup: 'manual', terminal: {open: 'button'}}));
+  ok(syn.ioSetup === 'code' && syn.stdioSetup === 'code' && syn.terminal === 'manual', 'synonyms: manual = code, button = manual');
+  ok(readConfig(tcfg({terminal: null})).terminal === 'manual', 'terminal: with nothing under it: a terminal with the defaults');
+  const forgot = I.runScript(readConfig(tcfg({script: ['terminal open at 1 s']})), readConfig(tcfg({script: ['terminal open at 1 s']})).script, 2 * SEC).machines[0];
+  ok(forgot.usb.openError === 'The computer sees no Pico on USB: the program has not called stdio_init_all(), which starts its USB connection.',
+    'stdio_setup left out (manual): Open says that stdio_init_all() is missing', forgot.usb.openError);
+  ok(readConfig({code: 'while (true) { printf("x"); }'}).warnings.some(w => /talks to a terminal \(printf, getchar, …\), but the block has none/.test(w)), 'printf without a terminal: a warning');
+  ok(readConfig(tcfg({})).lanes.map(l => l.kind).join() === 'cpu,terminal', 'the default timeline has the terminal after the cpu');
+  // a goal on the terminal's text
+  const gw = print({code: 'const uint32_t PERIOD_MS = 250;\nwhile (true) { uint64_t ms = time_us_64() / 1000; printf("\\rt = %" PRIu64 ".%03" PRIu64 " s", ms / 1000, ms % 1000); sleep_ms(PERIOD_MS); }',
+    terminal: {open: 'auto'}, stdio_setup: 'auto', goal: {shows: 't = 1.0'}, answer_script: [], answer: 'Wait.'});
+  ok(gw.exercise && gw.exercise.answer[1].text === '(No presses: the terminal shows "t = 1.0" at 1 s.)' && gw.exercise.terminal === 't = 1.250 s', 'a goal on the terminal: met when the text arrives; the answer\'s terminal ends with its picture', gw.exercise && JSON.stringify([gw.exercise.answer[1].text, gw.exercise.terminal]));
+  const gn = print({code: 'while (true) { printf("no"); sleep_ms(100); }', terminal: {}, stdio_setup: 'auto', goal: {shows: 'yes'}, answer_script: ['terminal open at 1 s'], answer: 'x'});
+  ok(gn.warnings.some(w => w === 'goal: the answer_script does not reach the goal (the terminal has not shown "yes" after 10 s)'), 'a goal on the terminal that the answer does not reach', gn.warnings.join(' | '));
 }
 
 // --- performance (a number, not a check) -------------------------------------------------------

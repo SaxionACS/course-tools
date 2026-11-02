@@ -5,8 +5,10 @@ browser, against simulated time. Students press the buttons on the board and
 watch the program run: the code with the line that runs (or sleeps), the
 LEDs, the variables, and a timeline of the inputs, the outputs and what the
 processor does, with every moment the program read an input. A press the
-program never read is marked. In the PDF the block becomes the code and the
-timeline of one run with scripted presses.
+program never read is marked. With a terminal, students open it, type to the
+program and read what it prints, as with a terminal app on their computer. In
+the PDF the block becomes the code and the timeline of one run with scripted
+presses (and typing).
 
 The program is C as on a Raspberry Pi Pico: the sizes of the RP2040, C's
 integer rules, and undefined behaviour that stops the program with a message.
@@ -22,6 +24,7 @@ This page describes everything a block can do. The
 - [Inputs and outputs](#inputs-and-outputs)
 - [Time](#time)
 - [Undefined behaviour](#undefined-behaviour)
+- [The terminal: `printf` and `getchar`](#the-terminal-printf-and-getchar)
 - [Variants](#variants)
 - [Constants students change: `params`](#constants-students-change-params)
 - [Variables and counters: `watch` and `show`](#variables-and-counters-watch-and-show)
@@ -77,10 +80,15 @@ shows how often the superloop ran.
 | `inputs` | `{NAME: kind}`: `button`, `hold button`, `pin`, `bouncy button`, `bouncy hold button`, `bouncy pin` | none |
 | `outputs` | `{NAME: kind}`: `led` (red), `red led`, `green led`, `amber led`, `yellow led`, `blue led`, `white led`, `buzzer` | none |
 | `active` | `high`: a pressed button reads 1 (wired to 3.3 V, with a pull-down, as in this course); `low`: it reads 0 | `high` |
-| `setup` | `auto`: the pins of inputs and outputs are set up before the program starts; `code`: the program sets them up itself, as on a real Pico | `auto` |
+| `io_setup` | `auto`: the pins of inputs and outputs are set up before the program starts; `code` (or `manual`): the program sets them up itself, as on a real Pico | `auto` |
+| `stdio_setup` | `auto`: USB stdio is started before the program starts; `code` (or `manual`): the program calls `stdio_init_all()`, as on a real Pico ([The terminal](#the-terminal-printf-and-getchar)) | `manual` |
 | `undefined_behavior` | `stop`: undefined behaviour stops the program with a message; `permit`: it goes on as on a Pico, with a note ([Undefined behaviour](#undefined-behaviour)) | `stop` |
+| `terminal` | settings of their own (`open`, `enter`, `echo`, below); with them, the block has a terminal app on the computer, for the Pico's USB stdio ([The terminal](#the-terminal-printf-and-getchar)) | no terminal |
+| `terminal: open` | `manual` (or `button`): students open it; `auto`: it opens by itself as soon as the Pico is on USB | `manual` |
+| `terminal: enter` | what the terminal sends for Enter: `cr`, `lf` or `crlf` | `cr` |
+| `terminal: echo` | the terminal's local echo at the start, and in the PDF: `true` or `false` | `false` |
 | `watch` | variables to show, by name; `name:hex` in hexadecimal | none |
-| `timeline` | the lanes, top to bottom: `cpu`, inputs, outputs and `absolute_time_t` variables | `cpu`, then the inputs and the outputs |
+| `timeline` | the lanes, top to bottom: `cpu`, `terminal`, inputs, outputs and `absolute_time_t` variables | `cpu`, `terminal` (with a terminal), then the inputs and the outputs |
 | `window` | how much time the timeline shows (and the length of a row in the PDF) | `4 s` |
 | `params` | constants students may change: `[DELAY_MS]`, or `{DELAY_MS: {min: 0, max: 2000}}` | none |
 | `show` | `iterations` (how often the superloop ran), `sleep` (the share of time asleep) | none |
@@ -88,7 +96,7 @@ shows how often the superloop ran.
 | `speed`, `speeds` | the speed at the start, and the speed buttons: `1/10`, `[1/100, 1/10, 1]` | `1`; buttons chosen from the program's times |
 | `line_time` | how long one statement takes (10 ns to 1 ms) | `1 us` |
 | `seed` | the random numbers of bounces in the PDF and the tests | `1` |
-| `script` | scripted presses for the PDF and the answers ([Scripts](#scripts)) | none |
+| `script` | scripted presses and typing for the PDF and the answers ([Scripts](#scripts)) | none |
 | `run` | how long the scripted run lasts | `3 s` (`10 s` for checking an answer) |
 | `print` | the PDF: `all` variants, or `one` (the one of `variant`) | `all` |
 | `goal`, `answer_script`, `answer` | a challenge ([Challenges](#challenges-goal)) | none |
@@ -138,6 +146,13 @@ error that says what is not supported, never a silent misreading.
   `limits.h` and `stdint.h`.
 - **Functions** with parameters and `return`, declared before they are
   called (a prototype is enough), as C wants; recursion up to 64 levels.
+- **Text**: string literals with C's escapes (`"Hello\n"`, `"\x41"`, letters
+  beyond ASCII as UTF-8); literals side by side are one (`"%" PRIu64 "\n"`,
+  with `PRIu64` and the other macros of `<inttypes.h>` as the Pico's C
+  library defines them). Text is the format and the values of `printf`, the
+  text of `puts`, and `const char *` (or `char *`) constants, parameters and
+  return values. A `const char *` keeps the text it starts with; text cannot
+  be compared or computed with. No other pointers.
 
 ### C's integer rules, as on the RP2040
 
@@ -159,7 +174,13 @@ for every build of course-tools (`tests/superloop_gcc.js`).
 
 | Function | What the widget does |
 |:--|:--|
-| `stdio_init_all()`, `tight_loop_contents()` | nothing |
+| `stdio_init_all()` | starts USB stdio: the Pico is on USB 0.25 s later ([The terminal](#the-terminal-printf-and-getchar)); returns `true` |
+| `tight_loop_contents()` | nothing |
+| `printf(format, …)`, `puts(text)`, `putchar(c)` | send text to the terminal, as the SDK does ([The terminal](#the-terminal-printf-and-getchar)) |
+| `getchar()` | waits for a key and returns it (0 to 255) |
+| `stdio_getchar_timeout_us(t)`, `getchar_timeout_us(t)` | a key, or `PICO_ERROR_TIMEOUT` (−2) after t µs; with 0, it does not wait |
+| `stdio_usb_connected()` | whether a terminal is open |
+| `stdio_flush()`, `fflush(stdout)` | nothing (the SDK's `printf` sends at once) |
 | `gpio_init(pin)` | the pin becomes an input of the SIO, its output value 0; the pulls stay as they are (the pull-down from reset) |
 | `gpio_set_dir(pin, GPIO_OUT / GPIO_IN)` | the direction (`GPIO_OUT` is 1, `GPIO_IN` 0; `true` and `false` work too) |
 | `gpio_put(pin, value)` | the output value; it drives the pin only when the pin is an output |
@@ -175,6 +196,7 @@ for every build of course-tools (`tests/superloop_gcc.js`).
 | `time_reached(t)` | now ≥ t |
 | `absolute_time_diff_us(from, to)` | to − from, signed |
 | `nil_time`, `at_the_end_of_time` | 0, and the largest time (`INT64_MAX`), as in the SDK |
+| `PICO_ERROR_TIMEOUT`, `PICO_OK`, `PICO_ERROR_GENERIC`, `EOF` | −2, 0, −1, −1 |
 
 A call of any other function that the code does not define is an error that
 names it.
@@ -210,10 +232,10 @@ driven high. An LED is drawn as an eye sees it: its level averaged over about
 is on half the time looks about 76 % bright; a fast blink looks like a dim,
 steady LED, which leads to PWM.
 
-**`setup`.** With `setup: auto` (the default), before the program starts,
+**`io_setup`.** With `io_setup: auto` (the default), before the program starts,
 inputs are inputs with the pull for `active` (a pull-down for `high`), and
 outputs are outputs driven low, so lesson fragments without `gpio_init()`
-work. With `setup: code`, every pin starts as after reset: an input with its
+work. With `io_setup: code` (or `manual`), every pin starts as after reset: an input with its
 pull-down on. Then:
 
 - `gpio_put()` on a pin that is not an output does nothing, and the widget
@@ -229,7 +251,9 @@ Time is simulated. Every statement takes `line_time` (1 µs): each expression
 statement, declaration with a value, `return`, `break`, `continue`, each
 evaluation of a condition (`if`, `while`, `for`, `do`) and each `for` step.
 Calls of the SDK take nothing more, except `sleep_*` and `busy_wait_*`, which
-take their time. These numbers are a model: a Pico runs a statement in about
+take their time, `printf`, `puts` and `putchar`, which take the time they take
+on a Pico ([The terminal](#the-terminal-printf-and-getchar)), and `getchar()`,
+which waits for a key. These numbers are a model: a Pico runs a statement in about
 0.1 µs. A superloop round of a few statements takes a few microseconds, as
 the lessons say.
 
@@ -280,6 +304,99 @@ decide the same):
 
 gcc's own `-Wall -Wextra` warns only about the last two rows and some
 uninitialised reads; it says nothing about overflow, shifts or `1 << 31`.
+
+## The terminal: `printf` and `getchar`
+
+A `terminal:` block gives the block a terminal: a terminal app on the
+computer, such as PuTTY or minicom, talking to the Pico over USB. Students
+open it, type, and read what the program prints. The Pico itself has *USB
+stdio* (`stdio_init_all()` starts it); the computer shows it as a serial
+device (COM3, `/dev/ttyACM0`), which the terminal app opens. Everything below
+is what the Pico SDK 2.3.1 does, checked on a Pico W.
+
+```yaml
+stdio_setup: manual       # the program calls stdio_init_all() (manual = code; auto: the block does)
+terminal:                 # a terminal; without this block, there is none
+  open: manual            # students click Open (manual = button); auto: it opens by itself
+  enter: cr               # what Enter sends: cr, lf or crlf
+  echo: false             # local echo at the start (and in the PDF)
+```
+
+Every setting has a default (the values above), so `terminal:` with nothing
+under it is a terminal that students open, for a program that calls
+`stdio_init_all()` itself.
+
+- **On USB.** The Pico appears on USB 0.25 s after `stdio_init_all()` (the
+  computer needs that long to recognise it; measured). With
+  `stdio_setup: manual` (the default), the program calls `stdio_init_all()`
+  itself, as on a Pico; a fragment without it never appears on USB. With
+  `stdio_setup: auto`, USB stdio starts before the program. Open before the
+  Pico is on USB says *The computer sees no Pico on USB: the program has not
+  called stdio_init_all(), which starts its USB connection.* (or *The
+  computer doesn't see the Pico on USB yet.*). With `open: auto`, the
+  terminal opens by itself as soon as the Pico is on USB, as terminal apps
+  that reconnect by themselves do.
+- **Text without a terminal is dropped**, as the SDK drops it: before
+  `stdio_init_all()`, before the Pico is on USB, and while no terminal is
+  open. A program that prints one line at the start loses it, even with
+  `open: auto`. `stdio_usb_connected()` is true while a terminal is open;
+  `while (!stdio_usb_connected()) sleep_ms(10);` waits for one.
+- **`\n` goes out as `\r\n`**, unless it follows a `\r`, also across calls
+  (the SDK's CR/LF conversion).
+- **Keys.** Every key is sent at once; Enter as `enter` (`\r`, as most
+  terminals), Backspace as DEL (0x7F, as PuTTY), letters beyond ASCII as
+  UTF-8. Local echo (`echo`, also a checkbox) shows the keys on the screen, as a
+  terminal app does; it is off by default, as in most terminals. A closed
+  terminal takes no keys. Keys the program does not read yet wait, in order,
+  and are never lost: on a Pico, USB makes the computer hold what does not fit
+  in the Pico's buffer (measured: 1000 keys typed during a `sleep_ms(3000)`
+  all arrive; keys still waiting when the terminal closes stay). The widget
+  keeps up to 4 KB, then stops taking keys, with a note.
+- **`getchar()` waits** for a key: the `cpu` lane says *waiting*, the line
+  *waiting for a key*. `stdio_getchar_timeout_us(t)` waits at most t µs.
+- **The screen** shows what the terminal received, as a terminal shows it:
+  `\r` goes back to the start of the line (so `printf("\rt = %llu", t)`
+  updates a line in place), `\b` back one character, `\t` to the next
+  multiple of 8; other control characters and escape sequences are not
+  interpreted. It keeps the last 1000 lines. Every variant has its own
+  screen; Open, Close and the keys go to all variants at once, as the presses
+  do. Reset closes the terminal and clears it (a reset of the Pico drops its
+  USB connection).
+
+**`printf`** prints as the SDK's own `printf` (`pico_printf`) does, quirks
+included: `%d %i %u %x %X %o %b %c %s %%`, the flags `- 0 + space #`, a width
+and a precision (also `*`), and the lengths `hh h l ll z j t`. `%#4x` of
+`0x1234` prints `0x34`, and zero padding stops at 32 characters, as on a Pico.
+`%f` comes with `float`. The build checks every value against its conversion,
+in both `undefined_behavior` modes:
+
+- a value of another size, or text for a number (or a number for text), is an
+  error with the fix: *Line 5, column 16: %d expects an int, but time_us_64()
+  is a uint64_t: use %llu (or "%" PRIu64)*. What a Pico prints there comes
+  from whatever is left in a register, so the widget cannot copy it. A
+  missing value is an error too.
+- a value of the same size and the other signedness prints as on a Pico,
+  without a message: `printf("%u", -1)` prints 4294967295, `%d` of an
+  `int32_t` (a `long` on the Pico) prints the number;
+- extra values are a warning;
+- the format must be text in double quotes, or a `const char *` constant with
+  such text.
+
+**Times** (measured on a Pico W, within 20 %). These are real times, like
+`sleep_ms()`, not scaled like `line_time`:
+
+| | `printf`, `puts` | `putchar` |
+|:--|:--|:--|
+| USB stdio not started | 2 µs + 0.02 µs per character | 2 µs |
+| no terminal open (dropped) | 10 µs + 0.15 µs per character | 4 µs |
+| a terminal open | 40 µs + 0.15 µs per character, and waits for room | 13 µs, and waits for room |
+
+A 64-bit number (`%llu`) adds 1.1 µs per digit: the RP2040 divides 64-bit
+numbers in software. With a terminal open, the text leaves in USB packets of
+up to 64 bytes, one per 90 µs, and the Pico holds 64 bytes besides the packet
+being sent; a call that does not fit waits (*busy* on the `cpu` lane). So
+printing in the superloop slows it down: 64-character lines in a tight loop
+take about 0.1 ms each.
 
 ## Variants
 
@@ -333,7 +450,16 @@ of `timeline`:
 - **An output**: its level. Changes too close for a pixel become a hatched
   band, with the rate when there is room (*toggling at 100 Hz*).
 - **`cpu`**: what the processor does: running (blue), asleep (grey,
-  hatched), busy (`busy_wait`, blue hatched), stopped.
+  hatched), busy (`busy_wait`, blue hatched), waiting for a key (light blue),
+  stopped.
+- **`terminal`**: the USB connection as a band (hatched: the Pico is not on
+  USB; grey: no terminal open; dark: a terminal open). Above it, an orange
+  mark for each `printf`, `puts` or `putchar`, with its text (C's notation)
+  where there is room and as a tooltip; text that was dropped is a red ✕,
+  struck through, with the reason in its tooltip (*Dropped (no terminal was
+  open)*). Prints closer than a mark become a band (*printing 2 000
+  times/s*). Below the band, a dark mark for each key typed (`5`, `12⏎`), and
+  a green dot where `getchar()` took a key.
 - **An `absolute_time_t` variable**: `time_reached(variable)` as a level (low
   before the deadline, high after, low while it is 0), and a flag at its
   value with *in 37 ms*. In the debouncing example, the flag runs ahead of
@@ -354,6 +480,9 @@ legend, and the status line.
   the superloop's body glows). A line that sleeps is marked, with *asleep:
   650 ms left* and a progress bar. Paused, the line about to run is marked.
 - **The board**: the inputs as buttons, the outputs as LEDs and buzzers.
+- **The terminal** (with `terminal`): Open/Close, local echo, and the screen,
+  which students click and type into. A line that waits for a key says
+  *waiting for a key*.
 - **Controls**: Reset, Pause/Run, the speed buttons, Step (one statement)
   and Next loop (to the start of the next round of the superloop) with
   `controls: [step]`, and the clock (*t = 1.234 s*).
@@ -371,12 +500,16 @@ script:
   - BUTTON_PIN press at 2 s                 # and held
   - BUTTON_PIN release at 2.5 s
   - SWITCH high at 1 s                      # a pin: high or low
+  - terminal open at 1.5 s                  # with a terminal: open, close
+  - type "5" at 2 s                         # C's escapes: "12\r"
 run: 3 s
 ```
 
 A `button` (click) without `for` is pressed for 150 ms. Bouncy inputs bounce
 in a script too, from `seed`. The steps of an input must be in time order and
-end within `run`.
+end within `run`; so must the terminal's. `type` sends its text at once, like
+a paste (several steps type slowly); with `open: manual`, the script opens
+the terminal before it types.
 
 ## Challenges: `goal`
 
@@ -386,13 +519,15 @@ goal:
   variant: checking            # with variants: the goal names its variant
   vars: {armed: false}         # these variables have these values at some moment
   outputs: {LED_PIN: off}      # and/or these outputs
+  shows: "Playing 5 beeps."    # and/or the terminal has shown this text
   max_presses: 1               # optional: with at most this many presses
 answer_script:
   - BUTTON_PIN press at 100 ms for 150 ms
 answer: Press once, for longer than 50 ms: the checking program reads the button all the time.
 ```
 
-The goal is met at the first moment all its variables and outputs hold. The
+The goal is met at the first moment all its variables and outputs hold (and
+the terminal has shown its text: text that was dropped does not count). The
 status says *Not yet.*, then *Right! armed became false at t = 0.152 s.*;
 with too many presses, *That took 3 presses. Can you do it with 1? (Reset
 starts again.)*. After a try that did not reach the goal (and a Reset), or
@@ -415,7 +550,12 @@ per variant (or only `variant` with `print: one`):
 3. the timeline of a run of `run` with the `script` (rows a `window` long,
    at most 12; a run shorter than the window gets one row of its own length);
 4. a caption: *With the script: BUTTON_PIN pressed at 0.3 s for 0.4 s. The
-   press was never read. At the end: armed = true.*
+   press was never read. At the end: armed = true.* With a terminal, the
+   caption has its steps and the dropped prints: *With the script: the
+   terminal opened at 1.5 s, typed "5" at 2 s. One print was dropped (the
+   Pico was not on USB yet).*
+5. with a terminal, its screen at the end of the run: the last 20 lines, as
+   students would see them (the keys only with `echo: true`).
 
 A challenge whose `answer_script` reaches its goal is an exercise: the code
 of its variant and the task. Its answer, at the end of the PDF under
@@ -435,18 +575,22 @@ The build reports, with the page and the block's number:
   at the end of the line*; unknown functions, types or variables; assignment
   to a `const`; `break` outside a loop; a function called before it is
   declared; a variable changed twice in one expression (with `stop`);
+  `printf` values that do not fit their conversions, a missing value, an
+  unknown conversion, `%f`, a format that is not text in double quotes;
 - unknown settings, input or output kinds; names in `watch`, `timeline` and
   `params` that are not in the program (`params` must be `const` integers
   with a number as their value); a device name that the code uses for
   something else than a pin number; two devices on one GPIO;
 - scripts: unknown inputs, steps out of order, steps after the end of the
-  run; goals: unknown variables or outputs, a goal without `variant` in a
-  block with variants;
+  run, terminal steps without a terminal, typing into a closed terminal;
+  goals: unknown variables or outputs, a goal without `variant` in a block
+  with variants, a goal on the terminal without one;
 - warnings: a goal without `answer_script` or `answer`, an `answer_script`
   that does not reach the goal or has more presses than `max_presses`; a run
   that stops at build time (undefined behaviour, a crash, too many
-  statements); with `setup: code`, a device whose pin the program never sets
-  up; an unknown `#include`.
+  statements); with `io_setup: code`, a device whose pin the program never sets
+  up; an unknown `#include`; `printf` with extra values; a program that
+  prints or reads keys in a block without a terminal.
 
 On the website, a block with a mistake shows the same message instead of the
 block.
@@ -565,7 +709,7 @@ task: Press and hold the button. Watch debounce_time while the button bounces, a
 ````markdown
 ```superloop
 title: Blinking
-setup: code
+io_setup: code
 outputs:
   LED_PIN: red led
 code: |
@@ -589,12 +733,66 @@ task: Make DELAY_MS smaller and smaller. When does the LED stop blinking and sta
 ```
 ````
 
+### Where did the prompt go?
+
+Week 3's two surprises: the first prompt is lost, because the Pico prints it
+before any terminal is open (here, before the Pico is even on USB), and the
+keys do not show. The second tab waits for the terminal.
+
+```yaml
+title: Where did the prompt go?
+stdio_setup: manual
+terminal:
+  open: manual
+variants:
+  as is: |
+    #include "pico/stdlib.h"
+    #include <stdio.h>
+
+    int main() {
+      stdio_init_all();
+
+      while (true) {
+        printf("Enter a number (1-9): ");
+        int n = getchar();
+        if (n < '1' || n > '9') {
+          printf("\nInvalid input.\n");
+          continue;
+        }
+        printf("\nPlaying %d beeps.\n", n - '0');
+      }
+    }
+  waiting for the terminal: |
+    #include "pico/stdlib.h"
+    #include <stdio.h>
+
+    int main() {
+      stdio_init_all();
+      while (!stdio_usb_connected()) sleep_ms(10);
+
+      while (true) {
+        printf("Enter a number (1-9): ");
+        int n = getchar();
+        if (n < '1' || n > '9') {
+          printf("\nInvalid input.\n");
+          continue;
+        }
+        printf("\nPlaying %d beeps.\n", n - '0');
+      }
+    }
+timeline: [cpu, terminal]
+script:
+  - terminal open at 1.5 s
+  - type "5" at 2 s
+task: Open the terminal, then type a digit. Where is the first prompt? Then look at the second tab.
+```
+
 ## What is not possible (yet)
 
-- `printf`, `getchar` and a terminal; `switch` and `enum`; `float` and
-  `double`; the lessons' button and blinker libraries (`uses`). The settings
-  `uses`, `terminal` and `enter` are accepted with a warning.
-- `struct`, arrays, pointers, strings, `static` locals, `scanf`.
+- `switch` and `enum`; `float` and `double` (and so `%f`); the lessons'
+  button and blinker libraries (`uses`, accepted with a warning).
+- `struct`, arrays, pointers other than `const char *`, `static` locals,
+  `scanf`, `sprintf`, `fgets`.
 - Interrupts and callbacks (`add_repeating_timer_ms`, GPIO IRQs), the second
   core, the PWM, ADC and UART hardware (the `pwm` and `adc` widgets cover
   some), the RP2040's real timing.

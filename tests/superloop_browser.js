@@ -6,8 +6,9 @@
 // CHROME is Chrome Headless Shell (from `course setup`), PAGE the built
 // lessons/week_02/lesson5.html. The page is driven over the DevTools protocol:
 // buttons are pressed as a student presses them (the keyboard: Space down and
-// up), and the variables, the challenge's status, the timeline and the notes
-// are read back. Errors in the page's scripts fail the test.
+// up), keys are typed into the terminal, and the variables, the challenge's
+// status, the timeline, the terminal and the notes are read back. Errors in
+// the page's scripts fail the test.
 const [chrome, page] = Deno.args;
 
 let passed = 0;
@@ -92,14 +93,25 @@ try {
     vars: n => [...T.block(n).querySelectorAll('.sl-var')].map(v => v.querySelector('.sl-vname').textContent + '=' + v.querySelector('.sl-val').textContent).join(' '),
     goal: n => T.block(n).querySelector('.sl-goaltext')?.textContent,
     count: (n, sel) => T.block(n).querySelectorAll(sel).length,
+    // the terminal: type (as the keyboard does: text, or Enter), its screen
+    type: async (n, text) => {
+      const i = T.block(n).querySelector('.sl-term-input');
+      if (text === '\\r') i.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+      else { i.value = text; i.dispatchEvent(new InputEvent('input', {bubbles: true, data: text})); }
+      await new Promise(r => setTimeout(r, 300));
+      return true;
+    },
+    screen: n => T.block(n).querySelector('.sl-term-screen').textContent.replace(/\\s+$/, ''),
   }, true)`);
 
-  ok(await js(`document.querySelectorAll('.course-superloop').length`) === 7 && await js(`document.querySelectorAll('.course-superloop .sl').length`) === 5,
-    'a block for every ```superloop on the page; five run');
-  ok(await js(`T.block(5).querySelector('.sl-error')?.textContent`) === 'This superloop cannot be shown: "flavour" is not a setting of a superloop block',
+  ok(await js(`document.querySelectorAll('.course-superloop').length`) === 9 && await js(`document.querySelectorAll('.course-superloop .sl').length`) === 7,
+    'a block for every ```superloop on the page; seven run');
+  ok(await js(`T.block(7).querySelector('.sl-error')?.textContent`) === 'This superloop cannot be shown: "flavour" is not a setting of a superloop block',
     'a block with a mistake shows the mistake');
-  ok((await js(`T.block(6).querySelector('.sl-error')?.textContent`) || '').startsWith('This superloop cannot be shown: the YAML cannot be read'),
+  ok((await js(`T.block(8).querySelector('.sl-error')?.textContent`) || '').startsWith('This superloop cannot be shown: the YAML cannot be read'),
     'unreadable YAML is reported on the page');
+  ok(await js(`[...document.querySelectorAll('.course-superloop .sl')].every(b => ![...b.childNodes].some(k => k.nodeType === 3 && k.textContent.trim()))`),
+    'no stray text in the blocks (2.7.0 showed "null" under blocks without a goal)');
   ok(!await js(`!!document.querySelector('.sl-source')`), 'no YAML editor on the published site');
 
   // the alarm: one short press, two variants on the same press
@@ -149,6 +161,34 @@ try {
   await sleep(300);
   ok(/Line 4: 2147\d+ \+ 100000 does not fit in an int\. Signed overflow is undefined behaviour in C\. The widget wraps, as the processor does; the compiled program may do something else\./.test(await js(`T.block(4).querySelector('.sl-notes').textContent`))
     && await js(`T.count(4, '.sl-line.is-ub')`) === 1, 'permit: the overflow is noted, its line marked', await js(`T.block(4).querySelector('.sl-notes').textContent`));
+
+  // the terminal: the prompt printed before it opened is lost; both variants get the same keys
+  await js(`T.show(5)`);
+  await sleep(400);
+  ok(await js(`T.block(5).querySelector('.sl-term-state').textContent`) === 'closed' && await js(`T.count(5, '.sl-line.is-waiting')`) === 1
+    && await js(`T.block(5).querySelector('.sl-line.is-waiting .sl-badge').textContent`) === 'waiting for a key', 'terminal: closed at the start; getchar() waits for a key');
+  await js(`T.type(5, '5')`);
+  ok(await js(`T.block(5).querySelector('.sl-term-msg').textContent`) === 'The terminal is closed: open it to type.', 'terminal: a closed terminal takes no keys');
+  await js(`T.click(5, 'Open')`);
+  await sleep(200);
+  ok(await js(`T.block(5).querySelector('.sl-term-state').textContent`) === 'open' && await js(`T.screen(5)`) === '', 'terminal: open, and the first prompt is not there', JSON.stringify(await js(`T.screen(5)`)));
+  await js(`T.type(5, '5')`);
+  ok(await js(`T.screen(5)`) === '\nPlaying 5 beeps.\nEnter a number (1-9):', 'terminal: a key typed, the program answers', JSON.stringify(await js(`T.screen(5)`)));
+  await js(`T.type(5, '\\r')`);   // ('\\r' here is '\r' in the page)
+  ok((await js(`T.screen(5)`)).endsWith('Invalid input.\nEnter a number (1-9):'), 'terminal: Enter sends \\r, which is no digit', JSON.stringify(await js(`T.screen(5)`)));
+  ok(await js(`T.count(5, '.sl-tl-dropx')`) >= 1 && await js(`T.count(5, '.sl-tl-key')`) === 2 && await js(`T.count(5, '.sl-tl-usb.open')`) >= 1,
+    'terminal lane: the dropped prompt, the keys, the open terminal');
+  await js(`T.tab(5, 1)`);
+  ok((await js(`T.screen(5)`)).startsWith('Enter a number (1-9): \nPlaying 5 beeps.'), 'terminal: the program that waits for the terminal shows its first prompt, after the same keys', JSON.stringify(await js(`T.screen(5)`)));
+  await js(`T.click(5, 'Close')`);
+  await sleep(200);
+  ok(await js(`T.block(5).querySelector('.sl-term-state').textContent`) === 'closed', 'terminal: closed again');
+
+  // terminal: open, a goal on its text, \r updating a line
+  await js(`T.show(6)`);
+  await sleep(1600);
+  ok(/^t = \d\.\d{3} s$/.test(await js(`T.screen(6)`)), 'terminal: open connects by itself; \\r updates the line in place', JSON.stringify(await js(`T.screen(6)`)));
+  ok(/^Right! the terminal showed "t = 1\.0" at t = 1\.0\d\d s\.$/.test(await js(`T.goal(6)`)), 'a goal on the terminal\'s text', await js(`T.goal(6)`));
   await sleep(300);
   ok(!session.errors.length, 'no script errors in the page', session.errors.join('\n'));
 } catch (e) {

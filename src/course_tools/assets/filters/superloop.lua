@@ -12,7 +12,8 @@ _course/superloops.json, keyed by the SHA-1 of the block's text.
   which the script shows under the block to change and apply.
 * PDF (Typst): the title, a note that the program runs live on the website
   (with a link to the block), the task, then per variant the code (with line
-  numbers), the timeline of the run with the block's script and a caption. A block with a goal is an exercise:
+  numbers), the timeline of the run with the block's script and a caption, and
+  with a terminal its screen at the end. A block with a goal is an exercise:
   the code and the task, and its answer (with the timeline of the answer's
   run) for the "Answers" section of practice.lua, which runs after this filter.
 ]]
@@ -93,6 +94,13 @@ local function code(text)
   return {pandoc.CodeBlock(text, pandoc.Attr('', {'c', 'numberLines'}))}
 end
 
+-- the terminal's screen at the end of the run, as text in a box (kept with its label on one page)
+local function screen(text)
+  if text == '' then return {pandoc.Para(pandoc.Emph(pandoc.Inlines('The terminal shows nothing.')))} end
+  return {pandoc.RawBlock('typst', '#block(breakable: false)['), pandoc.Para(pandoc.Emph(pandoc.Inlines('The terminal at the end:'))),
+    pandoc.CodeBlock(text, pandoc.Attr('', {'text'})), pandoc.RawBlock('typst', ']')}
+end
+
 local function link(text, id)
   return pandoc.Link(pandoc.Inlines(text), page_url .. '#' .. id)
 end
@@ -127,11 +135,13 @@ local function typst(entry, id)
       if v.caption then blocks:insert(pandoc.Para(pandoc.Emph(pandoc.Inlines(v.caption)))) end
       blocks:insert(pandoc.RawBlock('typst', ']'))
     end
+    if v.terminal then blocks:extend(screen(v.terminal)) end
   end
   if not ex then return pandoc.Div(blocks, pandoc.Attr('', {'course-superloop'})) end
   local answer = pandoc.Blocks({})
   for _, part in ipairs(ex.answer or {}) do answer:insert(pandoc.Para(pandoc.Inlines(part.text or ''))) end
   if ex.picture then answer:insert(picture(ex.picture)) end
+  if ex.terminal then answer:extend(screen(ex.terminal)) end
   blocks:insert(pandoc.Div(answer, pandoc.Attr('', {'answer'})))
   return pandoc.Div(blocks, pandoc.Attr('', {'course-widget-exercise'}))
 end

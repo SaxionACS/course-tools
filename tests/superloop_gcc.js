@@ -15,9 +15,14 @@
 //    statements in main()) against a pico/stdlib.h made from the interpreter's
 //    own list of SDK functions. Blocks with a mistake (the build reports it)
 //    are left out.
+// 3. printf against the Pico SDK's own printf.c (pico_printf): random formats
+//    and values, formatted by the widget and by printf.c compiled with gcc
+//    (vfctprintf, as the SDK's printf calls it). printf.c comes from
+//    PICO_SDK_PATH, or is downloaded from the SDK at the tag PICO_SDK below.
 //
 // SUPERLOOP_CASES (default 4000) and SUPERLOOP_SEED change the random cases;
 // CC the compiler (default gcc).
+const PICO_SDK = '2.3.1';   // the SDK whose printf the widget copies (docs/superloop.md); move it forward here
 const here = new URL('.', import.meta.url);
 (0, eval)(await Deno.readTextFile(new URL('../src/course_tools/assets/superloop/superloop.js', here)));
 const {compile, readConfig, Machine, internals: I} = globalThis.CourseSuperloop;
@@ -45,16 +50,20 @@ if (Deno.env.get('SUPERLOOP_REQUIRE_M32')) ok(m32, 'gcc -m32 works (gcc-multilib
 console.log(`gcc: ${(await sh(CC, ['-dumpfullversion'])).stdout.trim()}, ${m32 ? '-m32 (long is 32 bits, as on the RP2040)' : '64-bit (gcc-multilib is missing: long is left out)'}`);
 
 // --- the stand-in for pico/stdlib.h: the interpreter's SDK functions and constants ---------
+// (printf, puts, putchar and getchar come from the C library's stdio.h, as on the Pico)
+const cType = t => (t === 'str' ? 'const char *' : t);
 const stub = ['#ifndef SUPERLOOP_STUB_H', '#define SUPERLOOP_STUB_H', '#include <stdint.h>', '#include <stdbool.h>', '#include <limits.h>',
+  '#include <stdio.h>', '#include <inttypes.h>',
   'typedef unsigned int uint;', 'typedef uint64_t absolute_time_t;', 'enum gpio_dir { GPIO_OUT = 1, GPIO_IN = 0 };',
+  'enum pico_error_codes { PICO_OK = 0, PICO_ERROR_NONE = 0, PICO_ERROR_GENERIC = -1, PICO_ERROR_TIMEOUT = -2, PICO_ERROR_NO_DATA = -3 };',
   'extern const absolute_time_t nil_time;', 'extern const absolute_time_t at_the_end_of_time;',
-  ...Object.entries(I.SDK).map(([name, f]) => `${f.ret} ${name}(${f.params.length ? f.params.join(', ') : 'void'});`), '#endif', ''].join('\n');
+  ...Object.entries(I.SDK).filter(([, f]) => !f.libc).map(([name, f]) => `${cType(f.ret)} ${name}(${f.params.length ? f.params.map(cType).join(', ') : 'void'});`), '#endif', ''].join('\n');
 for (const h of ['pico/stdlib.h', 'pico/time.h', 'hardware/gpio.h', 'hardware/timer.h']) {
   await Deno.mkdir(`${tmp}/inc/${h.split('/')[0]}`, {recursive: true});
   await Deno.writeTextFile(`${tmp}/inc/${h}`, stub);
 }
 const consts = Object.keys(I.CONSTS).filter(k => !['true', 'false', 'GPIO_OUT', 'GPIO_IN', 'nil_time', 'at_the_end_of_time'].includes(k));
-ok(consts.every(k => /^U?INT(8|16|32|64)?_(MAX|MIN)$/.test(k)), 'the interpreter\'s constants are those of limits.h and stdint.h', consts.join(' '));
+ok(consts.every(k => /^U?INT(8|16|32|64)?_(MAX|MIN)$|^PICO_(OK|ERROR_[A-Z_]+)$|^EOF$/.test(k)), 'the interpreter\'s constants are those of limits.h, stdint.h, stdio.h and pico/error.h', consts.join(' '));
 
 // --- 1. random expressions ------------------------------------------------------------
 let seed = Number(Deno.env.get('SUPERLOOP_SEED') || 20261101);
@@ -168,6 +177,87 @@ if (Deno.args[0]) {
     ok(r.code === 0, `${b.where}: gcc compiles the program`, r.stderr.split('\n').filter(l => /error/.test(l)).slice(0, 3).join(' '));
   }
   console.log(`block programs: ${blocks.length} compiled with gcc`);
+}
+
+// --- 3. printf against the SDK's printf.c ------------------------------------------------------
+{
+  let source = null;
+  const sdk = Deno.env.get('PICO_SDK_PATH');
+  if (sdk) source = await Deno.readTextFile(`${sdk}/src/rp2_common/pico_printf/printf.c`).catch(() => null);
+  if (!source) {
+    const url = `https://raw.githubusercontent.com/raspberrypi/pico-sdk/${PICO_SDK}/src/rp2_common/pico_printf/printf.c`;
+    source = await fetch(url).then(r => (r.ok ? r.text() : null)).catch(() => null);
+  }
+  if (!source) {
+    // in CI, printf must be tested; elsewhere, without a network and a PICO_SDK_PATH, it is left out
+    if (Deno.env.get('CI')) ok(false, `printf.c of the Pico SDK ${PICO_SDK} could be downloaded`);
+    else console.log('printf: printf.c of the Pico SDK is not here (no PICO_SDK_PATH, no network): left out');
+  } else {
+    await Deno.mkdir(`${tmp}/pp/pico`, {recursive: true});
+    await Deno.writeTextFile(`${tmp}/pp/printf.c`, source);
+    await Deno.writeTextFile(`${tmp}/pp/pico.h`, '#include <stdbool.h>\n#include <stdint.h>\n#include <stddef.h>\ntypedef unsigned int uint;\n#define WRAPPER_FUNC(x) pp_##x\n#define __printflike(a, b)\n');
+    await Deno.writeTextFile(`${tmp}/pp/pico/printf.h`, '#include <stdarg.h>\n#define PICO_PRINTF_ALWAYS_INCLUDED 1\nint vfctprintf(void (*out)(char character, void *arg), void *arg, const char *format, va_list va);\n');
+    const CONVS = 'diuxXobcs%', LENS = m32 ? ['', '', '', 'hh', 'h', 'l', 'll', 'z', 'j', 't'] : ['', '', '', 'hh', 'h', 'll'];
+    const utf8 = t => String.fromCharCode(...new TextEncoder().encode(t));
+    const TEXTS = ['', 'a', 'hello', 'with space', 'tab\there', utf8('µs'), 'a string of more than thirty-two characters'];
+    const intIn = (bits, signed) => {
+      const v = value([null, bits, signed]);
+      return bits === 64 ? v : Number(v);
+    };
+    const cStr = b => `"${[...b].map(ch => { const c = ch.charCodeAt(0); return c >= 32 && c < 127 && ch !== '"' && ch !== '\\' && ch !== '?' ? ch : `\\${c.toString(8).padStart(3, '0')}`; }).join('')}"`;
+    const cases = [];
+    for (let k = 0; k < N; k++) {
+      let fmt = '';
+      const vals = [], args = [];
+      for (let n = 1 + Math.floor(rnd() * 3); n > 0; n--) {
+        fmt += pick(['', '', ' ', 'x=', '|', '\n', 'ab']);
+        const conv = pick(CONVS.split(''));
+        let spec = '%';
+        for (const f of '-0+ #') if (rnd() < 0.2) spec += f;
+        const w = rnd();
+        if (w < 0.35) spec += String(Math.floor(rnd() * 41));
+        else if (w < 0.5) { spec += '*'; const x = Math.floor(rnd() * 61) - 30; vals.push(x); args.push(`${x}`); }
+        const p = rnd();
+        if (p < 0.05) spec += '.';
+        else if (p < 0.35) spec += `.${Math.floor(rnd() * 41)}`;
+        else if (p < 0.45) { spec += '.*'; const x = Math.floor(rnd() * 61) - 20; vals.push(x); args.push(`${x}`); }
+        const len = 'cs%'.includes(conv) ? '' : pick(LENS);
+        spec += len + conv;
+        fmt += spec;
+        if (conv === '%') continue;
+        if (conv === 's') { const t = pick(TEXTS); vals.push(t); args.push(cStr(t)); continue; }
+        if (conv === 'c') { const x = Math.floor(rnd() * 300) - 20; vals.push(x); args.push(`${x}`); continue; }
+        const signed = 'di'.includes(conv), big = len === 'll' || len === 'j', longish = 'lzt'.includes(len) && len !== '';
+        const type = big ? (signed ? 'long long' : 'unsigned long long') : longish ? (signed ? 'long' : 'unsigned long') : (signed ? 'int' : 'unsigned int');
+        // a value of the size the conversion reads; sometimes of the other signedness (a same-size mix)
+        const x = intIn(big ? 64 : 32, rnd() < 0.5 ? signed : !signed);
+        vals.push(x);
+        args.push(big ? `(long long)${BigInt.asIntN(64, BigInt(x))}LL` : `(${type})${x}${x < 0 ? '' : 'u'}`);
+      }
+      fmt += pick(['', '\n', '.']);
+      cases.push({fmt, vals, args});
+    }
+    const prog = ['#include <stdio.h>', '#include <stdarg.h>', 'int vfctprintf(void (*out)(char, void *), void *arg, const char *format, va_list va);',
+      'static char out[4096]; static int on;', 'static void put(char c, void *a) { (void)a; if (on < 4000) out[on++] = c; }',
+      'static int t(const char *fmt, ...) { va_list va; va_start(va, fmt); on = 0; int r = vfctprintf(put, 0, fmt, va); va_end(va); return r; }',
+      'static void show(int r) { printf("%d:", r); for (int i = 0; i < on; i++) printf("%02x", (unsigned char)out[i]); printf("\\n"); }',
+      'int main(void) {', ...cases.map(c => `  show(t(${cStr(c.fmt)}${c.args.map(a => `, ${a}`).join('')}));`), '  return 0;', '}', ''].join('\n');
+    await Deno.writeTextFile(`${tmp}/pp/cases.c`, prog);
+    const cc = await sh(CC, [...ARCH, '-funsigned-char', '-std=gnu11', '-w', `-I${tmp}/pp`, '-o', `${tmp}/pp/cases`, `${tmp}/pp/cases.c`, `${tmp}/pp/printf.c`]);
+    ok(cc.code === 0, 'printf.c of the Pico SDK compiles with gcc', cc.stderr.split('\n').slice(0, 4).join(' '));
+    if (cc.code === 0) {
+      const got = (await sh(`${tmp}/pp/cases`, [])).stdout.trim().split('\n');
+      const hex = s => [...s].map(ch => ch.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+      let bad = 0;
+      cases.forEach((c, k) => {
+        const r = I.formatPrintf(I.readFormat(c.fmt).items, c.vals, 0);
+        const mine = `${r.count}:${hex(r.text)}`;
+        if (mine !== got[k]) { bad++; if (bad <= 5) ok(false, `printf(${JSON.stringify(c.fmt)}, ${c.args.join(', ')}) as the SDK's printf.c`, `widget ${mine}, printf.c ${got[k]}`); }
+      });
+      ok(bad === 0, `printf: ${cases.length} random formats as the SDK's printf.c (${PICO_SDK}) prints them`, `${bad} differ`);
+      console.log(`printf: ${cases.length} random formats against the SDK's printf.c, ${bad} differ`);
+    }
+  }
 }
 
 await Deno.remove(tmp, {recursive: true});

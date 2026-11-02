@@ -85,8 +85,8 @@ STATEMACHINE_MESSAGES = (
 )
 # Superloop blocks with mistakes (lessons/week_02/lesson5.md).
 SUPERLOOP_MESSAGES = (
-    'warning: lessons/week_02/lesson5.md: superloop 6: "flavour" is not a setting of a superloop block',
-    "warning: lessons/week_02/lesson5.md: superloop 7: the YAML cannot be read: ",
+    'warning: lessons/week_02/lesson5.md: superloop 8: "flavour" is not a setting of a superloop block',
+    "warning: lessons/week_02/lesson5.md: superloop 9: the YAML cannot be read: ",
 )
 # Other lines that look like a warning or an error fail the check, except these.
 ALLOWED_MESSAGES = REQUIRED_MESSAGES + WIDGET_MESSAGES + STATEMACHINE_MESSAGES + SUPERLOOP_MESSAGES + (
@@ -458,13 +458,13 @@ def check_superloops(c: Checks, read, dist: Path) -> None:
     p = main_content(html)
     divs = re.findall(r'<div class="course-superloop" id="([\w-]+)"(?: data-config="([^"]*)")?>', p)
     configs = [json.loads(htmllib.unescape(cfg)) if cfg else {} for _, cfg in divs]
-    c.ok(len(divs) == 7, "a block for every ```superloop, not for one shown inside a code block", f"found {len(divs)}")
-    if len(divs) == 7:
+    c.ok(len(divs) == 9, "a block for every ```superloop, not for one shown inside a code block", f"found {len(divs)}")
+    if len(divs) == 9:
         c.ok([d[0] for d in divs[:3]] == ["superloop-1", "alarm-challenge", "superloop-3"],
              "every block has an id: the block's own, or superloop-<n>")
         c.ok(configs[1].get("goal", {}).get("outputs") == {"LED_PIN": "off"} and "while (true)" in configs[0]["variants"]["checking"],
              "off stays text (YAML 1.2 booleans: only true and false); the programs as text", json.dumps(configs[1].get("goal")))
-    c.ok("NOT-A-SUPERLOOP" in p and p.count('class="sl-error"') == 1 and len(divs) == 7 and not divs[6][1],
+    c.ok("NOT-A-SUPERLOOP" in p and p.count('class="sl-error"') == 1 and len(divs) == 9 and not divs[8][1],
          "a block in a code block is shown as code; unreadable YAML is reported on the page (a mistake in a readable block: by the script)")
     c.ok("data-yaml" not in p, "editable blocks have no YAML on the published site")
     c.ok(re.search(r'<script src="[^"]*site_libs/quarto-contrib/course-superloop-\w+/superloop\.js"', html)
@@ -478,7 +478,7 @@ def check_superloops(c: Checks, read, dist: Path) -> None:
                str(dist / "lessons" / "week_02" / "lesson5.html")])
     lines = ANSI.sub("", out.stdout).strip().splitlines()
     c.ok(out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
-         "in a browser: presses on both variants, a challenge, stepping, undefined behaviour noted (tests/superloop_browser.js)"
+         "in a browser: presses on both variants, a challenge, stepping, undefined behaviour noted, the terminal (tests/superloop_browser.js)"
          + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
 
 
@@ -753,6 +753,12 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("count = −2145967296" in questions and "This superloop cannot be shown: \"flavour\" is not a setting" in questions
          and "This superloop cannot be shown: the YAML cannot be read" in questions,
          "superloop PDF: undefined behaviour permitted (the counter wrapped); a block with a mistake says so")
+    c.ok('With the script: the terminal opened at 1.5 s, typed "5" at 2 s. One print was dropped (the Pico was not on USB yet).' in questions
+         and "The terminal at the end: Playing 5 beeps. Enter a number (1-9):" in questions
+         and "Enter a number (1-9): Playing 5 beeps. Enter a number (1-9):" in questions,
+         "superloop PDF: the terminal's steps and the dropped print in the caption, the terminal's screen at the end")
+    c.ok('(No presses: the terminal shows "t = 1.0" at 1 s.)' in key and "t = 1.250 s" in key,
+         "superloop PDF: a goal on the terminal's text, its answer with the screen")
 
 
 def main() -> int:

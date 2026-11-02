@@ -34,7 +34,7 @@ what changed recently.
 | `src/course_tools/assets/statemachine/dagre.min.js` | dagre 3.1.1 (MIT, vendored from npm unchanged, licence next to it): the layout of the diagrams |
 | `src/course_tools/assets/filters/statemachine.lua` | Lua filter: state machines as `<div class="course-statemachine" data-config>` (HTML) or pictures and transition tables (PDF) |
 | `src/course_tools/superloop.py` | superloop blocks: finds ```` ```superloop ```` blocks, reads their YAML (as state machines do), runs their `print.js` with the widgets' helpers and writes `_course/superloops.json` |
-| `src/course_tools/assets/superloop/superloop.js` | superloop blocks: a C interpreter (the RP2040's types and C's integer rules, undefined behaviour), the simulated Pico (GPIO, the SDK's time functions), the timeline and the page; in the browser and at build time (`print`) |
+| `src/course_tools/assets/superloop/superloop.js` | superloop blocks: a C interpreter (the RP2040's types and C's integer rules, undefined behaviour), the simulated Pico (GPIO, the SDK's time functions, USB stdio and the SDK's `printf`), the terminal, the timeline and the page; in the browser and at build time (`print`) |
 | `src/course_tools/assets/superloop/print.js` | build-time entry point, run with `quarto run` |
 | `src/course_tools/assets/filters/superloop.lua` | Lua filter: superloop blocks as `<div class="course-superloop" data-config>` (HTML) or the code, timelines and exercises (PDF); before `practice.lua` |
 | `src/course_tools/assets/filters/course.lua` | Lua filter: PDF button, learning outcomes and reading time, slides/GenAI/logbook/starter boxes, links, code annotations, diagram alignment, footer, PDF header |
@@ -51,7 +51,7 @@ what changed recently.
 | `tests/statemachine.js` | tests of the state machines: running, mistakes, layouts that must not overlap, the PDF form (`quarto run tests/statemachine.js`, also run by `check.py`) |
 | `tests/statemachine_browser.js` | the test course's state machines in Chrome Headless Shell, driven over the DevTools protocol (run by `check.py` after the build) |
 | `tests/superloop.js` | tests of the superloop interpreter: C's integer rules, every row of the undefined-behaviour table (the values a Pico gives), mistakes, the lesson programs with scripted presses, goals and the PDF form (`quarto run tests/superloop.js`, also run by `check.py`) |
-| `tests/superloop_gcc.js` | the interpreter against gcc: thousands of random expressions (values, and undefined behaviour against UBSan), and every superloop program of the test course compiled with gcc (run by `check.py` after the build; needs gcc, `-m32` with `gcc-multilib` as in CI) |
+| `tests/superloop_gcc.js` | the interpreter against gcc: thousands of random expressions (values, and undefined behaviour against UBSan), every superloop program of the test course compiled with gcc, and `printf` against the Pico SDK's own `printf.c` (from `PICO_SDK_PATH`, or downloaded at the tag `PICO_SDK` in the file) on random formats (run by `check.py` after the build; needs gcc, `-m32` with `gcc-multilib` as in CI) |
 | `tests/superloop_browser.js` | the test course's superloop blocks in Chrome Headless Shell (run by `check.py` after the build) |
 | `docs/authoring.md`, `docs/course-info.md` | documentation for course authors (state machines: `docs/statemachines.md`; superloop blocks: `docs/superloop.md`) |
 | `install.sh`, `install.ps1`, `requirements.md` | local installation: Ubuntu and macOS (`install.sh`: system packages, uv, `uv tool install`, `course setup`), Windows (`install.ps1`: the same without system packages) |
@@ -98,9 +98,11 @@ what changed recently.
   nothing from `widgets.js` or `statemachine.js`. `superloop.js` is one
   script for the browser and the build; only `mount` and its helpers touch
   the DOM. The C semantics are those of the RP2040 with arm-none-eabi-gcc;
-  the `permit` values of undefined behaviour were measured on a Pico. Change
-  them only together with `docs/superloop.md` and `tests/superloop.js`, and
-  run `tests/superloop_gcc.js`.
+  the `permit` values of undefined behaviour were measured on a Pico, and so
+  were USB stdio's behaviour and times (the `USB` constants); `printf` is
+  the SDK's `pico_printf`, quirks included. Change them only together with
+  `docs/superloop.md` and `tests/superloop.js`, and run
+  `tests/superloop_gcc.js`.
 - `course preview` writes changed pages one at a time (`stage.sync(settle=...)`,
   `cli._rendered`): Quarto's preview fails silently when it re-renders several
   pages at once, from the second time on. Keep it that way unless a Quarto

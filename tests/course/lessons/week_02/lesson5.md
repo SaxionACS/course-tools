@@ -108,7 +108,7 @@ answer: SL-ANSWER Press once, for longer than 50 ms.
 
 ```superloop
 title: The LED follows the button
-setup: code
+io_setup: code
 inputs:
   BUTTON_PIN: hold button
 outputs:
@@ -193,6 +193,77 @@ watch: [count]
 timeline: [cpu, LED_PIN]
 undefined_behavior: permit
 run: 20 ms
+```
+
+## The terminal
+
+```superloop
+title: SL-TERM Where did the prompt go?
+terminal:
+  open: manual
+stdio_setup: manual
+variants:
+  as is: |
+    #include "pico/stdlib.h"
+    #include <stdio.h>
+
+    int main() {
+      stdio_init_all();
+
+      while (true) {
+        printf("Enter a number (1-9): ");
+        int n = getchar();
+        if (n < '1' || n > '9') {
+          printf("\nInvalid input.\n");
+          continue;
+        }
+        printf("\nPlaying %d beeps.\n", n - '0');
+      }
+    }
+  waiting for the terminal: |
+    #include "pico/stdlib.h"
+    #include <stdio.h>
+
+    int main() {
+      stdio_init_all();
+      while (!stdio_usb_connected()) sleep_ms(10);
+
+      while (true) {
+        printf("Enter a number (1-9): ");
+        int n = getchar();
+        if (n < '1' || n > '9') {
+          printf("\nInvalid input.\n");
+          continue;
+        }
+        printf("\nPlaying %d beeps.\n", n - '0');
+      }
+    }
+timeline: [cpu, terminal]
+script:
+  - terminal open at 1.5 s
+  - type "5" at 2 s
+run: 3 s
+task: Open the terminal, then type a digit. Where is the first prompt? Then look at the second tab.
+```
+
+```superloop
+title: SL-CLOCK Time since boot
+terminal:
+  open: auto
+stdio_setup: auto
+code: |
+  const uint32_t PERIOD_MS = 250;
+
+  while (true) {
+    uint64_t ms = time_us_64() / 1000;
+    printf("\rt = %" PRIu64 ".%03" PRIu64 " s", ms / 1000, ms % 1000);
+    sleep_ms(PERIOD_MS);
+  }
+params: [PERIOD_MS]
+goal:
+  shows: "t = 1.0"
+answer_script: []
+answer: Wait one second; the line updates in place, because \r goes back to the start of the line.
 ```
 
 A block shown as code is not run:

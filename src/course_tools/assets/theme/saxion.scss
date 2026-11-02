@@ -1058,9 +1058,13 @@ svg.cw-wv { display: block; max-width: none; }
   --sl-sleep-soft: #e6ebf0;
   --sl-cpu: #{$saxion-blue};
   --sl-cpu-soft: #d9e9f6;
+  --sl-term-bg: #1f2427;
+  --sl-term-fg: #e3e7ea;
   --sl-mono: #{$font-family-monospace};
   --sl-sans: #{$font-family-sans-serif};
 
+  color: var(--sl-fg);            // its own text and ground, not the page's: the block is light only
+  background: var(--sl-surface);
   border: 1px solid $saxion-grey-light;
   border-left: 4px solid $saxion-green;
   border-radius: .35rem;
@@ -1083,6 +1087,8 @@ svg.cw-wv { display: block; max-width: none; }
 
 .sl-main { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(12.5rem, 1fr); gap: 1rem 1.2rem; align-items: start; }
 @media (max-width: 760px) { .sl-main { grid-template-columns: minmax(0, 1fr); } }
+.sl-main.is-wide { grid-template-columns: minmax(0, 1fr); }
+.sl-main.is-wide > .sl-side { display: none; }
 
 // the code
 .sl-code { font-family: var(--sl-mono); font-size: .8rem; line-height: 1.55; background: var(--sl-code-bg); border-radius: .3rem; padding: .45rem 0; overflow-x: auto; min-width: 0; }
@@ -1096,6 +1102,10 @@ svg.cw-wv { display: block; max-width: none; }
 .sl-line.is-next .sl-mk::before { content: "▶"; color: var(--sl-warm); }
 .sl-line.is-asleep { background: var(--sl-sleep-soft); }
 .sl-line.is-asleep .sl-mk::before { content: "z"; font-weight: 700; color: var(--sl-sleep); font-size: .72rem; }
+.sl-line.is-waiting { background: var(--sl-cpu-soft); }
+.sl-line.is-waiting .sl-mk::before { content: "…"; font-weight: 700; color: var(--sl-cpu); }
+.sl-line.is-waiting .sl-badge { background: #4f86c0; }
+.sl-badge .sl-bar[hidden] { display: none; }
 .sl-line.is-ub .sl-mk::before { content: "!"; color: #fff; background: var(--sl-bad); border-radius: 50%; width: .8rem; height: .8rem; display: inline-grid; place-items: center; font-weight: 700; }
 .sl-line.is-stop { background: var(--sl-bad-soft); }
 .sl-badge { margin-left: 1.1rem; display: inline-flex; align-items: center; gap: .4rem; font: 700 .7rem var(--sl-sans); color: #fff; background: var(--sl-sleep); border-radius: 999px; padding: .05rem .5rem; line-height: 1.5; }
@@ -1215,6 +1225,45 @@ svg.cw-wv { display: block; max-width: none; }
 .sl-legend .k.asleep { background: repeating-linear-gradient(45deg, var(--sl-sleep-soft) 0 2px, #b9c4cf 2px 3.5px); }
 .sl-legend .k.band { background: repeating-linear-gradient(45deg, transparent 0 2px, var(--sl-hatch) 2px 3.5px); outline: 1px solid var(--sl-warm); }
 .sl-legend .k.flag { width: 9px; background: var(--sl-accent-dark); clip-path: polygon(0 0, 100% 0, 66% 50%, 100% 100%, 0 100%); }
+.sl-legend .k.print { width: 3px; height: 12px; background: var(--sl-warm); }
+.sl-legend .k.drop { width: 9px; height: 9px; background: linear-gradient(45deg, transparent 42%, var(--sl-bad) 42% 58%, transparent 58%), linear-gradient(-45deg, transparent 42%, var(--sl-bad) 42% 58%, transparent 58%); }
+.sl-legend .k.key { width: 3px; height: 12px; background: var(--sl-sig); }
+.sl-legend .k.waiting { background: #7aa7d6; }
+.sl-legend .k.open { background: var(--sl-sig); }
+
+// the terminal lane: the USB connection, prints (dropped ones red), keys typed, getchar() taking them
+.sl-tl-usb.off { stroke: var(--sl-hatch); stroke-width: 1; }
+.sl-tl-usb.closed { fill: var(--sl-grid); }
+.sl-tl-usb.open { fill: var(--sl-sig); }
+.sl-tl-usb.mixed { stroke: var(--sl-sig); stroke-width: 1; }
+.sl-tl-usblbl { font-size: 8.5px; text-anchor: middle; dominant-baseline: middle; fill: var(--sl-muted); }
+.sl-tl-usblbl.open { fill: #fff; font-weight: 700; }
+.sl-tl-print { stroke: var(--sl-warm); stroke-width: 2; }
+.sl-tl-printlbl { font-size: 9px; fill: #b65a0a; }
+.sl-tl-printlbl.drop { fill: var(--sl-bad); text-decoration: line-through; }
+.sl-tl-dropx { stroke: var(--sl-bad); stroke-width: 1.8; fill: none; }
+.sl-tl-dropline { stroke: var(--sl-bad); stroke-width: 1; stroke-dasharray: 2 2; }
+.sl-tl-prints.print { stroke: var(--sl-warm); stroke-width: 1; }
+.sl-tl-prints.drop { stroke: var(--sl-bad); stroke-width: 1; }
+.sl-tl-key { stroke: var(--sl-sig); stroke-width: 2; }
+.sl-tl-keylbl { font-size: 9.5px; font-weight: 700; fill: var(--sl-sig); }
+.sl-tl-svg g:has(> title), .sl-tl-prints { cursor: help; }
+
+// the terminal: a terminal app on the computer, talking to the Pico's USB stdio
+.sl-term { display: grid; gap: .3rem; min-width: 0; }
+.sl-term-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; }
+.sl-term-title { font: .7rem var(--sl-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--sl-muted); }
+.sl-term-state { font: 700 .78rem var(--sl-sans); color: var(--sl-muted); }
+.sl-term-state.open { color: var(--sl-accent-dark); }
+.sl-term-body { position: relative; min-width: 0; }
+.sl-term-screen { margin: 0; font: .8rem/1.45 var(--sl-mono); color: var(--sl-term-fg); background: var(--sl-term-bg); border-radius: .3rem; padding: .5rem .7rem; height: 11.6em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.sl-term-screen.is-closed { opacity: .72; cursor: default; }
+.sl-term-body:focus-within .sl-term-screen { outline: 2px solid var(--sl-warm); outline-offset: 1px; }
+.sl-term-cursor { background: var(--sl-term-fg); color: var(--sl-term-bg); }
+.sl-term-body:not(:focus-within) .sl-term-cursor { background: none; color: inherit; outline: 1px solid var(--sl-term-fg); outline-offset: -1px; }
+.sl-term-input { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; overflow: hidden; }
+.sl-term-msg { font-size: .82rem; color: #9a4a06; }
+.sl-term-msg:empty { display: none; }
 
 // status, notes
 .sl-status { font-size: .88rem; font-weight: 700; }

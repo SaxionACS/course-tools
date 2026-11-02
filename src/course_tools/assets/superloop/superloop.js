@@ -43,6 +43,8 @@
   defType('llong', 'long long', 64, true, 5);
   defType('ullong', 'unsigned long long', 64, false, 5);
   T.void = {k: 'void', name: 'void'};
+  // text: string literals, as printf's format and arguments and as const char * constants (no other pointers)
+  T.str = {k: 'str', name: 'const char *'};
   const alias = (name, of, extra) => Object.assign({}, T[of], {name}, extra);
   const TYPEDEFS = {
     int8_t: alias('int8_t', 'schar'), uint8_t: alias('uint8_t', 'uchar'),
@@ -111,7 +113,30 @@
     constructor(msg, line, col) { super(line ? `Line ${line}${col ? `, column ${col}` : ''}: ${msg}` : msg); this.line = line; this.col = col; this.text = msg; }
   }
 
-  // tokens: {k: 'id' | 'kw' | 'num' | 'char' | 'op' | 'eof', v, line, col, pos, end}; numbers also {value, suffix, radix}
+  // text as bytes: a JS string of characters 0-255, UTF-8 for letters beyond ASCII (as gcc stores a string literal)
+  const utf8 = s => String.fromCharCode(...new TextEncoder().encode(s));
+  // an escape sequence of C at src[j] (the backslash): {value, end} or {error}
+  const SIMPLE_ESC = {n: 10, t: 9, r: 13, '\\': 92, "'": 39, '"': 34, a: 7, b: 8, f: 12, v: 11, '?': 63};
+  function escapeAt(src, j) {
+    const e = src[j + 1];
+    if (e === 'x') {
+      const m = /^[0-9a-fA-F]+/.exec(src.slice(j + 2));
+      if (!m) return {error: '\\x needs hexadecimal digits'};
+      const value = parseInt(m[0], 16);
+      if (value > 255) return {error: `\\x${m[0]} is too large for a character (at most \\xff)`};
+      return {value, end: j + 2 + m[0].length};
+    }
+    if (/[0-7]/.test(e || '')) { const m = /^[0-7]{1,3}/.exec(src.slice(j + 1)); return {value: parseInt(m[0], 8) & 255, end: j + 1 + m[0].length}; }
+    if (e in SIMPLE_ESC) return {value: SIMPLE_ESC[e], end: j + 2};
+    return {error: `"\\${e || ''}" is not an escape sequence of C (\\n, \\r, \\t, \\\\, \\", \\x41, …)`};
+  }
+  // <inttypes.h>: the pieces of formats, as arm-none-eabi-gcc's newlib defines them (PRIu64 is "llu", PRId32 "ld")
+  const PRI = {};
+  for (const [bits, len] of [[8, 'hh'], [16, 'h'], [32, 'l'], [64, 'll']]) for (const c of 'diuxXo') PRI[`PRI${c}${bits}`] = len + c;
+  for (const c of 'diuxXo') { PRI[`PRI${c}MAX`] = `ll${c}`; PRI[`PRI${c}PTR`] = c; }
+
+  // tokens: {k: 'id' | 'kw' | 'num' | 'char' | 'str' | 'op' | 'eof', v, line, col, pos, end}; numbers also {value, suffix, radix},
+  // strings {value} (bytes)
   function lex(src) {
     const toks = [], includes = [], comments = [];
     let i = 0, line = 1, lineStart = 0;
@@ -174,12 +199,9 @@
       if (ch === "'") {
         let j = i + 1, value;
         if (src[j] === '\\') {
-          const e = src[j + 1];
-          const SIMPLE = {n: 10, t: 9, r: 13, '0': 0, '\\': 92, "'": 39, '"': 34, a: 7, b: 8, f: 12, v: 11, '?': 63};
-          if (e === 'x') { const m = /^[0-9a-fA-F]{1,2}/.exec(src.slice(j + 2)); if (!m) fail('\\x needs hexadecimal digits', p); value = parseInt(m[0], 16); j += 2 + m[0].length; }
-          else if (/[0-7]/.test(e) && e !== '0' || (e === '0' && /[0-7]/.test(src[j + 2] || ''))) { const m = /^[0-7]{1,3}/.exec(src.slice(j + 1)); value = parseInt(m[0], 8) & 255; j += 1 + m[0].length; }
-          else if (e in SIMPLE) { value = SIMPLE[e]; j += 2; }
-          else fail(`'\\${e}' is not a character`, p);
+          const r = escapeAt(src, j);
+          if (r.error) fail(r.error, p);
+          value = r.value; j = r.end;
         } else if (src[j] === "'" || src[j] === '\n' || j >= src.length) fail("a character needs something between the quotes, e.g. 'a'", p);
         else {
           const cp = src.codePointAt(j);
@@ -190,7 +212,24 @@
         toks.push({k: 'char', v: src.slice(i, j + 1), value: BigInt(value), line: p.line, col: p.col, pos: i, end: j + 1});
         i = j + 1; continue;
       }
-      if (ch === '"') fail('text in double quotes (strings) is not supported in this widget yet', p);
+      if (ch === '"') {
+        // a string literal: its bytes
+        let j = i + 1, value = '';
+        for (;;) {
+          if (j >= src.length || src[j] === '\n') fail('this text has no closing " on its line', p);
+          if (src[j] === '"') break;
+          if (src[j] === '\\') {
+            const r = escapeAt(src, j);
+            if (r.error) fail(r.error, {line: p.line, col: p.col + (j - i)});
+            value += String.fromCharCode(r.value); j = r.end; continue;
+          }
+          const cp = src.codePointAt(j);
+          value += cp < 128 ? src[j] : utf8(String.fromCodePoint(cp));
+          j += cp > 0xffff ? 2 : 1;
+        }
+        toks.push({k: 'str', v: src.slice(i, j + 1), value, line: p.line, col: p.col, pos: i, end: j + 1});
+        i = j + 1; continue;
+      }
       const op = OPS.find(o => src.startsWith(o, i));
       if (!op) fail(`"${ch}" is not allowed in C here`, p);
       toks.push({k: 'op', v: op, line: p.line, col: p.col, pos: i, end: i + op.length});
@@ -276,18 +315,32 @@
       else type = sign === 'unsigned' ? T.uint : T.int;
       return {type, isConst, isStatic, tok: first};
     }
-    function declarator() {
-      if (is('*')) fail('pointers are not supported in this widget');
+    // a declarator: the name, and its type (spec's type, or text for char *): {tok, type}
+    function declarator(spec) {
+      let type = spec.type;
+      if (is('*')) {
+        const star = next();
+        if (type !== T.char) fail('pointers are not supported in this widget (only const char * for text)', star);
+        accept('const');
+        if (is('*')) fail('pointers are not supported in this widget (only const char * for text)');
+        type = T.str;
+      }
       const t = next();
       if (t.k !== 'id') fail(t.k === 'kw' ? `"${t.v}" is a word of C and cannot be a name` : `a name is missing before "${t.v}"`, t);
       if (is('[')) fail('arrays are not supported in this widget yet');
-      return t;
+      return {tok: t, type};
     }
 
     function primary() {
       const t = next();
       if (t.k === 'num') return {k: 'num', tok: t};
       if (t.k === 'char') return {k: 'num', tok: t, char: true};
+      if (t.k === 'str' || (t.k === 'id' && t.v in PRI)) {
+        // string literals side by side are one: "%" PRIu64 "\n"
+        let value = t.k === 'str' ? t.value : PRI[t.v];
+        while (peek().k === 'str' || (peek().k === 'id' && peek().v in PRI)) { const u = next(); value += u.k === 'str' ? u.value : PRI[u.v]; }
+        return {k: 'str', value, tok: t};
+      }
       if (t.k === 'id') return {k: 'id', name: t.v, tok: t};
       if (t.k === 'op' && t.v === '(') {
         const e = expression();
@@ -303,10 +356,10 @@
         if (is('(')) {
           const t = next();
           if (e.k !== 'id') fail('only a function name can be called', t);
-          const args = [];
-          if (!is(')')) do args.push(assignment()); while (accept(','));
+          const args = [], spans = [];
+          if (!is(')')) do { const from = peek().pos; args.push(assignment()); spans.push([from, toks[p - 1].end]); } while (accept(','));
           expect(')', 'a ")" after the arguments');
-          e = {k: 'call', name: e.name, args, tok: e.tok};
+          e = {k: 'call', name: e.name, args, spans, tok: e.tok};
         } else if (is('++') || is('--')) e = {k: 'post', op: next().v, a: e, tok: e.tok};
         else if (is('[')) fail('arrays are not supported in this widget yet');
         else if (is('.') || is('->')) fail('struct is not supported in this widget yet');
@@ -361,9 +414,10 @@
     // a declaration after its type: int a = 1, b;
     function declRest(spec, first) {
       const decls = [];
-      let name = first;
+      let d = first;
       for (;;) {
-        if (spec.type.k === 'void') fail(`a variable cannot be void: ${name.v}`, name);
+        const name = d.tok;
+        if (d.type.k === 'void') fail(`a variable cannot be void: ${name.v}`, name);
         let init = null, span = null;
         if (accept('=')) {
           if (is('{')) fail('{ … } initialisers are not supported in this widget yet');
@@ -371,9 +425,9 @@
           init = assignment();
           span = [from, toks[p - 1].end];
         }
-        decls.push({name: name.v, tok: name, type: spec.type, isConst: spec.isConst, isStatic: spec.isStatic, init, span});
+        decls.push({name: name.v, tok: name, type: d.type, isConst: spec.isConst && d.type.k !== 'str', isStatic: spec.isStatic, init, span});
         if (!accept(',')) break;
-        name = declarator();
+        d = declarator(spec);
       }
       expect(';');
       return {k: 'decl', decls, tok: spec.tok};
@@ -383,9 +437,9 @@
       if (t.k === 'kw') unsupported(t);
       if (startsType()) {
         const spec = typeSpec();
-        const name = declarator();
-        if (is('(')) fail('a function cannot be defined inside another function', name);
-        return declRest(spec, name);
+        const d = declarator(spec);
+        if (is('(')) fail('a function cannot be defined inside another function', d.tok);
+        return declRest(spec, d);
       }
       if (accept('{')) {
         const body = [];
@@ -413,7 +467,7 @@
       if (accept('for')) {
         expect('(', 'a "(" after for');
         let init = null;
-        if (startsType()) { const spec = typeSpec(); init = declRest(spec, declarator()); }
+        if (startsType()) { const spec = typeSpec(); init = declRest(spec, declarator(spec)); }
         else if (!accept(';')) { const it = peek(); init = {k: 'expr', e: expression(), tok: it}; expect(';'); }
         const ctok = peek();
         const c = is(';') ? null : expression();
@@ -444,7 +498,7 @@
       const done = kind => items.push({kind, span: [from, toks[p - 1].end], node: kind === 'function' ? functions[functions.length - 1] : statements[statements.length - 1]});
       if (startsType()) {
         const spec = typeSpec();
-        const name = declarator();
+        const d = declarator(spec), name = d.tok;
         if (is('(')) {
           next();
           const params = [];
@@ -453,21 +507,21 @@
             do {
               const ps = typeSpec();
               if (ps.type.k === 'void') fail('a parameter cannot be void', ps.tok);
-              const pn = declarator();
-              params.push({name: pn.v, tok: pn, type: ps.type, isConst: ps.isConst});
+              const pd = declarator(ps);
+              params.push({name: pd.tok.v, tok: pd.tok, type: pd.type, isConst: ps.isConst && pd.type.k !== 'str'});
             } while (accept(','));
           }
           expect(')', 'a ")" after the parameters');
-          if (accept(';')) { functions.push({name: name.v, tok: name, ret: spec.type, params, proto: true}); done('function'); continue; }
+          if (accept(';')) { functions.push({name: name.v, tok: name, ret: d.type, params, proto: true}); done('function'); continue; }
           if (!is('{')) fail(`a "{" is missing: the body of ${name.v}()`);
           const body = statement();
-          functions.push({name: name.v, tok: name, ret: spec.type, params, body, isStatic: spec.isStatic});
+          functions.push({name: name.v, tok: name, ret: d.type, params, body, isStatic: spec.isStatic});
           done('function');
           continue;
         }
-        const d = declRest(spec, name);
-        globals.push(d);
-        statements.push(d);   // in a fragment, a declaration with a value that needs running runs here
+        const decl = declRest(spec, d);
+        globals.push(decl);
+        statements.push(decl);   // in a fragment, a declaration with a value that needs running runs here
         done('decl');
         continue;
       }
@@ -605,11 +659,187 @@
     return t;
   }
 
+  // ========================================================================
+  // printf: the Pico SDK's own (pico_printf: Marco Paland's printf, SDK 2.3.1)
+  // ========================================================================
+  const PF = {ZEROPAD: 1, LEFT: 2, PLUS: 4, SPACE: 8, HASH: 16, UPPERCASE: 32, CHAR: 64, SHORT: 128, LONG: 256, LONG_LONG: 512, PRECISION: 1024};
+  const NTOA = 32;            // PICO_PRINTF_NTOA_BUFFER_SIZE: zero padding stops at 32 characters
+  const MAX_WIDTH = 100000;   // the widget's limit for a width from *
+  const an = s => `${/^(?:[aeio]|u(?!int))/i.test(s) ? 'an' : 'a'} ${s}`;
+  const C_LEN = {'': 'int', hh: 'int', h: 'int', l: 'long', ll: 'long long', z: 'size_t', t: 'ptrdiff_t', j: 'intmax_t'};
+  /*
+   * readFormat(format bytes) -> {items: [{text} | {conv, flags, width, prec, len, src}], wants: [...]}, read as
+   * pico_printf reads it (width and prec: a number, '*' or null). `wants` says what each value after the
+   * format must be: {kind: 'int', bits, conv, src, expects, star} or {kind: 'str', ...}. Throws Error.
+   */
+  function readFormat(fmt) {
+    const nul = fmt.indexOf('\0');
+    if (nul >= 0) fmt = fmt.slice(0, nul);   // a C string ends at its first \0
+    const items = [], wants = [];
+    let i = 0, text = '';
+    const number = () => { let n = 0; while (/[0-9]/.test(fmt[i] || '')) n = (n * 10 + Number(fmt[i++])) >>> 0; return n; };
+    while (i < fmt.length) {
+      if (fmt[i] !== '%') { text += fmt[i++]; continue; }
+      const start = i++;
+      let flags = 0, f;
+      while ((f = {'0': PF.ZEROPAD, '-': PF.LEFT, '+': PF.PLUS, ' ': PF.SPACE, '#': PF.HASH}[fmt[i]])) { flags |= f; i++; }
+      let width = null, prec = null, len = '';
+      if (/[0-9]/.test(fmt[i] || '')) width = number();
+      else if (fmt[i] === '*') { width = '*'; i++; }
+      if (fmt[i] === '.') { i++; prec = 0; if (/[0-9]/.test(fmt[i] || '')) prec = number(); else if (fmt[i] === '*') { prec = '*'; i++; } }
+      if (fmt[i] === 'l' || fmt[i] === 'h') { len = fmt[i++]; if (fmt[i] === len) len += fmt[i++]; }
+      else if (fmt[i] && 'tjz'.includes(fmt[i])) len = fmt[i++];
+      const conv = fmt[i], src = esc(fmt.slice(start, i + 1));
+      if (conv === undefined) throw new Error(i === start + 1 ? 'the format ends with a single %: write %% to print a percent sign' : `"${src}" at the end of the format is not finished: d, u, x, c or s is missing`);
+      i++;
+      const star = what => wants.push({kind: 'int', bits: 32, src, star: what, expects: 'an int'});
+      if ('fFeEgGaA'.includes(conv)) throw new Error(`"${src}" prints a float or double, which this widget does not support yet`);
+      if (conv === 'p') throw new Error(`"${src}" prints a pointer, which this widget does not support`);
+      if (!'diuxXobcs%'.includes(conv)) throw new Error(`"${src}" is not a conversion of printf. Use %d, %u, %x, %c, %s or %% (a percent sign)`);
+      if (len && 'cs%'.includes(conv)) throw new Error(`"${src}": ${len} does not go with %${conv}${len === 'l' && conv !== '%' ? ` (%l${conv} is for wide characters, which this widget does not support)` : ''}`);
+      if (text) { items.push({text}); text = ''; }
+      if (width === '*') star('width');
+      if (prec === '*') star('precision');
+      items.push({conv, flags, width, prec, len, src});
+      if (conv === 's') wants.push({kind: 'str', conv, src, expects: 'text (a string)'});
+      else if (conv !== '%') {
+        const signed = 'dic'.includes(conv);
+        let name = conv === 'c' ? 'int' : C_LEN[len];
+        if (!signed && !['z', 't'].includes(len)) name = len === 'j' ? 'uintmax_t' : `unsigned ${name}`;
+        wants.push({kind: 'int', bits: len === 'll' || len === 'j' ? 64 : 32, conv, src, expects: conv === 'c' ? 'an int (a character)' : an(name)});
+      }
+    }
+    if (text) items.push({text});
+    return {items, wants};
+  }
+  // a C string: up to its first \0
+  const cstr = s => { const k = s.indexOf('\0'); return k < 0 ? s : s.slice(0, k); };
+  // _ntoa_format and _out_rev of pico_printf: the digits of value (a BigInt, at least 0) with sign, prefix and padding
+  function ntoa(value, negative, base, prec, width, flags) {
+    const buf = [];
+    let len = 0;
+    if (!value) flags &= ~PF.HASH;
+    if (!(flags & PF.PRECISION) || value) {
+      const b = BigInt(base);
+      do {
+        const d = Number(value % b);
+        buf[len++] = String.fromCharCode(d < 10 ? 48 + d : (flags & PF.UPPERCASE ? 65 : 97) + d - 10);
+        value /= b;
+      } while (value && len < NTOA);
+    }
+    const digits = len;
+    if (!(flags & PF.LEFT)) {
+      if (width && (flags & PF.ZEROPAD) && (negative || (flags & (PF.PLUS | PF.SPACE)))) width--;
+      while (len < prec && len < NTOA) buf[len++] = '0';
+      while ((flags & PF.ZEROPAD) && len < width && len < NTOA) buf[len++] = '0';
+    }
+    if (flags & PF.HASH) {
+      if (!(flags & PF.PRECISION) && len && (len === prec || len === width)) { len--; if (len && base === 16) len--; }
+      if (base === 16 && !(flags & PF.UPPERCASE) && len < NTOA) buf[len++] = 'x';
+      else if (base === 16 && (flags & PF.UPPERCASE) && len < NTOA) buf[len++] = 'X';
+      else if (base === 2 && len < NTOA) buf[len++] = 'b';
+      if (len < NTOA) buf[len++] = '0';
+    }
+    if (len < NTOA) {
+      if (negative) buf[len++] = '-';
+      else if (flags & PF.PLUS) buf[len++] = '+';
+      else if (flags & PF.SPACE) buf[len++] = ' ';
+    }
+    let s = '';
+    if (!(flags & PF.LEFT) && !(flags & PF.ZEROPAD)) for (let k = len; k < width; k++) s += ' ';
+    while (len) s += buf[--len];
+    if (flags & PF.LEFT) while (s.length < width) s += ' ';
+    return {text: s, digits};
+  }
+  /*
+   * formatPrintf(items, values, first) -> {text (bytes), count (what printf returns), digits64} or {error}:
+   * the format with the values from values[first…] (numbers, BigInts, text), as pico_printf prints them.
+   * A value is read as the type its conversion expects (the compiler checked the sizes).
+   */
+  function formatPrintf(items, st, i) {
+    let out = '', count = 0, digits64 = 0;
+    // _out_fct: a 0 character is counted, but not sent
+    const put = s => { count += s.length; out += s.includes('\0') ? s.replace(/\0/g, '') : s; };
+    for (const it of items) {
+      if (it.text !== undefined) { put(it.text); continue; }
+      let flags = it.flags, width = 0, precision = 0;
+      if (it.width === '*') { const w = convert(st[i++], T.int); if (w < 0) { flags |= PF.LEFT; width = -w; } else width = w; }
+      else if (it.width !== null) width = it.width;
+      if (width > MAX_WIDTH) return {error: `printf: a width of ${group(width)} characters (${it.src}) is more than the widget prints (${group(MAX_WIDTH)})`};
+      if (it.prec !== null) {
+        flags |= PF.PRECISION;
+        if (it.prec === '*') { const p = convert(st[i++], T.int); precision = p > 0 ? p : 0; } else precision = it.prec;
+      }
+      const len = it.len, c = it.conv;
+      if (len === 'l' || len === 'z' || len === 't') flags |= PF.LONG;
+      else if (len === 'll') flags |= PF.LONG | PF.LONG_LONG;
+      else if (len === 'j') flags |= PF.LONG_LONG;
+      else if (len === 'h') flags |= PF.SHORT;
+      else if (len === 'hh') flags |= PF.SHORT | PF.CHAR;
+      if (c === '%') put('%');
+      else if (c === 'c') {
+        let l = 1;
+        const v = convert(st[i++], T.int) & 255;
+        if (!(flags & PF.LEFT)) while (l++ < width) put(' ');
+        put(String.fromCharCode(v));
+        if (flags & PF.LEFT) while (l++ < width) put(' ');
+      } else if (c === 's') {
+        const p = cstr(String(st[i++]));
+        let l = Math.min(p.length, precision || Infinity);
+        if (flags & PF.PRECISION) l = Math.min(l, precision);
+        if (!(flags & PF.LEFT)) while (l++ < width) put(' ');
+        let k = 0;
+        while (k < p.length && (!(flags & PF.PRECISION) || precision-- > 0)) put(p[k++]);
+        if (flags & PF.LEFT) while (l++ < width) put(' ');
+      } else {
+        const base = c === 'x' || c === 'X' ? 16 : c === 'o' ? 8 : c === 'b' ? 2 : 10;
+        if (base === 10) flags &= ~PF.HASH;
+        if (c === 'X') flags |= PF.UPPERCASE;
+        if (c !== 'i' && c !== 'd') flags &= ~(PF.PLUS | PF.SPACE);
+        if (flags & PF.PRECISION) flags &= ~PF.ZEROPAD;
+        const v = st[i++];
+        let mag, neg = false;
+        if (c === 'i' || c === 'd') {
+          const x = flags & PF.LONG_LONG ? BigInt.asIntN(64, BigInt(v)) : BigInt(convert(v, flags & PF.LONG ? T.long : flags & PF.CHAR ? T.char : flags & PF.SHORT ? T.short : T.int));
+          neg = x < 0n; mag = neg ? -x : x;
+        } else mag = flags & PF.LONG_LONG ? BigInt.asUintN(64, BigInt(v)) : BigInt(convert(v, flags & PF.LONG ? T.ulong : flags & PF.CHAR ? T.uchar : flags & PF.SHORT ? T.ushort : T.uint));
+        const r = ntoa(mag, neg, base, precision, width, flags);
+        if (flags & PF.LONG_LONG) digits64 += r.digits;
+        put(r.text);
+      }
+    }
+    return {text: out, count, digits64};
+  }
+  // keys as a terminal lane shows them: 5, 12⏎
+  function keyLabel(bytes) {
+    const text = new TextDecoder().decode(Uint8Array.from(bytes, ch => ch.charCodeAt(0)));
+    return text.replace(/[\x00-\x20\x7f]/g, ch => ({'\r': '⏎', '\n': '↵', '\t': '⇥', '\x7f': '⌫', ' ': '␣'})[ch] || '·');
+  }
+  // text in C's notation, for messages and labels: "Enter\n"
+  function esc(s) {
+    let out = '';
+    for (const ch of s) {
+      const c = ch.charCodeAt(0);
+      out += ch === '\n' ? '\\n' : ch === '\r' ? '\\r' : ch === '\t' ? '\\t' : ch === '"' ? '\\"' : ch === '\\' ? '\\\\'
+        : c < 32 || c === 127 ? `\\x${c.toString(16).padStart(2, '0')}` : ch;
+    }
+    return out;
+  }
+
   // The functions of the Pico SDK the widget knows; `run` gets the machine and the arguments.
-  // Their behaviour is in the machine (sdk*), as on a Pico.
+  // Their behaviour is in the machine (sdk*), as on a Pico. libc: declared by stdio.h (not by the SDK);
+  // terminal: talks to the terminal.
   const ty = n => T[n] || TYPEDEFS[n];
   const SDK = {
-    stdio_init_all: {ret: 'void', params: []},
+    stdio_init_all: {ret: 'bool', params: []},
+    stdio_usb_connected: {ret: 'bool', params: [], terminal: true},
+    stdio_getchar_timeout_us: {ret: 'int', params: ['uint32_t'], ms: 0.001, terminal: true},
+    getchar_timeout_us: {ret: 'int', params: ['uint32_t'], ms: 0.001, terminal: true},
+    stdio_flush: {ret: 'void', params: []},
+    printf: {ret: 'int', params: ['str'], libc: true, terminal: true},
+    puts: {ret: 'int', params: ['str'], libc: true, terminal: true, numMsg: 'puts() sends text, e.g. puts("Hello"); for a number, use printf("%d\\n", …)'},
+    putchar: {ret: 'int', params: ['int'], libc: true, terminal: true, strMsg: 'putchar() sends one character, e.g. putchar(\'a\'); for text, use puts() or printf()'},
+    getchar: {ret: 'int', params: [], libc: true, terminal: true},
     gpio_init: {ret: 'void', params: ['uint']},
     gpio_set_dir: {ret: 'void', params: ['uint', 'bool']},
     gpio_put: {ret: 'void', params: ['uint', 'bool']},
@@ -643,6 +873,9 @@
     INT16_MAX: [T.int, 32767], INT16_MIN: [T.int, -32768], UINT16_MAX: [T.int, 65535],
     INT32_MAX: [T.long, INT_MAX], INT32_MIN: [T.long, INT_MIN], UINT32_MAX: [T.ulong, 4294967295],
     INT64_MAX: [T.llong, I64_MAX], INT64_MIN: [T.llong, I64_MIN], UINT64_MAX: [T.ullong, U64_MAX],
+    // pico/error.h (an enum: int), stdio.h
+    PICO_OK: [T.int, 0], PICO_ERROR_NONE: [T.int, 0], PICO_ERROR_GENERIC: [T.int, -1], PICO_ERROR_TIMEOUT: [T.int, -2],
+    PICO_ERROR_NO_DATA: [T.int, -3], EOF: [T.int, -1],
   };
 
   /*
@@ -657,6 +890,11 @@
     const here = () => code.length;
     const fail = (msg, tok) => { throw new CError(msg, tok && tok.line, tok && tok.col); };
     const warnings = [];
+    // text (const char *) is only printed: these say so where it meets numbers
+    const TEXT_ONLY = 'text (a string) can only be printed in this widget: printf("%s", …) or puts(…)';
+    const noText = (t, tok) => { if (t.k === 'str') fail(TEXT_ONLY, tok); };
+    const textNeedsValue = name => `${name} is text (const char *), so it needs its text: const char *${name} = "…";`;
+    const kindClash = (name, t) => (t === T.str ? `${name} is text (const char *), so its value must be text in double quotes ("…")` : `${name} is a number (${typeName(t)}), but its value is text. ${TEXT_ONLY}`);
 
     // --- symbols ------------------------------------------------------------
     const globalScope = new Map();
@@ -678,17 +916,19 @@
     function constValue(e) {
       try {
         if (e.k === 'num') return {t: literalType(e.tok), v: convert(e.tok.value, literalType(e.tok))};
+        if (e.k === 'str') return {t: T.str, v: e.value};
         if (e.k === 'id') {
           const s = globalScope.get(e.name);
+          if (s && s.kind === 'var' && s.type === T.str) return s.text !== undefined ? {t: T.str, v: s.text} : undefined;
           if (s && s.kind === 'var' && s.isConst && s.constValue !== undefined) return {t: s.type, v: s.constValue};
           if (!s && e.name in CONSTS) return {t: CONSTS[e.name][0], v: convert(CONSTS[e.name][1], CONSTS[e.name][0])};
           return undefined;
         }
-        if (e.k === 'un') { const a = constValue(e.a); if (!a) return; const t = e.op === '!' ? T.int : promote(a.t); return {t, v: unaryOp(e.op, t)(convert(a.v, t), {})}; }
-        if (e.k === 'cast') { const a = constValue(e.a); return a && {t: e.type, v: convert(a.v, e.type)}; }
+        if (e.k === 'un') { const a = constValue(e.a); if (!a || a.t.k !== 'int') return; const t = e.op === '!' ? T.int : promote(a.t); return {t, v: unaryOp(e.op, t)(convert(a.v, t), {})}; }
+        if (e.k === 'cast') { const a = constValue(e.a); return a && a.t.k === 'int' && e.type.k === 'int' ? {t: e.type, v: convert(a.v, e.type)} : undefined; }
         if (e.k === 'bin' && !['&&', '||'].includes(e.op)) {
           const a = constValue(e.a), b = constValue(e.b);
-          if (!a || !b) return;
+          if (!a || !b || a.t.k !== 'int' || b.t.k !== 'int') return;
           if (e.op === '<<' || e.op === '>>') { const t = promote(a.t); return {t, v: shiftOp(e.op, t)(convert(a.v, t), b.v, {})}; }
           const t = common(a.t, b.t);
           const r = binaryOp(e.op, t)(convert(a.v, t), convert(b.v, t), {});
@@ -709,14 +949,16 @@
         }
         if (v.name in SDK) fail(`${v.name} is a function of the Pico SDK, not a name for a variable`, v.tok);
         let value = zeroOf(v.type);
+        if (v.type === T.str && !v.init) fail(textNeedsValue(v.name), v.tok);
         if (v.init) {
           const c = constValue(v.init);
-          if (c) value = convert(c.v, v.type);
+          if (c && (c.t === T.str) !== (v.type === T.str)) fail(kindClash(v.name, v.type), v.init.tok);
+          if (c) value = v.type === T.str ? c.v : convert(c.v, v.type);
           else if (hasMain) fail(`the value of the global ${v.name} must be known before the program runs (in C, a global needs a constant)`, v.init.tok);
           else initLater.add(v);
         } else if (v.isConst) fail(`${v.name} is const, so it needs a value: const … ${v.name} = …;`, v.tok);
         const sym = {kind: 'var', global: true, slot: globals.length, type: v.type, isConst: v.isConst, name: v.name, decl: v,
-          constValue: v.isConst && !initLater.has(v) ? value : undefined};
+          constValue: v.isConst && !initLater.has(v) ? value : undefined, text: v.type === T.str && !initLater.has(v) ? value : undefined};
         globals.push({name: v.name, type: v.type, isConst: v.isConst, value, sym, line: v.tok.line, literal: v.init && v.init.k === 'num' ? v.init.tok : null});
         globalScope.set(v.name, sym);
       }
@@ -748,7 +990,11 @@
       return sym;
     };
 
-    const conv = (from, to) => { if (to.k === 'void') return; if (!(fits(from, to) && !!from.big === !!to.big)) emit(OP.CONV, {f: convOp(to)}); };
+    const conv = (from, to) => { if (to.k !== 'int' || from.k !== 'int') return; if (!(fits(from, to) && !!from.big === !!to.big)) emit(OP.CONV, {f: convOp(to)}); };
+    // the text of an expression when the compiler knows it: a string literal, or a const char * with its text
+    const knownText = e => { if (e.k === 'str') return e.value; const s = e.k === 'id' && lookup(e.name); return s && s.type === T.str ? s.text : undefined; };
+    // the token where the source position pos starts (for columns in messages)
+    const tokAt = pos => ast.toks.find(t => t.pos === pos);
     const stmt = tok => emit(OP.STMT, {line: tok.line, unseq: null});
     const isScalar = t => t.k === 'int';
     function load(sym, tok) { emit(sym.global ? OP.LOADG : OP.LOADL, {a: sym.slot, line: tok.line, sym}); }
@@ -758,6 +1004,7 @@
       const sym = lookup(e.name);
       if (!sym) fail(`${e.name} is not declared`, e.tok);
       if (sym.kind !== 'var') fail(`${e.name} is not a variable`, e.tok);
+      if (sym.type === T.str) fail(`${e.name} is text (const char *): in this widget, it keeps the text it starts with`, e.tok);
       if (sym.isConst) fail(`${e.name} is a constant (const); it cannot be changed`, e.tok);
       return sym;
     }
@@ -775,6 +1022,7 @@
     function ex(e, used = true) {
       switch (e.k) {
         case 'num': { const t = literalType(e.tok); emit(OP.CONST, {v: convert(e.tok.value, t)}); return t; }
+        case 'str': emit(OP.CONST, {v: e.value}); return T.str;
         case 'id': {
           const sym = lookup(e.name);
           if (sym && sym.kind === 'var') { load(sym, e.tok); return sym.type; }
@@ -784,6 +1032,7 @@
         }
         case 'un': {
           const ta = ex(e.a);
+          noText(ta, e.tok);
           if (!isScalar(ta)) fail(`${e.op} needs a number`, e.tok);
           if (e.op === '!') { emit(OP.UN, {f: unaryOp('!', ta)}); return T.int; }
           const t = promote(ta);
@@ -808,6 +1057,7 @@
         }
         case 'cast': {
           const ta = ex(e.a);
+          noText(ta, e.tok);
           if (e.type.k === 'void') { emit(OP.POP); emit(OP.CONST, {v: 0}); return T.void; }
           conv(ta, e.type);
           return e.type;
@@ -815,9 +1065,11 @@
         case 'bin': {
           if (e.op === '&&' || e.op === '||') {
             const ta = ex(e.a);
+            noText(ta, e.tok);
             if (!isScalar(ta)) fail(`${e.op} needs numbers or bools`, e.tok);
             const j1 = emit(e.op === '&&' ? OP.JZ : OP.JNZ);
             const tb = ex(e.b);
+            noText(tb, e.tok);
             if (!isScalar(tb)) fail(`${e.op} needs numbers or bools`, e.tok);
             const j2 = emit(e.op === '&&' ? OP.JZ : OP.JNZ);
             emit(OP.CONST, {v: e.op === '&&' ? 1 : 0});
@@ -829,6 +1081,7 @@
           }
           if (e.op === '<<' || e.op === '>>') {
             const ta = typeOf(e.a), tb = typeOf(e.b);
+            noText(ta, e.tok); noText(tb, e.tok);
             const t = promote(ta);
             ex(e.a); conv(ta, t);
             ex(e.b);
@@ -836,6 +1089,7 @@
             return t;
           }
           const ta = typeOf(e.a), tb = typeOf(e.b);
+          noText(ta, e.tok); noText(tb, e.tok);
           if (!isScalar(ta) || !isScalar(tb)) fail(`${e.op} needs two numbers`, e.tok);
           const t = common(ta, tb);
           ex(e.a); conv(ta, t);
@@ -845,10 +1099,12 @@
         }
         case 'cond': {
           const tc = ex(e.c);
+          noText(tc, e.tok);
           if (!isScalar(tc)) fail('the condition of ? : needs a number or bool', e.tok);
           const jz = emit(OP.JZ);
           const ta = typeOf(e.a), tb = typeOf(e.b);
-          const t = (ta.k === 'void' || tb.k === 'void') ? T.void : common(ta, tb);
+          if ((ta === T.str) !== (tb === T.str)) fail('both sides of ? : must be text, or both numbers', e.tok);
+          const t = ta === T.str ? T.str : (ta.k === 'void' || tb.k === 'void') ? T.void : common(ta, tb);
           ex(e.a); conv(ta, t);
           const j = emit(OP.JMP);
           jz.a = here();
@@ -861,6 +1117,7 @@
           const t = sym.type;
           if (e.op === '=') {
             const tb = ex(e.b);
+            if (tb === T.str) fail(kindClash(sym.name, t), e.tok);
             if (!isScalar(tb)) fail(`${sym.name} needs a value, but the right side has none (void)`, e.tok);
             conv(tb, t);
             store(sym, e.a.tok);
@@ -869,6 +1126,7 @@
           }
           const op = e.op.slice(0, -1);
           const tb = typeOf(e.b);
+          noText(tb, e.tok);
           load(sym, e.a.tok);
           if (op === '<<' || op === '>>') {
             const ct = promote(t);
@@ -905,7 +1163,16 @@
     function call(e, used) {
       const f = functions.get(e.name);
       const sdk = !f && SDK[e.name];
+      if (sdk && e.name === 'printf') return printfCall(e);
+      if (!f && e.name === 'fflush') {
+        // the SDK's printf sends at once: there is nothing to flush
+        if (e.args.length !== 1 || e.args[0].k !== 'id' || e.args[0].name !== 'stdout') fail('fflush() works on stdout only here: fflush(stdout);', e.tok);
+        emit(OP.CONST, {v: 0});
+        return T.int;
+      }
       if (!f && !sdk) {
+        if (['sprintf', 'snprintf', 'scanf', 'sscanf', 'fgets', 'gets', 'getc', 'fgetc', 'fputs', 'fprintf'].includes(e.name))
+          fail(`${e.name}() is not supported in this widget yet (printf, puts, putchar, getchar and stdio_getchar_timeout_us are)`, e.tok);
         if (lookup(e.name)) fail(`${e.name} is a variable, not a function`, e.tok);
         const later = ast.functions.find(g => g.name === e.name);
         if (later) fail(`${e.name}() is called before it is declared. Define it above, or declare it first: ${typeName(later.ret)} ${e.name}(…);`, e.tok);
@@ -918,7 +1185,9 @@
         fail(`${e.name}() takes ${params.length || 'no'} argument${params.length === 1 ? '' : 's'}, not ${e.args.length}`, e.tok);
       e.args.forEach((a, k) => {
         const ta = ex(a);
-        if (!isScalar(ta)) fail(`argument ${k + 1} of ${e.name}() has no value`, a.tok);
+        if (params[k] === T.str && ta !== T.str) fail(sdk && sdk.numMsg || `argument ${k + 1} of ${e.name}() is text (const char *), but this is not`, a.tok);
+        if (params[k] !== T.str && ta === T.str) fail(sdk && sdk.strMsg || `argument ${k + 1} of ${e.name}() is a number (${typeName(params[k])}), but this is text`, a.tok);
+        if (!isScalar(ta) && ta !== T.str) fail(`argument ${k + 1} of ${e.name}() has no value`, a.tok);
         conv(ta, params[k]);
       });
       if (sdk) {
@@ -928,6 +1197,53 @@
       }
       emit(OP.CALL, {a: f, n: params.length, line: e.tok.line, used});
       return f.ret;
+    }
+
+    // printf: the format is read now, and every value is checked against it. A value of another
+    // type is undefined behaviour (C11 7.21.6.1); one of another size, or text for a number, the Pico
+    // prints unpredictably (a register's leftover): an error, in both modes. Same-size mixes print as on the Pico.
+    function printfCall(e) {
+      if (!e.args.length) fail('printf() needs a format, e.g. printf("Hello\\n");', e.tok);
+      const fa = e.args[0], fmt = knownText(fa);
+      const ft = ex(fa);
+      if (ft !== T.str) fail('the first value of printf() is the format, text in double quotes: printf("%d\\n", n);', fa.tok);
+      if (fmt === undefined) fail('the format of printf() must be text in double quotes ("…"), or a const char * constant with such text', fa.tok);
+      let spec;
+      try { spec = readFormat(fmt); } catch (err) { fail(err.message, fa.tok); }
+      if (cstr(fmt) !== fmt) warnings.push(`Line ${fa.tok.line}: the format of printf() has a \\0 in it, and ends there`);
+      const vals = e.args.slice(1), wants = spec.wants;
+      vals.forEach((a, k) => {
+        const t = ex(a);
+        if (t.k === 'void') fail(`value ${k + 1} after the format has no value (void)`, a.tok);
+        if (wants[k]) checkValue(wants[k], t, e.spans[k + 1]);
+        if (t.k === 'int') conv(t, promote(t));   // the default argument promotions
+      });
+      if (vals.length < wants.length) {
+        const w = wants[vals.length];
+        fail(`the format needs ${wants.length} value${wants.length === 1 ? '' : 's'} after it, but printf() gets ${vals.length || 'none'}: the value for ${w.star ? `the * (the ${w.star}) in ${w.src}` : w.src} is missing. That is undefined behaviour in C`, e.tok);
+      }
+      if (vals.length > wants.length) warnings.push(`Line ${e.tok.line}: printf() gets ${vals.length} value${vals.length === 1 ? '' : 's'} after the format, but the format uses ${wants.length || 'none'}; the rest ${vals.length - wants.length === 1 ? 'is' : 'are'} not printed`);
+      emit(OP.SDK, {a: 'printf', n: e.args.length, line: e.tok.line, spec: spec.items});
+      return T.int;
+    }
+    // a value after the format against what its conversion expects
+    function checkValue(w, t, span) {
+      const what = w.star ? `the * in ${w.src} (the ${w.star})` : w.src;
+      const text = src.slice(span[0], span[1]).trim();
+      const name = text.length <= 32 && !text.includes('\n') ? text : 'this value';
+      const tok = tokAt(span[0]);
+      const is = t === T.str ? 'text (a string)' : an(typeName(t));
+      if (w.kind === 'str') { if (t !== T.str) fail(`${what} expects text (a string), but ${name} is ${is}: use ${suggest(w, t)}`, tok); return; }
+      if (t === T.str) fail(`${what} expects ${w.expects}, but ${name} is text (a string)${w.star ? '' : ': use %s'}`, tok);
+      if ((promote(t).big ? 64 : 32) !== w.bits) fail(`${what} expects ${w.expects}, but ${name} is ${is}${w.star ? '' : `: use ${suggest(w, t)}`}`, tok);
+    }
+    // the conversion for a value of type t: %llu (or "%" PRIu64)
+    function suggest(w, t) {
+      const pt = promote(t), len = pt.rank === 5 ? 'll' : pt.rank === 4 ? 'l' : '';
+      const signed = t.bool || t.signed;
+      const c = 'xXob'.includes(w.conv) ? w.conv : signed ? (w.conv === 'i' ? 'i' : 'd') : 'u';
+      const bits = t.time ? 64 : /^u?int(32|64)_t$/.test(t.name) ? t.bits : 0;
+      return `%${len}${c}${bits && c !== 'b' ? ` (or "%" PRI${c}${bits})` : ''}`;
     }
 
     // C11 6.5p2: a variable changed twice in one expression, or changed and also read, with no
@@ -980,6 +1296,7 @@
     // statements
     function cond(e, what) {
       const t = ex(e);
+      noText(t, e.tok);
       if (!isScalar(t)) fail(`the condition of ${what} needs a number or bool`, e.tok);
     }
     let superloop = null;     // the first endless loop of main()
@@ -1001,12 +1318,16 @@
               continue;
             }
             if (v.isStatic) fail('static variables inside functions are not supported in this widget yet', v.tok);
+            if (v.type === T.str && !v.init) fail(textNeedsValue(v.name), v.tok);
             if (v.isConst && !v.init) fail(`${v.name} is const, so it needs a value`, v.tok);
             if (v.init) {
               full(v.init, stmt(v.tok));
+              const text = knownText(v.init);
               const t = ex(v.init);
-              if (!isScalar(t)) fail(`${v.name} needs a value, but the right side has none (void)`, v.init.tok);
+              if (t.k !== 'void' && (t === T.str) !== (v.type === T.str)) fail(kindClash(v.name, v.type), v.init.tok);
+              if (!isScalar(t) && t !== T.str) fail(`${v.name} needs a value, but the right side has none (void)`, v.init.tok);
               const sym = newLocal(v, v.type, v.isConst);
+              if (v.type === T.str) sym.text = text;
               conv(t, v.type);
               store(sym, v.tok);
               emit(OP.POP);
@@ -1094,6 +1415,7 @@
           if (s.e) {
             const t = ex(s.e);
             if (fn.ret.k === 'void') fail(`${fn.name}() is void, so its return has no value`, s.tok);
+            if ((t === T.str) !== (fn.ret === T.str)) fail(fn.ret === T.str ? `${fn.name}() returns text (const char *): return "…";` : `${fn.name}() returns a number (${typeName(fn.ret)}), not text`, s.tok);
             conv(t, fn.ret);
           } else {
             if (fn.ret.k !== 'void' && fn.name !== 'main') fail(`${fn.name}() returns ${typeName(fn.ret)}: return needs a value`, s.tok);
@@ -1272,11 +1594,77 @@
     }
   }
 
+  // USB stdio as measured on a Pico W (SDK 2.3.1; embedded_software/private/widget_specs/superloop-usb):
+  // the Pico is on USB 0.25 s after stdio_init_all(); printf, puts and putchar cost [base, per character,
+  // putchar] while USB stdio is not started, with no terminal open (the text is dropped) and with one open.
+  // With a terminal open, the text leaves in USB packets of up to 64 bytes, one per 90 µs; the Pico holds
+  // 64 bytes besides the packet being sent, and a call waits (busy) until its last byte fits.
+  const USB = {appear: 250 * MS, packet: 90 * US, fifo: 64, digit64: 1.1 * US, rx: 4096,
+    off: [2 * US, 0.02 * US, 2 * US], closed: [10 * US, 0.15 * US, 4 * US], open: [40 * US, 0.15 * US, 13 * US]};
+  const CONN = ['not on USB', 'no terminal', 'terminal open'];
+
+  // The terminal app's screen: the bytes it received (UTF-8), with \r, \n, \b and \t as a terminal moves
+  // its cursor; other control characters are not shown. The last `max` lines.
+  class Screen {
+    constructor(max = 1000) { this.lines = [[]]; this.row = 0; this.col = 0; this.max = max; this.need = 0; this.cp = 0; this.version = 0; }
+    put(ch) {
+      const line = this.lines[this.row];
+      while (line.length < this.col) line.push(' ');
+      line[this.col++] = ch;
+    }
+    write(bytes) {
+      for (let k = 0; k < bytes.length; k++) {
+        const b = bytes.charCodeAt(k);
+        if (this.need) {
+          if ((b & 0xc0) === 0x80) { this.cp = (this.cp << 6) | (b & 0x3f); if (--this.need === 0) this.put(String.fromCodePoint(this.cp)); continue; }
+          this.need = 0; this.put('\ufffd');
+        }
+        if (b === 10) {
+          if (++this.row >= this.lines.length) this.lines.push([]);
+          if (this.lines.length > this.max) { this.lines.shift(); this.row--; }
+        } else if (b === 13) this.col = 0;
+        else if (b === 8) this.col = Math.max(0, this.col - 1);
+        else if (b === 9) this.col = (Math.floor(this.col / 8) + 1) * 8;
+        else if (b >= 32 && b < 127) this.put(bytes[k]);
+        else if (b >= 0xc2 && b < 0xf5) { this.need = b < 0xe0 ? 1 : b < 0xf0 ? 2 : 3; this.cp = b & (b < 0xe0 ? 0x1f : b < 0xf0 ? 0x0f : 0x07); }
+        else if (b >= 0x80) this.put('\ufffd');
+      }
+      this.version++;
+    }
+    // the last n lines as text, without the empty lines at the end
+    text(n = this.max) {
+      const lines = this.lines.slice(-n).map(l => l.join('').replace(/\s+$/, ''));
+      while (lines.length && !lines[lines.length - 1]) lines.pop();
+      return lines.join('\n');
+    }
+  }
+  // the terminal lane: the connection (CONN), prints {t0, t1, n, text, why} (merged when closer than gap;
+  // why: why the text was dropped), keys typed {t, text} and the moments getchar() took one
+  class Term {
+    constructor(gap) { this.gap = gap; this.conn = new Track(gap, 0); this.prints = []; this.keys = []; this.takes = new Reads(gap); this.printed = 0; this.dropped = 0; this.dropWhy = null; }
+    print(t, text, why) {
+      const l = this.prints, last = l[l.length - 1];
+      if (why) { this.dropped++; this.dropWhy ||= why; } else this.printed++;
+      if (last && t - last.t1 <= this.gap && last.why === why) { last.t1 = t; last.n++; if (last.text.length < 160) last.text += text; }
+      else l.push({t0: t, t1: t, n: 1, text, why});
+    }
+    trim(t) {
+      this.conn.trim(t); this.takes.trim(t);
+      let k = 0;
+      while (k < this.prints.length && this.prints[k].t1 < t) k++;
+      if (k) this.prints.splice(0, k);
+      k = 0;
+      while (k < this.keys.length && this.keys[k].t < t) k++;
+      if (k) this.keys.splice(0, k);
+    }
+  }
+
   /*
    * new Machine(program, cfg)
-   *   cfg: {lineTime (ns), ub: 'stop' | 'permit', setup: 'auto' | 'code', active: 'high' | 'low',
+   *   cfg: {lineTime (ns), ub: 'stop' | 'permit', ioSetup, stdioSetup: 'auto' | 'code', active: 'high' | 'low',
    *         inputs: [{name, gpio, kind}], outputs: [{name, gpio, kind, color}],
-   *         params: {NAME: value}, tracked: [variable names], gap (ns), tau (ns), seed}
+   *         params: {NAME: value}, tracked: [variable names], gap (ns), tau (ns), seed,
+   *         terminal: false | 'manual' | 'auto' (how it opens), goal}
    */
   class Machine {
     constructor(prog, cfg) {
@@ -1304,7 +1692,13 @@
       this.notes = []; this.noted = new Set();
       this.stopped = null; this.returned = false;
       this.stepMode = null; this.stepLeft = 0; this.paused = false;
+      this.holdUntil = 0; this.holdBusy = 0; this.holdLine = 0;
       this.cpu = new Track(gap, RUN);
+      // USB stdio (started: the time of stdio_init_all(); with stdio_setup: auto, before the program) and the terminal app
+      this.usb = {started: null, onUsb: false, open: false, rx: [], lastCR: false, fifo: 0, linkFree: 0, openError: null, tail: '', seen: false, raw: ''};
+      this.screen = new Screen();
+      this.term = new Term(gap);
+      if (cfg.stdioSetup === 'auto') this.usbStart();
       // pins: after reset, every pad is an input with its pull-down on (RP2040 datasheet, PADS_BANK0)
       this.pins = Array.from({length: NGPIO}, () => ({func: 0, dir: 0, out: 0, pull: 'down', inDev: null, outDev: null}));
       this.inputs = {}; this.outputs = {};
@@ -1312,7 +1706,7 @@
         const pin = this.pins[d.gpio];
         const dev = {name: d.name, gpio: d.gpio, pressed: false, track: null, reads: new Reads(gap), presses: [], noted: false};
         pin.inDev = dev;
-        if (cfg.setup !== 'code') { pin.func = SIO; pin.dir = 0; pin.pull = cfg.active === 'low' ? 'up' : 'down'; }
+        if (cfg.ioSetup !== 'code') { pin.func = SIO; pin.dir = 0; pin.pull = cfg.active === 'low' ? 'up' : 'down'; }
         dev.track = new Track(gap, this.inputLevel(d.gpio, true));
         this.inputs[d.name] = dev;
       }
@@ -1320,7 +1714,7 @@
         const pin = this.pins[d.gpio];
         const dev = {name: d.name, gpio: d.gpio, level: 0, track: new Track(gap, 0), ema: {b: 0, t: 0, lvl: 0}, toggles: 0};
         pin.outDev = dev;
-        if (cfg.setup !== 'code') { pin.func = SIO; pin.dir = 1; pin.out = 0; }
+        if (cfg.ioSetup !== 'code') { pin.func = SIO; pin.dir = 1; pin.out = 0; }
         this.outputs[d.name] = dev;
       }
       // absolute_time_t variables on the timeline: their stores are recorded
@@ -1333,7 +1727,7 @@
       // a goal (only on the machine of its variant): met at the first moment all its variables and outputs hold
       this.presses = 0;
       this.goal = cfg.goal ? {vars: cfg.goal.vars.map(v => ({sym: prog.lookup(v.name), value: v.value, name: v.name})),
-        outputs: cfg.goal.outputs, met: null, presses: 0} : null;
+        outputs: cfg.goal.outputs, shows: cfg.goal.shows, met: null, presses: 0} : null;
       const goalSyms = new Set(this.goal ? this.goal.vars.map(v => v.sym) : []);
       for (const ins of this.code) if (ins.op === OP.STOREG || ins.op === OP.STOREL) { ins.track = this.trackBySym.get(ins.sym) || null; ins.goal = goalSyms.has(ins.sym); }
       for (const g of prog.globals) { const d = this.trackBySym.get(g.sym); if (d && g.value) d.set(0, g.value); }
@@ -1352,6 +1746,21 @@
             this.advance(t);
             if (this.time < this.wakeAt) break;
             this.setCpu(RUN);
+            continue;
+          }
+          if (this.state === WAITING) {
+            // until a key comes (an event wakes the machine) or the timeout
+            this.advance(Math.min(this.wakeAt, until, this.nextT));
+            if (this.state !== WAITING) continue;
+            if (this.time >= this.wakeAt) { this.setCpu(RUN); continue; }
+            if (this.time >= until) break;
+            continue;
+          }
+          if (this.holdUntil > this.time) {
+            // inside a call that takes time (printf): running, then busy while it waits for room
+            this.advance(Math.min(this.holdUntil, until));
+            if (this.time < this.holdUntil) break;
+            if (this.holdBusy > 0) { this.block(BUSY, this.holdBusy, this.holdLine); this.holdBusy = 0; }
             continue;
           }
           budget = this.exec(until, budget);
@@ -1454,6 +1863,7 @@
             else {
               const f = ins.a;
               v = 0;
+              if (f.ret === T.str && fr.used) { this.stop(`Line ${ins.line}: ${f.name}() ends without a return, but its text is used.`, ins.line); throw new Stop(); }
               if (f.ret.k !== 'void' && f.name !== 'main' && fr.used) {
                 this.pc = pc; this.sp = sp;
                 v = this.ub(ins, 'noreturn', `${f.name}() ends without a return, but its value is used. That is undefined behaviour in C`, convert(fr.first, f.ret));
@@ -1473,7 +1883,7 @@
             this.pc = pc; this.sp = sp;
             const r = SDK_RUN[ins.a](this, st, sp, ins);
             st[sp++] = r === undefined ? 0 : r;
-            if (this.state !== RUN) { this.pc = pc; this.sp = sp; return budget; }
+            if (this.state !== RUN || this.holdUntil > this.time) { this.pc = pc; this.sp = sp; return budget; }
             break;
           }
           case OP.HALT:
@@ -1490,14 +1900,15 @@
       if (!gl || gl.met !== null) return;
       for (const v of gl.vars) { const x = v.sym && this.value(v.sym); if (!x || !x.init || convert(x.v, v.sym.type) != convert(v.value, v.sym.type)) return; }
       for (const o of gl.outputs) if (this.outputs[o.name].level !== (o.on ? 1 : 0)) return;
+      if (gl.shows && !this.usb.seen) return;
       gl.met = this.time; gl.presses = this.presses;
     }
     // step: one statement, or to the start of the next round of the superloop
-    step(kind) { this.stepMode = kind; this.stepLeft = kind === 'stmt' && (this.state === ASLEEP || this.state === BUSY) ? 0 : 1; this.paused = false; }
+    step(kind) { this.stepMode = kind; this.stepLeft = kind === 'stmt' && (this.state === ASLEEP || this.state === BUSY || this.state === WAITING) ? 0 : 1; this.paused = false; }
     // the line about to run (paused) or running (asleep)
     get line() {
       const ins = this.code[this.pc];
-      return this.state === ASLEEP || this.state === BUSY ? this.sleepLine : ins && ins.op === OP.STMT ? ins.line : 0;
+      return this.state === ASLEEP || this.state === BUSY || this.state === WAITING ? this.sleepLine : ins && ins.op === OP.STMT ? ins.line : 0;
     }
     block(state, ns, line) {
       this.wakeAt = this.time + ns; this.sleepFrom = this.time; this.sleepLine = line;
@@ -1555,10 +1966,18 @@
       this.events = this.events.filter((e, k) => k < this.ei || e.name !== name || e.t <= after);
       this.nextT = this.ei < this.events.length ? this.events[this.ei].t : Infinity;
     }
+    // an event of the terminal or of USB: {t, kind: 'usb' | 'open' | 'close' | 'type', bytes, echo}
+    queueEvent(e) {
+      let k = this.events.length;
+      while (k > this.ei && this.events[k - 1].t > e.t) k--;
+      this.events.splice(k, 0, e);
+      this.nextT = this.ei < this.events.length ? this.events[this.ei].t : Infinity;
+    }
     applyEvents(t) {
       const ev = this.events;
       while (this.ei < ev.length && ev[this.ei].t <= t) {
         const e = ev[this.ei++];
+        if (e.kind) { this.termEvent(e); continue; }
         const dev = this.inputs[e.name];
         if (!dev) continue;
         dev.pressed = e.pressed;
@@ -1583,7 +2002,118 @@
       }
       for (const d of Object.values(this.outputs)) d.track.trim(t);
       for (const d of Object.values(this.deadlines)) d.rec.track.trim(t);
+      this.term.trim(t);
     }
+    // --- USB stdio and the terminal app ----------------------------------------------------
+    // stdio_init_all(): the Pico appears on USB a moment later
+    usbStart() {
+      if (this.usb.started !== null) return;
+      this.usb.started = this.time;
+      this.queueEvent({t: this.time + USB.appear, kind: 'usb'});
+    }
+    termEvent(e) {
+      const u = this.usb;
+      if (e.kind === 'usb') {
+        u.onUsb = true;
+        this.term.conn.set(e.t, 1);
+        if (this.cfg.terminal === 'auto') this.termOpen(e.t);
+      } else if (e.kind === 'open') this.termOpen(e.t);
+      else if (e.kind === 'close') {
+        if (!u.open) return;
+        u.open = false; u.fifo = 0; u.openError = null;
+        this.term.conn.set(e.t, 1);
+      } else if (e.kind === 'type') {
+        if (!u.open) return;
+        let bytes = e.bytes;
+        if (u.rx.length + bytes.length > USB.rx) {
+          bytes = bytes.slice(0, Math.max(0, USB.rx - u.rx.length));
+          this.note(`The terminal stopped taking keys: ${group(USB.rx)} characters wait that the program has not read.`, 0, 'term');
+        }
+        if (!bytes) return;
+        for (let k = 0; k < bytes.length; k++) u.rx.push(bytes.charCodeAt(k));
+        this.term.keys.push({t: e.t, text: bytes});
+        if (e.echo) this.screen.write(bytes);   // local echo: the terminal app shows what it sends
+        this.wakeKey(e.t);
+      }
+    }
+    // the terminal app opens the serial device the computer shows for the Pico (and sets DTR)
+    termOpen(t) {
+      const u = this.usb;
+      if (u.open) return;
+      if (!u.onUsb) {
+        u.openError = u.started === null ? 'The computer sees no Pico on USB: the program has not called stdio_init_all(), which starts its USB connection.'
+          : 'The computer doesn\'t see the Pico on USB yet.';
+        return;
+      }
+      u.open = true; u.openError = null;
+      this.term.conn.set(t, 2);
+      this.wakeKey(t);
+    }
+    // a getchar() waiting for a key gets one
+    wakeKey(t) {
+      const u = this.usb;
+      if (this.state !== WAITING || !u.open || !u.rx.length) return;
+      if (t > this.time) this.time = t;
+      this.stack[this.sp - 1] = this.takeKey();
+      this.setCpu(RUN);
+    }
+    takeKey() { this.term.takes.add(this.time); return this.usb.rx.shift(); }
+    // getchar() (timeout Infinity), stdio_getchar_timeout_us(): a key that waits, or wait for one
+    getKey(timeout, line) {
+      const u = this.usb;
+      if (u.open && u.rx.length) return this.takeKey();
+      if (timeout <= 0) return -2;   // PICO_ERROR_TIMEOUT
+      this.block(WAITING, timeout, line);
+      return -2;                     // replaced by the key, when one comes in time
+    }
+    // a call that takes time: cpu ns running, then wait ns busy
+    spend(cpu, wait, line) { this.holdUntil = this.time + cpu; this.holdBusy = wait; this.holdLine = line; }
+    // printf, puts, putchar: the text (bytes) goes to USB stdio, as the SDK sends it, in the time measured
+    usbOut(text, putchar, digits, line) {
+      const u = this.usb, t0 = this.time;
+      let cost, wait = 0, why = null;
+      if (u.started === null) {
+        cost = putchar ? USB.off[2] : USB.off[0] + USB.off[1] * text.length;
+        why = 'the program has not started USB stdio (stdio_init_all())';
+      } else {
+        // the SDK's CR/LF: \n goes out as \r\n, unless it follows a \r (also across calls)
+        let out = '';
+        for (const ch of text) { if (ch === '\n' && !u.lastCR) out += '\r'; out += ch; u.lastCR = ch === '\r'; }
+        const c = u.open ? USB.open : USB.closed;
+        cost = putchar ? c[2] : c[0] + c[1] * out.length;
+        if (!u.open) why = u.onUsb ? 'no terminal was open' : 'the Pico was not on USB yet';
+        else {
+          wait = this.usbSend(out.length, t0 + cost + digits * USB.digit64) - (t0 + cost + digits * USB.digit64);
+          this.screen.write(out);
+          u.raw = (u.raw + out).slice(-4096);   // the last bytes the terminal received (for the tests)
+          if (this.goal && this.goal.shows && !u.seen) {
+            const seen = (u.tail + out).replace(/\r/g, '');
+            if (seen.includes(this.goal.shows)) { u.seen = true; this.checkGoal(); }
+            u.tail = seen.slice(-this.goal.shows.length);
+          }
+        }
+      }
+      this.term.print(t0, text, why);
+      this.spend(cost + digits * USB.digit64, wait, line);
+    }
+    // n bytes, ready at time t, into the 64-byte buffer that USB packets empty: when the last byte fits
+    usbSend(n, t) {
+      const u = this.usb;
+      const drain = now => { while (u.fifo > 0 && u.linkFree <= now) { u.fifo -= Math.min(USB.fifo, u.fifo); u.linkFree += USB.packet; } };
+      const start = () => { if (u.fifo > 0 && u.linkFree <= t) { u.fifo -= Math.min(USB.fifo, u.fifo); u.linkFree = t + USB.packet; } };
+      drain(t);
+      for (;;) {
+        start();
+        const put = Math.min(USB.fifo - u.fifo, n);
+        u.fifo += put; n -= put;
+        if (!n) break;
+        t = Math.max(t, u.linkFree);
+        drain(t);
+      }
+      start();
+      return t;
+    }
+
     // the current value of a variable (watch:), or undefined when it is not in scope
     value(sym) {
       if (sym.global) return {v: this.globals[sym.slot], init: true};
@@ -1607,7 +2137,20 @@
     return d;
   }
   const SDK_RUN = {
-    stdio_init_all: () => 0,
+    stdio_init_all: m => { m.usbStart(); return 1; },
+    stdio_usb_connected: m => (m.usb.open ? 1 : 0),
+    stdio_flush: () => 0,
+    getchar: (m, st, i, ins) => m.getKey(Infinity, ins.line),
+    stdio_getchar_timeout_us: (m, st, i, ins) => m.getKey(st[i] * US, ins.line),
+    getchar_timeout_us: (m, st, i, ins) => m.getKey(st[i] * US, ins.line),
+    putchar: (m, st, i, ins) => { m.usbOut(String.fromCharCode(st[i] & 255), true, 0, ins.line); return st[i]; },
+    puts: (m, st, i, ins) => { const s = cstr(st[i]); m.usbOut(`${s}\n`, false, 0, ins.line); return s.length; },
+    printf(m, st, i, ins) {
+      const r = formatPrintf(ins.spec, st, i + 1);
+      if (r.error) { m.stop(`Line ${ins.line}: ${r.error}.`, ins.line); throw new Stop(); }
+      m.usbOut(r.text, false, r.digits64, ins.line);
+      return r.count;
+    },
     tight_loop_contents: () => 0,
     gpio_init(m, st, i, ins) { const p = m.pinCheck(st[i], ins.line); p.func = SIO; p.dir = 0; p.out = 0; m.pinChanged(st[i]); },
     gpio_set_dir(m, st, i, ins) { const p = m.pinCheck(st[i], ins.line); p.dir = st[i + 1]; m.pinChanged(st[i]); },
@@ -1668,6 +2211,7 @@
       this.clock = 0;
       this.levels = {};
       this.slow = 1;
+      this.echo = !!this.cfg.echo;
     }
     setSpeed(s) { this.speed = s; for (const m of this.machines) m.setTau(20 * MS * s); }
     get lead() { return Math.max(...this.machines.map(m => m.time)); }
@@ -1690,9 +2234,20 @@
       this.press(name, true, bouncy, t);
       this.press(name, false, bouncy, t + 150 * MS);
     }
-    // scripted presses (readScript); a step with a length comes back after it
+    // the terminal app (the same for every variant): open or close it, type (bytes; echo: its local echo)
+    terminal(action, at) {
+      const t = at === undefined ? this.lead : at;
+      for (const m of this.machines) m.queueEvent({t, kind: action});
+    }
+    type(bytes, at) {
+      const t = at === undefined ? this.lead : at;
+      for (const m of this.machines) m.queueEvent({t, kind: 'type', bytes, echo: this.echo});
+    }
+    // scripted presses and typing (readScript); a step with a length comes back after it
     script(steps, inputs) {
       for (const st of steps) {
+        if (st.kind === 'terminal') { this.terminal(st.action, st.at); continue; }
+        if (st.kind === 'type') { this.type(st.bytes, st.at); continue; }
         const bouncy = inputs.find(d => d.name === st.name).bouncy;
         this.press(st.name, st.down, bouncy, st.at);
         if (st.len != null) this.press(st.name, !st.down, bouncy, st.at + st.len);
@@ -1710,6 +2265,7 @@
     // step the machine shown, then bring the others to the same time
     step(k, kind) {
       const m = this.machines[k];
+      if (m.state === WAITING && m.wakeAt === Infinity) return;   // getchar(): nothing runs until a key comes
       m.step(kind);
       m.run(m.time + 600 * SEC, 5e6);
       m.paused = false; m.stepMode = null;
@@ -1721,11 +2277,14 @@
   // ========================================================================
   // Settings: the YAML of a ```superloop block
   // ========================================================================
-  const KEYS = ['title', 'task', 'code', 'variants', 'variant', 'inputs', 'outputs', 'active', 'setup', 'uses', 'terminal',
-    'enter', 'watch', 'timeline', 'window', 'params', 'show', 'controls', 'speed', 'speeds', 'line_time', 'seed', 'script',
+  const KEYS = ['title', 'task', 'code', 'variants', 'variant', 'inputs', 'outputs', 'active', 'io_setup', 'stdio_setup', 'uses', 'terminal',
+    'watch', 'timeline', 'window', 'params', 'show', 'controls', 'speed', 'speeds', 'line_time', 'seed', 'script',
     'run', 'print', 'goal', 'answer_script', 'answer', 'undefined_behavior', 'editable'];
-  const LATER = {uses: 'a later version (the button and blinker libraries)', terminal: 'a later version (printf and a terminal)',
-    enter: 'a later version (printf and a terminal)'};
+  const LATER = {uses: 'a later version (the button and blinker libraries)'};
+  // settings with a new name or place
+  const MOVED = {setup: 'setup is called io_setup (the pins); USB stdio has stdio_setup',
+    enter: 'enter belongs in the terminal block: terminal: {enter: cr}', echo: 'echo belongs in the terminal block: terminal: {echo: true}'};
+  const TERMINAL_KEYS = ['open', 'enter', 'echo'];
   const INPUT_KINDS = ['button', 'hold button', 'pin', 'bouncy button', 'bouncy hold button', 'bouncy pin'];
   const LED_COLORS = {led: 'red', 'red led': 'red', 'green led': 'green', 'amber led': 'amber', 'yellow led': 'yellow',
     'blue led': 'blue', 'white led': 'white'};
@@ -1771,14 +2330,41 @@
   // 2 s, 0.3 s, 0.152 s
   function fmtSec(ns) { return `${Number((ns / SEC).toFixed(3))} s`; }
 
+  // text in double quotes with C's escapes, as bytes ("12\r")
+  function unescapeC(text, where) {
+    let out = '';
+    for (let j = 0; j < text.length;) {
+      if (text[j] === '\\') { const r = escapeAt(text, j); if (r.error) throw new Error(`${where}: ${r.error}`); out += String.fromCharCode(r.value); j = r.end; continue; }
+      const cp = text.codePointAt(j);
+      out += cp < 128 ? text[j] : utf8(String.fromCodePoint(cp));
+      j += cp > 0xffff ? 2 : 1;
+    }
+    return out;
+  }
   // a script: scripted input for the PDF, the tests and the answers
   //   BUTTON_PIN press at 300 ms for 400 ms   BUTTON_PIN press at 2 s   SWITCH high at 1 s   BUTTON_PIN release at 3 s
-  function readScript(list, key, inputs, runNs) {
+  //   terminal open at 1.5 s   type "5\r" at 2 s   terminal close at 3 s
+  function readScript(list, key, inputs, runNs, terminal = false) {
     if (list != null && !Array.isArray(list)) throw new Error(`${key}: write one step per line, each after a dash, e.g. - BUTTON_PIN press at 300 ms for 400 ms`);
     const steps = [], last = {};
+    let open = terminal === 'auto' ? null : false;   // the terminal in the script (null: it opens by itself)
     listOf(list).forEach((raw, k) => {
       const where = `${key}, step ${k + 1}`, text = clean(raw);
-      if (/^(terminal|type)\b/.test(text)) throw new Error(`${where}: "${text}": the terminal belongs to a later version`);
+      const tm = /^terminal\s+(open|close)\s+at\s+(.+)$/.exec(text), typed = /^type\s+"((?:[^"\\]|\\.)*)"\s+at\s+(.+)$/.exec(text);
+      if (/^(terminal|type)\b/.test(text)) {
+        if (!terminal) throw new Error(`${where}: "${text}": the block has no terminal (a terminal: block)`);
+        if (!tm && !typed) throw new Error(`${where}: "${text}" is not a step. Write e.g. terminal open at 1.5 s, terminal close at 3 s, or type "5" at 2 s`);
+        const at = duration((tm || typed)[2], where);
+        if (last.terminal !== undefined && at < last.terminal) throw new Error(`${where}: the steps of the terminal must be in time order`);
+        if (runNs != null && at > runNs) throw new Error(`${where}: ${fmtSec(at)} is after the end of the run (${fmtSec(runNs)}; set run: to change it)`);
+        last.terminal = at;
+        if (tm) { open = tm[1] === 'open'; steps.push({kind: 'terminal', action: tm[1], at}); return; }
+        if (open === false) throw new Error(`${where}: the terminal is closed at ${fmtSec(at)}: open it first (terminal open at …)`);
+        const bytes = unescapeC(typed[1], where);
+        if (!bytes) throw new Error(`${where}: type "" types nothing`);
+        steps.push({kind: 'type', bytes, text: typed[1], at});
+        return;
+      }
       const m = /^(\S+)\s+(press|release|high|low)\s+at\s+(.+?)(?:\s+for\s+(.+))?$/.exec(text);
       if (!m) throw new Error(`${where}: "${text}" is not a step. Write e.g. BUTTON_PIN press at 300 ms for 400 ms, or SWITCH high at 1 s`);
       const dev = inputs.find(d => d.name === m[1] || d.key === m[1] || d.name === `GP${m[1]}`);
@@ -1800,6 +2386,8 @@
   // a script in words: BUTTON_PIN pressed at 0.3 s for 0.4 s, SWITCH high at 1 s
   function scriptWords(steps) {
     return steps.map(st => {
+      if (st.kind === 'terminal') return `the terminal ${st.action === 'open' ? 'opened' : 'closed'} at ${fmtSec(st.at)}`;
+      if (st.kind === 'type') return `typed "${st.text}" at ${fmtSec(st.at)}`;
       if (st.kind === 'pin') return `${st.name} ${st.down ? 'high' : 'low'} at ${fmtSec(st.at)}${st.len != null ? ` for ${fmtSec(st.len)}` : ''}`;
       if (!st.down) return `${st.name} released at ${fmtSec(st.at)}`;
       if (st.kind === 'button' && st.len === 150 * MS) return `${st.name} clicked at ${fmtSec(st.at)}`;
@@ -1807,9 +2395,9 @@
     }).join(', ');
   }
   // a goal: {variant, vars: [{name, value}], outputs: [{name, on}], maxPresses}
-  function readGoal(g, variants, outputs) {
+  function readGoal(g, variants, outputs, terminal) {
     if (!isMap(g)) throw new Error('goal: write vars: {armed: false} and/or outputs: {LED_PIN: off}');
-    for (const k of Object.keys(g)) if (!['variant', 'vars', 'outputs', 'max_presses'].includes(k)) throw new Error(`goal: "${k}" is not part of a goal (variant, vars, outputs, max_presses)`);
+    for (const k of Object.keys(g)) if (!['variant', 'vars', 'outputs', 'shows', 'max_presses'].includes(k)) throw new Error(`goal: "${k}" is not part of a goal (variant, vars, outputs, shows, max_presses)`);
     let vi = 0;
     if (variants.length > 1 && g.variant == null) throw new Error(`goal: with variants, a goal names its variant, e.g. variant: ${variants[variants.length - 1].name}`);
     if (g.variant != null) {
@@ -1837,16 +2425,23 @@
       if (!dev) throw new Error(`goal, outputs: ${name} is not an output`);
       return {name: dev.name, on: oneOf(`goal, outputs, ${name}`, v === true ? 'on' : v === false ? 'off' : v, ['on', 'off']) === 'on'};
     });
-    if (!vars.length && !outs.length) throw new Error('goal: it asks for nothing. Write vars: {…} or outputs: {…}');
+    let text = null;
+    if (g.shows != null) {
+      if (!terminal) throw new Error('goal, shows: the block has no terminal (a terminal: block)');
+      text = String(g.shows);
+      if (!text.replace(/\r/g, '')) throw new Error('goal, shows: write the text the terminal must show, e.g. shows: "Playing 5 beeps."');
+    }
+    if (!vars.length && !outs.length && text === null) throw new Error('goal: it asks for nothing. Write vars: {…}, outputs: {…} or shows: "…"');
     let maxPresses = null;
     if (g.max_presses != null) {
       maxPresses = Number(g.max_presses);
       if (!Number.isInteger(maxPresses) || maxPresses < 1) throw new Error(`goal, max_presses: a whole number from 1, not ${g.max_presses}`);
     }
-    return {variant: vi, vars, outputs: outs, maxPresses};
+    return {variant: vi, vars, outputs: outs, text, shows: text === null ? null : utf8(text).replace(/\r/g, ''), maxPresses};
   }
   // what the goal asks, in words: armed is false and LED_PIN is off
-  const goalWords = gl => [...gl.vars.map(v => `${v.name} is ${fmtGoalValue(v.value)}`), ...gl.outputs.map(o => `${o.name} is ${o.on ? 'on' : 'off'}`)].join(' and ');
+  const goalWords = gl => [...gl.vars.map(v => `${v.name} is ${fmtGoalValue(v.value)}`), ...gl.outputs.map(o => `${o.name} is ${o.on ? 'on' : 'off'}`),
+    ...(gl.text !== null ? [`the terminal shows "${esc(gl.text)}"`] : [])].join(' and ');
   const fmtGoalValue = v => (v === 1 || v === 0 ? (v ? 'true' : 'false') : String(v));
 
   // the top-level names a program declares itself, with their constant values when they have one
@@ -1867,6 +2462,7 @@
     if (!isMap(c)) throw new Error('a superloop block is YAML with code: (or variants:), inputs: and outputs:');
     const warnings = [];
     for (const k of Object.keys(c)) {
+      if (MOVED[k]) throw new Error(`"${k}" is not a setting of a superloop block: ${MOVED[k]}`);
       if (!KEYS.includes(k)) throw new Error(`"${k}" is not a setting of a superloop block`);
       if (LATER[k]) warnings.push(`${k}: belongs to ${LATER[k]}; ignored`);
     }
@@ -1883,8 +2479,24 @@
       if (shown < 0) throw new Error(`variant: "${c.variant}" is not one of the variants (${variants.map(v => v.name).join(', ')})`);
     }
     const active = c.active == null ? 'high' : oneOf('active', c.active, ['high', 'low']);
-    const setup = c.setup == null ? 'auto' : oneOf('setup', c.setup, ['auto', 'code']);
+    // who sets up the pins and USB stdio: the block, before the program (auto), or the program (code, also called manual)
+    const setupOf = (key, dflt) => { const v = c[key] == null ? dflt : oneOf(key, c[key], ['auto', 'code', 'manual']); return v === 'manual' ? 'code' : v; };
+    const ioSetup = setupOf('io_setup', 'auto'), stdioSetup = setupOf('stdio_setup', 'code');
     const ubMode = c.undefined_behavior == null ? 'stop' : oneOf('undefined_behavior', c.undefined_behavior, ['stop', 'permit']);
+    // the terminal app on the computer: a terminal: block (also an empty one) gives the block a terminal.
+    // open: manual (the student opens it; also called button) or auto (it opens by itself when the Pico is on USB)
+    let terminal = false, enter = '\r', echo = false;
+    if (c.terminal !== undefined) {
+      const t = c.terminal === null ? {} : c.terminal;   // terminal: with nothing under it: the defaults
+      if (!isMap(t)) throw new Error('terminal: write its settings under it, e.g. terminal: {open: manual} (open: auto | manual, enter: cr | lf | crlf, echo: true | false)');
+      for (const k of Object.keys(t)) if (!TERMINAL_KEYS.includes(k))
+        throw new Error(k === 'setup' ? 'terminal: setup: USB stdio is set up with stdio_setup, at the top level' : `terminal: "${k}" is not a setting of the terminal (open, enter, echo)`);
+      const open = t.open == null ? 'manual' : oneOf('terminal, open', t.open, ['auto', 'manual', 'button']);
+      terminal = open === 'auto' ? 'auto' : 'manual';
+      if (t.enter != null) enter = {cr: '\r', lf: '\n', crlf: '\r\n'}[oneOf('terminal, enter', t.enter, ['cr', 'lf', 'crlf'])];
+      if (t.echo != null && typeof t.echo !== 'boolean') throw new Error('terminal, echo: write true or false');
+      echo = t.echo === true;
+    }
 
     // devices: names of pin constants (or GPIO numbers: 15: red led)
     const devName = n => (/^\d+$/.test(String(n)) ? `GP${n}` : String(n));
@@ -1953,9 +2565,13 @@
       if (missing.length === variants.length) throw new Error(`watch: ${name} is not a variable of the program`);
       return {name, hex: fmtx === 'hex'};
     });
-    const timeline = c.timeline == null ? ['cpu', ...inputs.map(d => d.name), ...outputs.map(d => d.name)] : listOf(c.timeline).map(clean);
+    const timeline = c.timeline == null ? ['cpu', ...(terminal ? ['terminal'] : []), ...inputs.map(d => d.name), ...outputs.map(d => d.name)] : listOf(c.timeline).map(clean);
     const lanes = timeline.map(n => {
       if (n === 'cpu') return {kind: 'cpu', name: 'cpu'};
+      if (n === 'terminal') {
+        if (!terminal) throw new Error('timeline: terminal needs a terminal (a terminal: block)');
+        return {kind: 'terminal', name: 'terminal'};
+      }
       const dn = devName(n), dev = devices.find(d => d.name === dn);
       if (dev) return {kind: inputs.includes(dev) ? 'input' : 'output', name: dn, dev};
       const syms = variants.map(v => symIn(v, n)).filter(Boolean);
@@ -1998,10 +2614,12 @@
     const run = c.run == null ? null : duration(c.run, 'run');
     if (run !== null && (run <= 0 || run > 60 * SEC)) throw new Error('run: more than 0 and at most 60 s');
     const print = c.print == null ? 'all' : oneOf('print', c.print, ['all', 'one']);
-    const script = readScript(c.script, 'script', inputs, run ?? 3 * SEC);
-    const goal = c.goal == null ? null : readGoal(c.goal, variants, outputs);
+    const script = readScript(c.script, 'script', inputs, run ?? 3 * SEC, terminal);
+    const goal = c.goal == null ? null : readGoal(c.goal, variants, outputs, terminal);
     const answerRun = run ?? 10 * SEC;
-    const answerScript = c.answer_script == null ? null : readScript(c.answer_script, 'answer_script', inputs, answerRun);
+    const answerScript = c.answer_script == null ? null : readScript(c.answer_script, 'answer_script', inputs, answerRun, terminal);
+    if (!terminal && variants.some(v => v.prog.code.some(ins => ins.op === OP.SDK && SDK[ins.a].terminal)))
+      warnings.push('the program talks to a terminal (printf, getchar, …), but the block has none: a terminal: block adds one');
     if (goal && (!answerScript || c.answer == null)) warnings.push('goal: it needs answer_script (presses that reach it) and answer (the text for the PDF); without them, the PDF has no exercise');
     if (!goal && (answerScript || c.answer != null)) warnings.push('answer_script and answer belong to a goal, and there is none');
     if (goal && answerScript && goal.maxPresses !== null) {
@@ -2010,7 +2628,7 @@
     }
     const tracked = lanes.filter(l => l.kind === 'deadline').map(l => l.name).concat(watch.filter(w => variants.some(v => (symIn(v, w.name) || {type: {}}).type.time)).map(w => w.name));
     return {title: c.title != null ? String(c.title) : null, task: c.task != null ? String(c.task) : null,
-      variants, shown, active, setup, ub: ubMode, inputs, outputs, devices, watch, lanes, params, show, controls, speed,
+      variants, shown, active, ioSetup, stdioSetup, ub: ubMode, terminal, enter, echo, inputs, outputs, devices, watch, lanes, params, show, controls, speed,
       speeds, lineTime, window, seed: c.seed != null ? Number(c.seed) : 1, tracked: [...new Set(tracked)], warnings,
       run: run ?? 3 * SEC, print, script, goal, answerRun, answerScript, answer: c.answer != null ? String(c.answer) : null};
   }
@@ -2176,7 +2794,7 @@
     const xNow = X(now);
     const id = o.id;
     const rows = cfg.lanes;
-    const heights = rows.map(l => (l.kind === 'cpu' ? 26 : 36));
+    const heights = rows.map(l => (l.kind === 'cpu' ? 26 : l.kind === 'terminal' ? 48 : 36));
     const lanesTop = AX + 4;
     const H = lanesTop + heights.reduce((a, b) => a + b, 0) + 4;
     const kids = [make('defs', {},
@@ -2267,10 +2885,64 @@
       return {under, over};
     }
 
+    // a label cut to the room it has (9 px monospace: 5.4 px a character)
+    const fit = (text, room) => { const n = Math.floor(room / 5.4); return text.length <= n ? text : `${text.slice(0, Math.max(1, n - 1))}…`; };
+    // the terminal lane: the USB connection as a band; above it what the program printed (dropped: red ✕),
+    // below it the keys typed, and green dots where getchar() took one
+    function terminalLane(tm, y) {
+      const bandY = y + 17, bandH = 12, keyY = bandY + bandH;
+      for (const p of mergeNarrow(pieces(tm.conn, tA, tN), 2 * px)) {
+        const xa = X(p.a), w = Math.max(0.8, X(p.b) - xa), cls = p.band ? 'mixed' : ['off', 'closed', 'open'][p.lvl];
+        plot.push(make('rect', {x: r1(xa), y: bandY, width: r1(w), height: bandH, class: `sl-tl-usb ${cls}`, fill: cls === 'off' || cls === 'mixed' ? `url(#${id}-hatch)` : null}));
+        if (w > 80 && !p.band) plot.push(make('text', {x: r1(xa + w / 2), y: bandY + bandH / 2 + 0.5, class: `sl-tl-usblbl ${cls}`, text: CONN[p.lvl]}));
+      }
+      const groups = [];
+      for (const pr of tm.prints) {
+        if (pr.t1 < tA || pr.t0 > tN) continue;
+        const g = groups[groups.length - 1];
+        if (g && X(pr.t0) - X(g.t1) < 6) { g.t1 = pr.t1; g.n += pr.n; g.dropped += pr.why ? pr.n : 0; if (g.text.length < 160) g.text += pr.text; }
+        else groups.push({t0: pr.t0, t1: pr.t1, n: pr.n, dropped: pr.why ? pr.n : 0, first: pr, text: pr.text});
+      }
+      groups.forEach((g, k) => {
+        const xa = X(g.t0), xb = X(g.t1), next = k + 1 < groups.length ? X(groups[k + 1].t0) : x1 + 400;
+        const cls = g.dropped === g.n ? 'drop' : 'print';
+        const tip = `${g.n > 1 ? `${group(g.n)} prints${g.dropped && g.dropped < g.n ? `, ${group(g.dropped)} of them dropped` : ''}: ` : ''}${g.first.why && g.dropped === g.n ? `Dropped (${g.first.why})` : 'Printed'} "${esc(g.text)}${g.text.length >= 160 ? '…' : ''}"`;
+        if (xb - xa >= 3) {
+          plot.push(make('rect', {x: r1(xa), y: y + 4, width: r1(xb - xa), height: 11, class: `sl-tl-prints ${cls}`, fill: `url(#${id}-hatch)`}, make('title', {text: tip})));
+          const hz = g.n / ((g.t1 - g.t0) / SEC);
+          if (xb - xa > 130) plot.push(make('text', {x: r1((xa + xb) / 2), y: y + 2.5, class: 'sl-tl-bandlbl', text: `printing ${hz >= 1000 ? `${group(Math.round(hz / 100) * 100)}` : Number(hz.toPrecision(3))} times/s`}));
+          return;
+        }
+        const xm = Math.max(xa, x0 + (cls === 'drop' ? 4 : 1));   // a mark at 0 s stays whole
+        plot.push(cls === 'drop'
+          ? make('g', {}, make('title', {text: tip}), make('path', {d: `M${r1(xm)} ${y + 11}V${bandY}`, class: 'sl-tl-dropline'}),
+            make('path', {d: `M${r1(xm - 3.5)} ${y + 3.5}l7 7m0 -7l-7 7`, class: 'sl-tl-dropx'}))
+          : make('g', {}, make('title', {text: tip}), make('path', {d: `M${r1(xm)} ${y + 3}V${bandY}`, class: 'sl-tl-print'})));
+        const room = next - xm - 10;
+        if (room > 16) plot.push(make('text', {x: r1(xm + (cls === 'drop' ? 6 : 4)), y: y + 12, class: `sl-tl-printlbl ${cls}`, text: fit(`"${esc(g.text)}"`, room)}));
+      });
+      tm.keys.forEach((kk, k) => {
+        if (kk.t < tA || kk.t > tN) return;
+        const x = X(kk.t), next = k + 1 < tm.keys.length ? X(tm.keys[k + 1].t) : x1 + 400;
+        plot.push(make('g', {}, make('title', {text: `Typed "${esc(kk.text)}"`}), make('path', {d: `M${r1(x)} ${keyY}V${y + 45}`, class: 'sl-tl-key'})));
+        if (next - x > 12) plot.push(make('text', {x: r1(x + 3.5), y: y + 44, class: 'sl-tl-keylbl', text: fit(keyLabel(kk.text), next - x - 6)}));
+      });
+      const runs = [];
+      for (const r of tm.takes.list) {
+        if (r.t1 < tA || r.t0 > tN) continue;
+        const a = Math.max(r.t0, tA), b = Math.min(r.t1, tN), last = runs[runs.length - 1];
+        if (last && X(a) - X(last.b) < 9) last.b = b; else runs.push({a, b});
+      }
+      for (const run of runs) {
+        if (X(run.b) - X(run.a) < 3) plot.push(make('circle', {cx: r1(X(run.a)), cy: keyY, r: 3.6, class: 'sl-tl-dot'}, make('title', {text: 'getchar() took a key here'})));
+        else plot.push(make('rect', {x: r1(X(run.a)), y: bandY - 2, width: r1(X(run.b) - X(run.a)), height: bandH + 4, class: 'sl-tl-watchedband'}));
+      }
+    }
+
     let y = lanesTop;
     rows.forEach((lane, li) => {
       const lh = heights[li], hiY = y + 7, loY = y + lh - 11;
-      const sub = lane.kind === 'cpu' ? 'the processor' : lane.kind === 'deadline' ? 'time_reached()' : `GP${lane.dev.gpio}, ${lane.kind}`;
+      const sub = lane.kind === 'cpu' ? 'the processor' : lane.kind === 'terminal' ? 'USB stdio' : lane.kind === 'deadline' ? 'time_reached()' : `GP${lane.dev.gpio}, ${lane.kind}`;
       kids.push(make('text', {x: x0 - 10, y: y + lh / 2 - 1, class: `sl-tl-name ${lane.kind}`, text: lane.name}));
       kids.push(make('text', {x: x0 - 10, y: y + lh / 2 + 10, class: `sl-tl-sub ${lane.kind}`, text: sub}));
       plot.push(make('line', {x1: x0, y1: y + lh - 1, x2: x1, y2: y + lh - 1, class: 'sl-tl-sep'}));
@@ -2300,6 +2972,8 @@
         plot.push(...marks.over);
       } else if (lane.kind === 'output') {
         level(mergeNarrow(pieces(m.outputs[lane.name].track, tA, tN), 2 * px), hiY, loY, 'output', true);
+      } else if (lane.kind === 'terminal') {
+        terminalLane(m.term, y);
       } else {
         const rec = m.deadlines[lane.name] ? m.deadlines[lane.name].rec : null;
         if (rec) {
@@ -2335,8 +3009,8 @@
   // ========================================================================
   // the settings of the machines (browser and build)
   function machineCfg(c, extra) {
-    return Object.assign({lineTime: c.lineTime, ub: c.ub, setup: c.setup, active: c.active, inputs: c.inputs, outputs: c.outputs,
-      tracked: c.tracked, seed: c.seed, gap: c.window / 4000}, extra);
+    return Object.assign({lineTime: c.lineTime, ub: c.ub, ioSetup: c.ioSetup, stdioSetup: c.stdioSetup, active: c.active, inputs: c.inputs, outputs: c.outputs,
+      tracked: c.tracked, seed: c.seed, gap: c.window / 4000, terminal: c.terminal, echo: c.echo}, extra);
   }
   // every variant, run with scripted presses for runNs (at most 50 million statements each)
   function runScript(c, steps, runNs) {
@@ -2371,6 +3045,14 @@
     `.sl-tl-sleepbg{fill:${INK.sleepSoft}}`, `.sl-tl-sleepline{stroke:${INK.sleepLine};stroke-width:1.6}`,
     `.sl-tl-cpulbl{font-size:9.5px;text-anchor:middle;dominant-baseline:middle;fill:${INK.paper};font-weight:bold}`,
     `.sl-tl-cpulbl.asleep{fill:${INK.sleep}}`, `.sl-tl-cpulbl.busy{fill:${INK.cpu}}`,
+    `.sl-tl-usb.off{stroke:${INK.hatch};stroke-width:1}`, `.sl-tl-usb.closed{fill:${INK.grid}}`, `.sl-tl-usb.open{fill:${INK.sig}}`,
+    `.sl-tl-usb.mixed{stroke:${INK.sig};stroke-width:1}`,
+    `.sl-tl-usblbl{font-size:8.5px;text-anchor:middle;dominant-baseline:middle;fill:${INK.muted}}`, `.sl-tl-usblbl.open{fill:${INK.paper};font-weight:bold}`,
+    `.sl-tl-print{stroke:${INK.warm};stroke-width:2}`, '.sl-tl-printlbl{font-size:9px;fill:#b65a0a}',
+    `.sl-tl-printlbl.drop{fill:${INK.bad};text-decoration:line-through}`, `.sl-tl-dropx{stroke:${INK.bad};stroke-width:1.8;fill:none}`,
+    `.sl-tl-dropline{stroke:${INK.bad};stroke-width:1;stroke-dasharray:2 2}`, `.sl-tl-prints.print{stroke:${INK.warm};stroke-width:1}`,
+    `.sl-tl-prints.drop{stroke:${INK.bad};stroke-width:1}`, `.sl-tl-key{stroke:${INK.sig};stroke-width:2}`,
+    `.sl-tl-keylbl{font-size:9.5px;font-weight:bold;fill:${INK.sig}}`,
   ].join('');
 
   // the timeline of a finished run from 0 to runNs: rows of the block's window (at most 12) in one picture
@@ -2396,6 +3078,7 @@
     const sym = m.prog.lookup(name), v = sym && m.value(sym);
     if (!v) return '–';
     if (!v.init) return 'no value yet';
+    if (sym.type === T.str) return `"${esc(v.v)}"`;
     if (sym.type.time) return v.v == 0 ? 'not set' : v.v >= I64_MAX ? 'at the end of time' : `${(Number(v.v) / 1e6).toFixed(4)} s`;
     if (sym.type.bool) return v.v ? 'true' : 'false';
     if (hex) return `0x${(typeof v.v === 'bigint' ? BigInt.asUintN(64, v.v) : v.v >>> 0).toString(16).toUpperCase()}`;
@@ -2417,29 +3100,33 @@
     const {all, missed} = missedPresses(m);
     if (all) parts.push(missed === 0 ? (all === 1 ? 'The press was read.' : 'Every press was read.')
       : all === 1 ? 'The press was never read.' : missed === all ? `None of the ${all} presses was read.` : `${missed} of ${all} presses were never read.`);
+    const tm = m.term;
+    if (tm.dropped) parts.push(`${tm.dropped === 1 ? 'One print was' : `${tm.dropped} prints were`} dropped (${tm.dropWhy}${tm.dropped > 1 ? ', at first' : ''}).`);
     if (m.stopped) parts.push(m.returned ? 'main() returned.' : `The program stopped: ${m.stopped.message}`);
     if (c.watch.length) parts.push(`At the end: ${c.watch.map(w => `${w.name} = ${valueText(m, w.name, w.hex)}`).join(', ')}.`);
     return parts.join(' ');
   }
-  // what a run tells the author: a crash, pins a `setup: code` program never sets up
+  // what a run tells the author: a crash, pins an `io_setup: code` program never sets up
   function runWarnings(m, c, variant) {
     const pre = variant ? `variant ${variant}: ` : '';
     const out = [];
     if (m.stopped && !m.returned) out.push(`${pre}the program stops in the scripted run: ${m.stopped.message}`);
-    if (c.setup === 'code') for (const d of c.devices) if (m.pins[d.gpio].func !== SIO)
-      out.push(`${pre}setup: code, but the program never sets up ${d.name} (GP${d.gpio}): gpio_init(${/^GP\d+$/.test(d.name) ? d.gpio : d.name}) is missing`);
+    if (c.ioSetup === 'code') for (const d of c.devices) if (m.pins[d.gpio].func !== SIO)
+      out.push(`${pre}io_setup: code, but the program never sets up ${d.name} (GP${d.gpio}): gpio_init(${/^GP\d+$/.test(d.name) ? d.gpio : d.name}) is missing`);
     return out;
   }
   // the first thing the goal still waits for: armed is still true
   function goalMissing(m, gl) {
     for (const v of gl.vars) { const now = valueText(m, v.name); if (now !== fmtGoalValue(v.value)) return `${v.name} is still ${now}`; }
     for (const o of gl.outputs) if (m.outputs[o.name].level !== (o.on ? 1 : 0)) return `${o.name} is still ${o.on ? 'off' : 'on'}`;
+    if (gl.text !== null && !m.usb.seen) return `the terminal has not shown "${esc(gl.text)}"`;
     return 'it is not met';
   }
 
   /*
    * print(config) -> the PDF form of a block, or {error}:
-   *   {title, task, variants: [{name, code, svg, width, height, caption}], exercise, warnings}
+   *   {title, task, variants: [{name, code, svg, width, height, caption, terminal}], exercise, warnings}
+   * (terminal: the last 20 lines of the terminal's screen at the end, with terminal: on)
    * Every variant (print: one: the one shown first) runs with the script; its timeline is drawn. A goal
    * whose answer_script reaches it becomes an exercise: the code of its variant and the task, and in the
    * answer the text, the script in words and the timeline of that run.
@@ -2456,9 +3143,11 @@
         else {
           const v = c.variants[c.goal.variant];
           const end = Math.min(c.answerRun, m.goal.met + Math.max(0.1 * Math.min(c.window, c.answerRun), 50 * MS));
+          // the picture and the terminal end a little after the goal: the run again, to there
+          const shown = end < c.answerRun ? runScript(c, c.answerScript, end).machines[c.goal.variant] : m;
           const exercise = {answer: [{text: c.answer},
             {text: `(${c.answerScript.length ? scriptWords(c.answerScript) : 'No presses'}: ${goalWords(c.goal)} at ${fmtSec(m.goal.met)}.)`}],
-            picture: timelinePicture(m, c, end, W, 'answer')};
+            picture: timelinePicture(shown, c, end, W, 'answer'), terminal: c.terminal ? shown.screen.text(20) : undefined};
           return {title: c.title, task: c.task, variants: [{name: multi ? v.name : null, code: code(v)}], exercise, warnings};
         }
       }
@@ -2467,8 +3156,8 @@
       const variants = which.map(k => {
         const m = r.machines[k], v = c.variants[k];
         warnings.push(...runWarnings(m, c, multi ? v.name : null));
-        return Object.assign({name: multi ? v.name : null, code: code(v), caption: caption(m, c, c.script, c.run)},
-          timelinePicture(m, c, c.run, W, `v${k}`));
+        return Object.assign({name: multi ? v.name : null, code: code(v), caption: caption(m, c, c.script, c.run),
+          terminal: c.terminal ? m.screen.text(20) : undefined}, timelinePicture(m, c, c.run, W, `v${k}`));
       });
       return {title: c.title, task: c.task, variants, warnings};
     } catch (e) {
@@ -2500,13 +3189,13 @@
     const multi = c.variants.length > 1;
     const params = Object.fromEntries(c.params.map(p => [p.name, p.value]));
     const bouncy = Object.fromEntries(c.inputs.map(d => [d.name, d.bouncy]));
-    let runner, shown = c.shown, running = true, speed = c.speed;
+    let runner, shown = c.shown, running = true, speed = c.speed, echo = c.echo;
     const W = {visible: !io, frame, destroy() { live.delete(W); if (io) io.unobserve(host); }};
     let tries = 0, answerShown = false;   // challenge: Reset after a try that did not reach the goal
 
     const makeRunner = () => {
       runner = new Runner(c.variants.map(v => ({name: v.name, prog: v.prog})),
-        machineCfg(c, {params, keep: c.window * 1.5, speed, goal: c.goal, random: seeded(Math.floor(Math.random() * 2 ** 31))}));
+        machineCfg(c, {params, keep: c.window * 1.5, speed, echo, goal: c.goal, random: seeded(Math.floor(Math.random() * 2 ** 31))}));
     };
     makeRunner();
     const M = () => runner.machines[shown];
@@ -2642,7 +3331,64 @@
     });
     const counters = c.show.length ? h('div', {class: 'sl-counters', 'aria-live': 'off'}) : null;
     const side = h('div', {class: 'sl-side'}, board, vars, counters);
-    top.append(h('div', {class: 'sl-main'}, codeBox, side));
+    // nothing beside the code (no board, no variables): the code takes the width
+    top.append(h('div', {class: `sl-main${board.childElementCount || vars || counters ? '' : ' is-wide'}`}, codeBox, side));
+
+    // --- the terminal: a terminal app on the computer. Open, Close and the keys go to every variant; each has its screen
+    const termView = c.terminal ? terminalView() : null;
+    if (termView) top.append(termView.el);
+    function terminalView() {
+      const state = h('span', {class: 'sl-term-state'});
+      const openBtn = h('button', {class: 'sl-btn', type: 'button', onClick: () => { hint = ''; runner.terminal(M().usb.open ? 'close' : 'open'); }}, 'Open');
+      const echoBox = h('input', {type: 'checkbox', id: `${id}-echo`});
+      echoBox.checked = echo;
+      echoBox.addEventListener('change', () => { echo = echoBox.checked; runner.echo = echo; });
+      const screen = h('pre', {class: 'sl-term-screen', 'aria-label': 'The terminal: what the computer received from the Pico'});
+      const input = h('textarea', {class: 'sl-term-input', rows: 1, autocapitalize: 'off', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false',
+        'aria-label': 'Type to the Pico: every key is sent at once'});
+      const msg = h('div', {class: 'sl-term-msg', 'aria-live': 'polite'});
+      let hint = '', seenVersion = -1, seenMachine = null;
+      const send = bytes => {
+        if (!M().usb.open) { hint = 'The terminal is closed: open it to type.'; return; }
+        hint = '';
+        runner.type(bytes);
+      };
+      input.addEventListener('keydown', e => {
+        if (e.isComposing) return;
+        if (e.key === 'Enter') { e.preventDefault(); send(c.enter); }
+        else if (e.key === 'Backspace') { e.preventDefault(); send('\x7f'); }   // as PuTTY sends it
+        else if (e.key === 'Escape') input.blur();
+      });
+      // typed text (also on phones and from the clipboard): a line break is what Enter sends
+      input.addEventListener('input', () => {
+        const text = input.value;
+        input.value = '';
+        if (text) send(utf8(text).replace(/\r\n|\r|\n/g, c.enter));
+      });
+      screen.addEventListener('click', () => { if (!String(window.getSelection())) input.focus({preventScroll: true}); });
+      const el = h('div', {class: 'sl-term'},
+        h('div', {class: 'sl-term-bar'}, h('span', {class: 'sl-term-title', text: 'Terminal, on the computer'}), state, openBtn,
+          h('label', {class: 'sl-check', for: echoBox.id}, echoBox, 'local echo')),
+        h('div', {class: 'sl-term-body'}, screen, input), msg);
+      return {el, reset() { hint = ''; }, update(m, force) {
+        const u = m.usb, st = u.open ? 'open' : 'closed';
+        if (state.textContent !== st) { state.textContent = st; state.className = `sl-term-state ${st}`; }
+        if (openBtn.textContent !== (u.open ? 'Close' : 'Open')) openBtn.textContent = u.open ? 'Close' : 'Open';
+        const note = u.openError || (u.open ? '' : hint);
+        if (msg.textContent !== note) msg.textContent = note;
+        screen.classList.toggle('is-closed', !u.open);
+        if (!force && m === seenMachine && m.screen.version === seenVersion && screen.slOpen === u.open) return;
+        const atEnd = screen.scrollTop + screen.clientHeight >= screen.scrollHeight - 4;
+        seenMachine = m; seenVersion = m.screen.version; screen.slOpen = u.open;
+        // the text, with the terminal's cursor where the next character goes
+        const sc = m.screen, lines = sc.lines.map(l => l.join(''));
+        const line = lines[sc.row] || '', pad = line.length < sc.col ? line + ' '.repeat(sc.col - line.length) : line;
+        const before = lines.slice(0, sc.row).map(l => `${l}\n`).join('') + pad.slice(0, sc.col);
+        const after = pad.slice(sc.col + 1) + lines.slice(sc.row + 1).map(l => `\n${l}`).join('');
+        screen.replaceChildren(before, u.open ? h('span', {class: 'sl-term-cursor', text: pad[sc.col] || ' '}) : (pad[sc.col] || ''), after);
+        if (atEnd || force) screen.scrollTop = screen.scrollHeight;
+      }};
+    }
 
     // --- controls ----------------------------------------------------------------------------
     const resetBtn = h('button', {class: 'sl-btn', type: 'button', onClick: () => reset()}, 'Reset');
@@ -2668,8 +3414,14 @@
     // --- timeline, status --------------------------------------------------------------------
     const tl = h('div', {class: 'sl-tl'});
     const keys = [];
-    if (c.lanes.some(l => l.kind === 'input')) keys.push(['dot', 'the program read the input here'], ['watched', 'it read it all the time'], ['missed', 'a press it never read']);
+    const termLane = c.lanes.some(l => l.kind === 'terminal');
+    if (c.lanes.some(l => l.kind === 'input')) keys.push(['dot', termLane ? 'the program read the input (or took a key) here' : 'the program read the input here'], ['watched', 'it read it all the time'], ['missed', 'a press it never read']);
     if (c.lanes.some(l => l.kind === 'cpu')) keys.push(['running', 'running'], ['asleep', 'asleep']);
+    if (c.lanes.some(l => l.kind === 'cpu') && c.variants.some(v => v.prog.code.some(ins => ins.op === OP.SDK && /getchar/.test(ins.a)))) keys.push(['waiting', 'waiting for a key']);
+    if (termLane) {
+      keys.push(['open', 'a terminal is open'], ['print', 'printed'], ['drop', 'printed, but dropped: nothing received it'], ['key', 'a key typed']);
+      if (!c.lanes.some(l => l.kind === 'input')) keys.push(['dot', 'getchar() took it']);
+    }
     if (c.lanes.some(l => l.kind === 'output')) keys.push(['band', 'toggling faster than the eye can see']);
     if (c.lanes.some(l => l.kind === 'deadline')) keys.push(['flag', 'the deadline: the variable’s value']);
     const legend = h('div', {class: 'sl-legend'}, keys.map(([k, t]) => h('span', {class: 'sl-key'}, h('span', {class: `k ${k}`}), t)));
@@ -2691,7 +3443,7 @@
       }}, `Play it: ${scriptWords(c.answerScript)}`));
       goalBox = h('div', {class: 'sl-goal'}, goalText, answerBtn, answerBox);
     }
-    top.append(goalBox, status, notes);
+    top.append(...[goalBox, status, notes].filter(Boolean));   // (append() shows a null as the text "null")
     host.append(top);
 
     // --- actions -------------------------------------------------------------------------------
@@ -2705,6 +3457,7 @@
     function reset(replay) {
       if (c.goal && !replay && runner.machines.some(m => m.presses) && !(runner.machines[c.goal.variant].goal || {}).met) tries++;
       makeRunner();
+      if (termView) termView.reset();
       for (const b of board.querySelectorAll('.sl-in')) b.slRelease && b.slRelease();
       renderCode();
       lastNotes = -1;
@@ -2757,6 +3510,7 @@
             else if (v.v >= I64_MAX) text = 'never (the end of time)';
             else { text = ns > now ? `in ${fmtDur(ns - now)}` : `reached ${fmtDur(now - ns)} ago`; small = `= ${(ns / SEC).toFixed(4)} s`; }
           } else if (sym.type.bool) text = v.v ? 'true' : 'false';
+          else if (sym.type === T.str) text = `"${esc(v.v)}"`;
           else if (r.w.hex) text = `0x${(typeof v.v === 'bigint' ? BigInt.asUintN(64, v.v) : v.v >>> 0).toString(16).toUpperCase()}`;
           else text = String(v.v);
         }
@@ -2778,8 +3532,9 @@
       const delta = new Float64Array(lineEls.length);
       for (let l = 1; l < lineEls.length; l++) { delta[l] = heat[l] - heatPrev[l]; if (delta[l] > max) max = delta[l]; }
       heatPrev = heat.slice();
-      const asleep = m.state === ASLEEP || m.state === BUSY;
+      const asleep = m.state === ASLEEP || m.state === BUSY || m.state === WAITING;
       const nextLine = !running && m.state === RUN ? lineOf(m) : 0;
+      if (termView) termView.update(m, force);
       for (let l = 1; l < lineEls.length; l++) {
         const target = running && max > 0 ? delta[l] / max : 0;
         heatEma[l] = force && !running ? 0 : heatEma[l] * 0.75 + target * 0.25;
@@ -2788,13 +3543,17 @@
         const prev = el.slHeat || 0;
         if (Math.abs(prev - hv) > 0.02 || (hv === 0 && prev !== 0)) { el.style.setProperty('--heat', hv.toFixed(2)); el.slHeat = hv; }
         el.classList.toggle('is-next', l === nextLine);
-        const isSleep = asleep && l === m.sleepLine && (m.wakeAt - m.sleepFrom) / speed >= 40 * MS;
-        el.classList.toggle('is-asleep', isSleep);
+        const forever = m.state === WAITING && m.wakeAt === Infinity;
+        const isSleep = asleep && l === m.sleepLine && (forever || (m.wakeAt - m.sleepFrom) / speed >= 40 * MS);
+        el.classList.toggle('is-asleep', isSleep && m.state !== WAITING);
+        el.classList.toggle('is-waiting', isSleep && m.state === WAITING);
         const badge = el.lastChild;
         if (isSleep) {
           badge.hidden = false;
-          badge.firstChild.textContent = `${m.state === BUSY ? 'busy-waiting' : 'asleep'}: ${fmtDur(m.wakeAt - m.time)} left`;
-          badge.lastChild.firstChild.style.width = `${Math.min(100, (m.time - m.sleepFrom) / (m.wakeAt - m.sleepFrom) * 100).toFixed(1)}%`;
+          const left = fmtDur(m.wakeAt - m.time);
+          badge.firstChild.textContent = m.state === WAITING ? (forever ? 'waiting for a key' : `waiting for a key: ${left} left`) : `${m.state === BUSY ? 'busy-waiting' : 'asleep'}: ${left} left`;
+          badge.lastChild.hidden = forever;
+          if (!forever) badge.lastChild.firstChild.style.width = `${Math.min(100, (m.time - m.sleepFrom) / (m.wakeAt - m.sleepFrom) * 100).toFixed(1)}%`;
         } else if (!badge.hidden) badge.hidden = true;
       }
       // status and notes
@@ -2802,7 +3561,7 @@
         status.textContent = m.returned ? m.stopped.message : `The program stopped: ${m.stopped.message}`;
         status.className = `sl-status ${m.returned ? 'done' : 'bad'}`;
         if (m.stopped.line && lineEls[m.stopped.line]) lineEls[m.stopped.line].classList.add('is-stop');
-      } else if (!running) { status.textContent = m.state === RUN ? `Paused before line ${lineOf(m)}.` : 'Paused.'; status.className = 'sl-status'; }
+      } else if (!running) { status.textContent = m.state === RUN ? `Paused before line ${lineOf(m)}.` : m.state === WAITING ? 'Paused, waiting for a key.' : 'Paused.'; status.className = 'sl-status'; }
       else { status.textContent = ''; status.className = 'sl-status'; }
       if (c.goal) {
         const gm = runner.machines[c.goal.variant], gl = gm.goal, of = multi ? ` (${c.variants[c.goal.variant].name})` : '';
@@ -2812,7 +3571,7 @@
           text = `That took ${gl.presses} presses${of}. Can you do it with ${c.goal.maxPresses}? (Reset starts again.)`; cls = 'more';
         } else {
           const first = c.goal.vars[0], o = c.goal.outputs[0];
-          text = `Right!${of} ${first ? `${first.name} became ${fmtGoalValue(first.value)}` : `${o.name} went ${o.on ? 'on' : 'off'}`} at t = ${(gl.met / SEC).toFixed(3)} s.`;
+          text = `Right!${of} ${first ? `${first.name} became ${fmtGoalValue(first.value)}` : o ? `${o.name} went ${o.on ? 'on' : 'off'}` : `the terminal showed "${esc(c.goal.text)}"`} at t = ${(gl.met / SEC).toFixed(3)} s.`;
           cls = 'ok';
         }
         if (goalText.textContent !== text) { goalText.textContent = text; goalText.className = `sl-goaltext ${cls}`; }
@@ -2909,7 +3668,7 @@
   root.CourseSuperloop = {compile, readConfig, Machine, Runner, print, mount,
     // for the tests (tests/superloop.js)
     internals: {parse, lex, toC, SDK, CONSTS, drawTimeline, svgText, runScript, caption, T, TYPEDEFS, convert, common, promote, seeded, Track, OP,
-      US, MS, SEC, CPU_NAMES, speedLabel, duration, lightness}};
+      US, MS, SEC, CPU_NAMES, speedLabel, duration, lightness, readFormat, formatPrintf, Screen, USB, PRI, esc}};
 
   if (hasDom) {
     const mountAll = () => document.querySelectorAll('.course-superloop[data-config]').forEach(mountBlock);

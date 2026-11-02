@@ -879,11 +879,16 @@ script:
   warning).
 - `inputs:` and `outputs:` are named like the code's pin constants. A
   constant the code does not declare is declared by the block (outputs GP15,
-  14, …; inputs GP16, 17, …); `setup: code` makes the program set its pins
+  14, …; inputs GP16, 17, …); `io_setup: code` makes the program set its pins
   up itself.
 - `variants:` instead of `code:` gives tabs that all run on the same presses;
   `params: [DELAY_MS]` lets students change a constant in the code;
   `watch:` shows variables; `goal:` makes a challenge.
+- A `terminal:` block adds a terminal for `printf` and `getchar` (USB stdio
+  as on a Pico: text printed before a terminal is open is lost). Students
+  open it (`open: manual`), or it opens by itself (`open: auto`); the program
+  starts USB stdio with `stdio_init_all()`, unless `stdio_setup: auto`.
+  Scripts open it and type: `- type "5" at 2 s`.
 
 Everything a block can do is in [Superloop](superloop.md). The course
 template has a gallery of blocks to try and change:

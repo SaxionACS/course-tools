@@ -14,6 +14,62 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.8.0 (unreleased)
+
+Superloop blocks get a terminal, for `printf` and `getchar`. See *The
+terminal* in [docs/superloop.md](docs/superloop.md).
+
+- A `terminal:` block adds a terminal app on the computer, talking to the
+  Pico's USB stdio: Open/Close, local echo, a screen to type into. Its
+  settings: `open: manual | auto` (`button` = `manual`; `auto` opens it as
+  soon as the Pico is on USB), `enter: cr | lf | crlf`, `echo: true | false`.
+  Every variant has its own screen and gets the same keys.
+- `stdio_setup: auto | manual` (`code` = `manual`, the default): whether the
+  block starts USB stdio before the program, or the program calls
+  `stdio_init_all()`. **Renamed:** `setup` is now `io_setup` (the pins), also
+  with `manual` as another word for `code`; `setup` is an error that says so.
+- USB stdio as the Pico SDK 2.3.1 does it, measured on a Pico W: the Pico is
+  on USB 0.25 s after `stdio_init_all()`; text printed before a terminal is
+  open is dropped; `\n` goes out as `\r\n`; keys wait until the program
+  reads them; `getchar()`, `stdio_getchar_timeout_us()` (and
+  `getchar_timeout_us()`), `stdio_usb_connected()`, `PICO_ERROR_TIMEOUT`.
+  `printf`, `puts` and `putchar` take the time they take on a Pico, and a
+  flood of prints waits for USB.
+- `printf` prints as the SDK's own `printf` (quirks included), with every
+  value checked against its conversion: a value of another size, or text for
+  a number, is a build error with the fix (`use %llu (or "%" PRIu64)`).
+  String literals (with `PRIu64` and the other `<inttypes.h>` macros) and
+  `const char *` constants.
+- A `terminal` lane on the timeline: the USB connection, prints (dropped ones
+  in red), keys typed, and where `getchar()` took them. The cpu lane shows
+  *waiting* for a key; the code line says *waiting for a key*.
+- Scripts open and close the terminal and type (`- type "5" at 2 s`); a goal
+  can ask for text in the terminal (`goal: {shows: "…"}`).
+- The PDF: the terminal's screen at the end of each run, and the terminal
+  steps and dropped prints in the caption.
+- Fixed: blocks without a goal showed "null" under the status line on the
+  website (2.7.0).
+- Tests: `printf` against the SDK's `printf.c` compiled with gcc (random
+  formats, in CI); the USB model and the lesson's beeps program in
+  `tests/superloop.js`; the terminal in the browser test.
+
+Platform notes:
+
+- **Dependencies:** none new. The gcc test downloads `printf.c` of the Pico
+  SDK 2.3.1 from GitHub (or reads it from `PICO_SDK_PATH`); in CI, a failed
+  download fails the check.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 168
+  checks, with `CC=gcc-13` (13.4, `-m32`) and `printf.c` from
+  `PICO_SDK_PATH`; the gcc test also passes with `printf.c` downloaded, as in
+  CI. In an extra run, 60 000 random formats printed as the SDK's `printf.c`
+  prints them. On a Pico W (SDK 2.3.1), 3 000 `printf` cases print the same,
+  and the USB model is within 20 % of every timing measured.
+  The Check workflow itself has not run yet.
+- **macOS:** untested. There `gcc` is clang, which has no `-m32`: the gcc
+  check runs 64-bit.
+- **Windows:** untested; without gcc, the gcc check (and with it the `printf`
+  test) is skipped.
+
 ## 2.7.0 (2026-11-01)
 
 Superloop blocks: a short C program from a lesson, running against simulated
