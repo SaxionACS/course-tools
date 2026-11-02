@@ -138,7 +138,7 @@
     all('.course-predict').forEach(function (box) {
       var text = one('textarea', box), button = one('.course-reveal', box), selfgrade = one('.course-selfgrade', box);
       if (!text || !button) return;
-      text.addEventListener('input', function () { button.disabled = text.value.trim().length < 3; });
+      text.addEventListener('input', function () { button.disabled = text.value.trim().length < 1; });
       button.addEventListener('click', function () {
         box.classList.add('revealed');   // also shows Compiler Explorer links (saxion.scss)
         one('.course-answer', box).hidden = false;
