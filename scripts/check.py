@@ -73,6 +73,8 @@ WIDGET_MESSAGES = (
     'warning: lessons/week_02/lesson3.md: widget 19 (register): field MODE: bits "6,5" should look like 7 or 6..5',
     'warning: lessons/week_02/lesson3.md: widget 20 (number): unknown setting "widht"',
     "warning: lessons/week_02/lesson3.md: widget 20 (number): goal: unsigned: 300 does not fit in 8 bits",
+    "warning: lessons/week_02/lesson3.md: widget 20 (number): widths are the choices of the width control: "
+    "add width to controls",
     "warning: lessons/week_02/lesson3.md: widget 21: the YAML cannot be read: ",
 )
 # State machines with mistakes (lessons/week_02/lesson4.md): each line must start with one of these.
@@ -532,6 +534,8 @@ def check_widgets(c: Checks, read) -> None:
     if len(configs) == 21:
         c.ok(configs[3].get("value") == "16045690984503111693", "64-bit values are passed as text (no rounding in JavaScript)")
         c.ok(divs[0][0] == "widget-1" and divs[2][0] == "wheel", "every widget has an id: the block's own, or widget-<n>")
+        c.ok(configs[0].get("widths") == [8, 16, 32] and configs[5].get("widths") == [4, 8, 32],
+             "widths, the choices of the width control, reach the browser")
     c.ok("NOT-A-WIDGET" in p and p.count('class="cw-error"') == 1, "a widget in a code block is shown as code; unreadable YAML is reported on the page")
     c.ok("data-yaml" not in p, "editable widgets have no YAML on the published site")
     c.ok(re.search(r'<script src="[^"]*site_libs/quarto-contrib/course-widgets-\w+/widgets\.js"', html)
@@ -722,8 +726,9 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("LO3: Debugging" in text("info/outcomes.pdf"), "outcome map PDF")
     t = text("lessons/week_02/lesson3.pdf")
     questions, _, key = t.partition(" Answers ")
-    c.ok("WIDGET-TITLE" in questions and "binary 1101 0010 hexadecimal 0xD2 · unsigned 210 · signed −46" in questions
-         and "Try it on the website." in questions, "widget PDF: a picture of the widget, with its title and a link")
+    c.ok("WIDGET-TITLE" in questions and "binary 1101 0010 hexadecimal 0xD2 · uint8_t 210 · int8_t −46" in questions
+         and "Try it on the website." in questions, "widget PDF: a picture of the widget, with its title and a link, "
+         "the stdint.h types of its readings")
     c.ok("Exercise 5." in questions and "Exercise 6." not in questions and "'O' 0x4F" not in questions,
          "widget PDF: challenges are exercises, without their answers")
     c.ok(all(a in key for a in ("Exercise 1 1101 0010 (0xD2)", "For example A =",

@@ -154,6 +154,18 @@
     return value;
   }
   const signedText = (v, w) => Bits.minus(Bits.s(v, w).toString());
+  // The choices of the width control: widths: [8, 16, 32], or the type's own (`all`); the widget's width is one of them
+  function widthsOf(c, all) {
+    if (c.widths == null) return all;
+    const ws = [...new Set(listOf(c.widths).map(int))].sort((x, y) => x - y);
+    const bad = ws.find(n => n < 1 || n > 64);
+    if (bad !== undefined) throw new Error(`widths must be 1 … 64, not ${bad}`);
+    const w = widthOf(c.width);
+    if (!ws.includes(w)) throw new Error(`width ${w} is not one of the widths (${ws.join(', ')})`);
+    return ws;
+  }
+  // The stdint.h type of a reading: uint8_t, int16_t, …; '' for widths without one (4, 12, …)
+  const cType = (w, kind) => ([8, 16, 32, 64].includes(w) ? `${kind === 'signed' ? '' : 'u'}int${w}_t` : '');
 
   // ========================================================================
   // Kit: shared parts of the interactive widgets
@@ -443,6 +455,7 @@
         if (def.controls) {
           for (const k of listOf(c.controls)) if (!def.controls.includes(k)) warnings.push(`unknown control "${k}" (${def.controls.join(', ')})`);
         }
+        if (c.widths != null && known.has('widths') && !has(c.controls, 'width')) warnings.push('widths are the choices of the width control: add width to controls');
         let exercise = null;
         if (c.goal != null) {
           if (!def.exercise) warnings.push(`this widget has no goal${def.goalHint ? ` (${def.goalHint})` : ''}`);
@@ -470,6 +483,7 @@
   // type: number (views: converter, wheel)
   // ========================================================================
   const NUMBER_GOALS = ['signed', 'unsigned', 'value'];
+  const NUMBER_WIDTHS = [4, 8, 16, 32, 64];   // the width control's choices, unless the widget has widths
   // The bit pattern that a goal asks for: {signed: -46}, {unsigned: 210} or {value: 0xD2}.
   function numberTarget(c, w) {
     const g = c.goal;
@@ -496,7 +510,7 @@
   }
 
   Widget.define('number', {
-    keys: ['width', 'value', 'signed', 'explain', 'show'],
+    keys: ['width', 'widths', 'value', 'signed', 'explain', 'show'],
     views: ['converter', 'wheel'],
     controls: ['bits', 'bin', 'hex', 'unsigned', 'signed', 'char', 'width'],
     defaults: {view: 'converter', width: 8, value: 0, controls: ['bits', 'bin', 'hex', 'unsigned', 'signed'], hide: [], explain: false},
@@ -505,11 +519,12 @@
       let w = widthOf(c.width);
       let v = Bits.u(Bits.big(c.value), w);
       const rd = readings(c);
+      const widths = widthsOf(c, NUMBER_WIDTHS);
       if (c.goal) numberTarget(c, w);   // a wrong goal is an error, as at build time
       const status = kit.status();
       const top = h('div', {class: 'cw-controls'});
       if (has(c.controls, 'width')) {
-        top.append(kit.control('Width', kit.segmented([4, 8, 16, 32, 64].map(n => ({value: n, label: `${n} bits`})), w, n => {
+        top.append(kit.control('Width', kit.segmented(widths.map(n => ({value: n, label: `${n} bits`})), w, n => {
           w = n; v = Bits.u(v, w); build();
         })));
       }
@@ -521,8 +536,9 @@
       const readouts = [
         {key: 'bin', label: 'Binary', get: () => Bits.bin(v, w), parse: t => Bits.parse(/^0b/i.test(t.trim()) ? t : '0b' + t.replace(/\s/g, ''))},
         {key: 'hex', label: 'Hexadecimal', get: () => Bits.hex(v, w), parse: t => Bits.parse(/^0x/i.test(t.trim()) ? t : '0x' + t.trim())},
-        {key: 'unsigned', label: 'Unsigned decimal', get: () => Bits.u(v, w).toString(), range: () => [0n, Bits.mask(w)]},
-        {key: 'signed', label: "Signed decimal (two's complement)", get: () => signedText(v, w),
+        {key: 'unsigned', label: () => 'Unsigned decimal' + (cType(w, 'unsigned') ? ` (${cType(w, 'unsigned')})` : ''),
+          get: () => Bits.u(v, w).toString(), range: () => [0n, Bits.mask(w)]},
+        {key: 'signed', label: () => `Signed decimal (${cType(w, 'signed') || "two's complement"})`, get: () => signedText(v, w),
           range: () => [-(1n << BigInt(w - 1)), (1n << BigInt(w - 1)) - 1n]},
         {key: 'char', label: 'Character (ASCII)', get: () => { const n = Number(Bits.u(v, 8)); return n >= 32 && n < 127 ? `'${String.fromCharCode(n)}'` : '—'; }},
       ];
@@ -552,7 +568,8 @@
           });
           input.addEventListener('blur', () => { input.classList.remove('is-invalid'); err.textContent = ''; refresh(); });
           inputs.push({r, input});
-          fieldsBox.append(h('div', {class: 'cw-field' + (r.key === 'bin' && w > 16 ? ' wide' : '')}, h('label', {for: id, text: r.label}), input, err));
+          const label = typeof r.label === 'function' ? r.label() : r.label;
+          fieldsBox.append(h('div', {class: 'cw-field' + (r.key === 'bin' && w > 16 ? ' wide' : '')}, h('label', {for: id, text: label}), input, err));
         }
         refresh();
       }
@@ -566,10 +583,11 @@
           const termsU = set.map(i => (2n ** BigInt(i)).toString());
           const termsS = set.map(i => (i === w - 1 ? '−' : '') + (2n ** BigInt(i)).toString());
           const sum = terms => terms.length ? terms.join(' + ').replace(/\+ −/g, '− ') : '0';
+          const named = kind => (cType(w, kind) ? `${kind} (${cType(w, kind)}) ` : `${kind} `);
           explain.replaceChildren();
           add(explain,
-            rd.u ? h('div', {}, h('b', {text: 'unsigned '}), `${sum(termsU)} = ${Bits.u(v, w)}`) : null,
-            rd.s ? h('div', {}, h('b', {text: 'signed   '}), `${sum(termsS)} = ${signedText(v, w)}`) : null);
+            rd.u ? h('div', {}, h('b', {text: named('unsigned')}), `${sum(termsU)} = ${Bits.u(v, w)}`) : null,
+            rd.s ? h('div', {}, h('b', {text: named('signed')}), `${sum(termsS)} = ${signedText(v, w)}`) : null);
         }
         if (c.goal) {
           if (numberGoalMet(c, v, w)) status.ok('That is the right pattern.');
@@ -593,6 +611,7 @@
         wheel.set(Number(v));
         return picture([svgBlock(wheel.svg)]);
       }
+      widthsOf(c, NUMBER_WIDTHS);
       const per = w > 16 ? 16 : w, blocks = [];
       for (let hi = w - 1; hi >= 0; hi -= per) {
         const lo = Math.max(0, hi - per + 1);
@@ -606,8 +625,8 @@
         const shown = k => !has(c.hide, k);
         blocks.push(drawText([
           shown('bin') ? `binary ${Bits.bin(v, w)}` : null,
-          [shown('hex') ? `hexadecimal ${Bits.hex(v, w)}` : null, rd.u && shown('unsigned') ? `unsigned ${Bits.u(v, w)}` : null,
-            rd.s && shown('signed') ? `signed ${signedText(v, w)}` : null].filter(Boolean).join(' · '),
+          [shown('hex') ? `hexadecimal ${Bits.hex(v, w)}` : null, rd.u && shown('unsigned') ? `${cType(w, 'unsigned') || 'unsigned'} ${Bits.u(v, w)}` : null,
+            rd.s && shown('signed') ? `${cType(w, 'signed') || 'signed'} ${signedText(v, w)}` : null].filter(Boolean).join(' · '),
         ].filter(Boolean)));
       }
       return picture(blocks);
@@ -729,8 +748,9 @@
     return goal.flags.every(([k, x]) => out.flags[k] === x) && (goal.result === null || out.r === Bits.u(goal.result, w));
   }
 
+  const ARITHMETIC_WIDTHS = [4, 8, 16];   // the width control's choices, unless the widget has widths
   Widget.define('arithmetic', {
-    keys: ['op', 'width', 'a', 'b', 'step', 'signed', 'convention'],
+    keys: ['op', 'width', 'widths', 'a', 'b', 'step', 'signed', 'convention'],
     controls: ['a', 'b', 'width'],
     defaults: {op: 'add', width: 8, a: 0, b: 0, step: false, controls: ['a', 'b']},
     render(root, c, kit) {
@@ -738,6 +758,7 @@
       const sub = c.op === 'sub';
       const rd = readings(c), cv = conventionOf(c);
       let w = widthOf(c.width);
+      const widths = widthsOf(c, ARITHMETIC_WIDTHS);
       let a = Bits.u(Bits.big(c.a), w), b = Bits.u(Bits.big(c.b ?? 0), w);
       const goal = c.goal ? arithmeticGoal(c, w) : null;
       const top = h('div', {class: 'cw-controls'});
@@ -765,7 +786,7 @@
         top.replaceChildren();
         if (has(c.controls, 'a')) top.append(operand('A', () => a, x => { a = x; }));
         if (has(c.controls, 'b')) top.append(operand('B', () => b, x => { b = x; }));
-        if (has(c.controls, 'width')) top.append(kit.control('Width', kit.segmented([4, 8, 16].map(n => ({value: n, label: `${n} bits`})), w, n => {
+        if (has(c.controls, 'width')) top.append(kit.control('Width', kit.segmented(widths.map(n => ({value: n, label: `${n} bits`})), w, n => {
           w = n; a = Bits.u(a, w); b = Bits.u(b, w); controls(); update();
         })));
       }
@@ -855,6 +876,7 @@
       oneOf(c.op, ['add', 'sub'], 'op');
       const w = widthOf(c.width), sub = c.op === 'sub', rd = readings(c), cv = conventionOf(c);
       const a = Bits.u(Bits.big(c.a), w), b = Bits.u(Bits.big(c.b ?? 0), w);
+      widthsOf(c, ARITHMETIC_WIDTHS);
       if (c.goal) arithmeticGoal(c, w);
       const out = addSub(a, b, w, sub, cv);
       const val = x => (blank ? rd.list.map(() => '') : [rd.u ? Bits.u(x, w).toString() : null, rd.s ? signedText(x, w) : null].filter(t => t !== null));
@@ -2365,7 +2387,7 @@
   root.CourseWidgets = {
     Widget, Bits, Protocols, CLang, Wave, print: config => Widget.print(config),
     // for the tests (tests/widgets.js)
-    internals: {unescapeText, escapeText, byteName, toBytes, addSub, numberTarget, numberGoalMet, arithmeticGoal, arithmeticGoalMet, conventionOf, registerFields, registerTarget,
+    internals: {unescapeText, escapeText, byteName, toBytes, widthsOf, cType, addSub, numberTarget, numberGoalMet, arithmeticGoal, arithmeticGoalMet, conventionOf, registerFields, registerTarget,
       registerGoalMet, settable, checkCode, modelCode, codeGoal, packFields, packetFields, frameSettings, toSlots, fromSlots, shiftOnce, SHIFTS},
   };
   // editable: true: the widget's YAML under it, to change and apply (a playground, or a gallery for authors).

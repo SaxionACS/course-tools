@@ -14,6 +14,29 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.9.0 (unreleased)
+
+Number widgets name the C type of their readings, and authors choose the
+widths students can pick.
+
+- `widths: [8, 16, 32]` limits the choice of the `width` control of `number`
+  and `arithmetic` widgets (until now always 4 to 64 bits for numbers, 4, 8
+  and 16 for arithmetic). `width` must be one of them; `widths` without the
+  `width` control is reported.
+- At 8, 16, 32 and 64 bits, a number widget names the `stdint.h` type of its
+  decimal readings: in the labels (*Unsigned decimal (uint8_t)*, *Signed
+  decimal (int8_t)*), in the sums of `explain: true`, and in the PDF
+  (`uint8_t 210 · int8_t −46`). Other widths read as before.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 169
+  checks, with `CC=gcc-13`; the widgets checked in Chrome Headless Shell by
+  hand (the width control, labels and sums at 8, 16 and 32 bits).
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
+
 ## 2.8.0 (2026-11-02)
 
 Superloop blocks get a terminal, for `printf` and `getchar`. See *The

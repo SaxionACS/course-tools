@@ -263,6 +263,34 @@ ok(print({type: 'number', width: 65}).error?.includes('width must be 1 … 64'),
 ok(!print({type: 'number', editable: true}).warnings.length && print({type: 'number', editable: 'yes'}).warnings.includes('editable is true or false'),
   'editable is true or false');
 
+// ---- widths: the choices of the width control ----------------------------
+for (const type of ['number', 'arithmetic']) {
+  const r = print({type, width: 16, widths: [32, 8, 16, 8], controls: ['width']});
+  ok(!r.error && !r.warnings.length, `${type}: widths in any order, twice is fine`, r.error || r.warnings.join('; '));
+  const wrong = print({type, width: 8, widths: [16, 32], controls: ['width']});
+  ok(wrong.error === 'width 8 is not one of the widths (16, 32)', `${type}: the width must be one of the widths`, wrong.error);
+  ok(print({type, widths: [8, 65], controls: ['width']}).error === 'widths must be 1 … 64, not 65', `${type}: widths up to 64 bits`);
+  ok(print({type, widths: 8, controls: ['width']}).error === undefined, `${type}: a single width without brackets`);
+  ok(print({type, widths: [8, 16]}).warnings.includes('widths are the choices of the width control: add width to controls'),
+    `${type}: widths without the width control are reported`);
+}
+ok(I.widthsOf({width: 8}, [4, 8, 16]).join() === '4,8,16' && I.widthsOf({width: 8, widths: [32, 8, 8]}, [4]).join() === '8,32',
+  "widthsOf: the type's choices, or the widget's own, sorted and once each");
+{
+  const w = print({type: 'shift', widths: [8, 16]}).warnings;
+  ok(w.length === 1 && w[0] === 'unknown setting "widths"', 'widths only for number and arithmetic', w.join('; '));
+}
+
+// ---- number: the stdint.h type of 8, 16, 32 and 64 bits -------------------
+ok([I.cType(8, 'unsigned'), I.cType(8, 'signed'), I.cType(64, 'unsigned'), I.cType(64, 'signed'), I.cType(4, 'unsigned'), I.cType(12, 'signed')].join()
+  === 'uint8_t,int8_t,uint64_t,int64_t,,', 'cType: uintN_t and intN_t for 8, 16, 32 and 64 bits, nothing for other widths');
+for (const [w, value, line] of [[8, '0xD2', 'uint8_t 210 · int8_t −46'], [16, -1, 'uint16_t 65535 · int16_t −1'],
+  [32, '0x80000000', 'uint32_t 2147483648 · int32_t −2147483648'], [4, 9, 'unsigned 9 · signed −7'], [12, 4095, 'unsigned 4095 · signed −1']]) {
+  const svg = print({type: 'number', width: w, value}).svg || '';
+  ok(svg.includes(line), `number PDF, ${w} bits: ${line}`, svg.match(/hexadecimal[^<]*/)?.[0]);
+}
+ok((print({type: 'number', width: 32, value: 7, signed: true}).svg || '').includes('0x00000007 · int32_t 7'), 'number PDF: signed only names int32_t');
+
 // ---- frames: C escapes in text, bit values under the labels, zoom to fit --
 {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);

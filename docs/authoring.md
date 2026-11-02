@@ -605,6 +605,9 @@ and see what every setting does. It is a [draft](#draft-pages): run
 Settings that several types share:
 
 - `width`: the number of bits, 1 to 64.
+- `widths`: the widths the student can choose from with the `width` control,
+  for example `[8, 16, 32]`; `width` must be one of them. Only for `number`
+  and `arithmetic`; without `widths`, they offer the choice given below.
 - `signed: false` (unsigned only), `true` (signed only) or `both` (the
   default): which readings of a value the widget shows: weights, readouts,
   flags and explanations.
@@ -618,14 +621,16 @@ Settings that several types share:
 ### Numbers
 
 `type: number` shows one value in many forms: bits, binary, hexadecimal,
-unsigned and signed decimal. Students click bits or type in any box.
+unsigned and signed decimal. Students click bits or type in any box. At 8,
+16, 32 and 64 bits, the decimal readings name their C type from `stdint.h`
+(`uint8_t`, `int8_t`, …), on the website and in the PDF.
 
 | Setting | Meaning |
 |:--|:--|
 | `view` | `converter` (the default) or `wheel`: counting round a 2- to 5-bit wheel, where unsigned and signed numbers wrap |
-| `width`, `value`, `signed` | see above; default 8 bits, value 0 |
+| `width`, `widths`, `value`, `signed` | see above; default 8 bits, value 0 |
 | `explain` | `true`: rows of bit weights (one for unsigned, one for signed: the top bit counts as −128), and the sums |
-| `controls` | `bits`, `bin`, `hex`, `unsigned`, `signed`, `width` (a choice of 4 to 64 bits); default: all but `width` |
+| `controls` | `bits`, `bin`, `hex`, `unsigned`, `signed`, `width` (a choice of 4, 8, 16, 32 and 64 bits, or `widths`); default: all but `width` |
 | `show` | `[char]` adds the ASCII character |
 | `goal` | `{signed: -46}`, `{unsigned: 210}` or `{value: 0xD2}`: the bits the student must set |
 
@@ -650,9 +655,9 @@ the flags. A subtraction is shown as A + ~B + 1, the way the hardware does it.
 |:--|:--|
 | `op` | `add` (the default) or `sub` |
 | `a`, `b` | the operands; default 0 |
-| `width`, `signed`, `convention` | see above |
+| `width`, `widths`, `signed`, `convention` | see above |
 | `step` | `true`: the student adds one column at a time |
-| `controls` | `a`, `b`, `width` (4, 8 or 16 bits); default `[a, b]` |
+| `controls` | `a`, `b`, `width` (4, 8 or 16 bits, or `widths`); default `[a, b]` |
 | `goal` | `{flags: {V: 1, C: 0}}` (ARM or Intel names) and/or `{result: 44}` |
 
 ````markdown

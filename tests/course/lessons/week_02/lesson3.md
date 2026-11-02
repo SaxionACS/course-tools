@@ -10,6 +10,7 @@ type: number
 title: WIDGET-TITLE
 editable: true
 width: 8
+widths: [8, 16, 32]
 value: 0b11010010
 controls: [bits, bin, hex, unsigned, signed, width]
 explain: true
@@ -56,6 +57,7 @@ controls: [a, b, width]
 type: arithmetic
 op: sub
 width: 4
+widths: [4, 8, 32]
 a: 0b0011
 b: 0b0101
 controls: [a, b, width]
@@ -214,6 +216,7 @@ fields:
 ```widget
 type: number
 widht: 8
+widths: [8, 16]
 goal: {unsigned: 300}
 ```
 
