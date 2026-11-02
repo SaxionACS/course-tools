@@ -14,7 +14,7 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.8.0 (unreleased)
+## 2.8.0 (2026-11-02)
 
 Superloop blocks get a terminal, for `printf` and `getchar`. See *The
 terminal* in [docs/superloop.md](docs/superloop.md).
@@ -64,7 +64,7 @@ Platform notes:
   CI. In an extra run, 60 000 random formats printed as the SDK's `printf.c`
   prints them. On a Pico W (SDK 2.3.1), 3 000 `printf` cases print the same,
   and the USB model is within 20 % of every timing measured.
-  The Check workflow itself has not run yet.
+  The Check workflow passes (`printf.c` downloaded, gcc 13 `-m32`).
 - **macOS:** untested. There `gcc` is clang, which has no `-m32`: the gcc
   check runs 64-bit.
 - **Windows:** untested; without gcc, the gcc check (and with it the `printf`
