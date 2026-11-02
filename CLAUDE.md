@@ -51,7 +51,7 @@ what changed recently.
 | `tests/statemachine.js` | tests of the state machines: running, mistakes, layouts that must not overlap, the PDF form (`quarto run tests/statemachine.js`, also run by `check.py`) |
 | `tests/statemachine_browser.js` | the test course's state machines in Chrome Headless Shell, driven over the DevTools protocol (run by `check.py` after the build) |
 | `tests/superloop.js` | tests of the superloop interpreter: C's integer rules, every row of the undefined-behaviour table (the values a Pico gives), mistakes, the lesson programs with scripted presses, goals and the PDF form (`quarto run tests/superloop.js`, also run by `check.py`) |
-| `tests/superloop_gcc.js` | the interpreter against gcc: thousands of random expressions (values, and undefined behaviour against UBSan), every superloop program of the test course compiled with gcc, and `printf` against the Pico SDK's own `printf.c` (from `PICO_SDK_PATH`, or downloaded at the tag `PICO_SDK` in the file) on random formats (run by `check.py` after the build; needs gcc, `-m32` with `gcc-multilib` as in CI) |
+| `tests/superloop_gcc.js` | the interpreter against gcc: thousands of random expressions (values, and undefined behaviour against UBSan), every superloop program of the test course compiled with gcc, and `printf` against the Pico SDK's own `printf.c` (from `PICO_SDK_PATH`, or downloaded at the tag `PICO_SDK` in the file) on random formats (run by `check.py` after the build; needs gcc 13 to 15, not 16 or later (see *Checking a change*), `-m32` with `gcc-multilib` as in CI) |
 | `tests/superloop_browser.js` | the test course's superloop blocks in Chrome Headless Shell (run by `check.py` after the build) |
 | `docs/authoring.md`, `docs/course-info.md` | documentation for course authors (state machines: `docs/statemachines.md`; superloop blocks: `docs/superloop.md`) |
 | `install.sh`, `install.ps1`, `requirements.md` | local installation: Ubuntu and macOS (`install.sh`: system packages, uv, `uv tool install`, `course setup`), Windows (`install.ps1`: the same without system packages) |
@@ -161,6 +161,17 @@ what changed recently.
    `quarto run tests/statemachine.js` the state machines, and
    `quarto run tests/superloop.js` and `quarto run tests/superloop_gcc.js`
    the superloop interpreter (`SUPERLOOP_CASES=30000` for more random cases).
+   Run the gcc check (`tests/superloop_gcc.js`, also run by `check.py`) with
+   gcc 13, as CI does (`CC=gcc-13`), or gcc 14 or 15 if one of those is
+   installed with 32-bit support (`gcc-multilib`, for `-m32`). Not with gcc
+   16 or later: since 16.1, gcc turns `(unsigned)-(int)x` into
+   `-(unsigned)x` when `x` goes through a conversion of the same width, as
+   every read of a `volatile` does (the random cases use `volatile`
+   variables). The negation is then unsigned, UBSan no longer sees its
+   signed overflow, and the check fails although the interpreter is right.
+   The rule is in gcc's `match.pd` (commit 5e363ffefac, PR
+   tree-optimization/120031); it has no `TYPE_OVERFLOW_SANITIZED` guard,
+   and gcc's master still had none in November 2026.
 3. For changes that affect how pages look, also look at the pages: run
    `course preview` in a copy of `tests/course`, or build a real course.
 
