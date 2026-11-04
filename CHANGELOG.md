@@ -14,7 +14,7 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.11.0 (unreleased)
+## 2.11.0 (2026-11-04)
 
 State machines get what week 4 of the embedded course calls *extended state*:
 variables, guards, events with a value, and exit actions.
@@ -44,12 +44,15 @@ variables, guards, events with a value, and exit actions.
 - In the PDF: the first values of the variables and the values of buttons, and
   arrows with guards share a cell of the transition table.
 
-**Platform notes**
+Platform notes:
 
 - **Dependencies:** none.
-- **Ubuntu / CI:** TODO at release.
-- **macOS:** untested.
-- **Windows:** untested.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 182 checks,
+  with `CC=gcc-13`; the gallery's new machines run in Chrome Headless Shell and
+  looked at at three page widths, and the PDF page through Typst. The Check
+  workflow passes.
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
 
 ## 2.10.0 (2026-11-04)
 
