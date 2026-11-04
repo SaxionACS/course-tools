@@ -14,7 +14,7 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.10.0 (unreleased)
+## 2.10.0 (2026-11-04)
 
 A new widget, `type: pwm`: one slice of the RP2040's PWM. Students change the
 wrap, the channel levels and the clock divider, and see the counter, the
@@ -45,10 +45,11 @@ levels and the outputs follow.
 Platform notes:
 
 - **Dependencies:** none.
-- **Ubuntu / CI:** `scripts/check.py` passes locally in WSL (181 checks, with
-  PDFs and gcc 13); the Check workflow has not run on this yet.
-- **macOS:** untested.
-- **Windows:** untested.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 181 checks,
+  with `CC=gcc-13`; the PDF pictures looked at in a real build through Typst.
+  The Check workflow passes.
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
 
 ## 2.9.0 (2026-11-02)
 
