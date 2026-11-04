@@ -929,12 +929,18 @@ states:
 
 - `inputs:` and `outputs:` declare buttons, pins, LEDs and buzzers by name.
 - Each state has `entry:` actions (`LED on`, `print "Ready"`,
-  `start T 10 s`, `send pressed`), an optional `do: blink LED 500 ms`, and
+  `start T 10 s`, `send pressed`), an optional `do: blink LED 500 ms`, optional
+  `exit:` actions, and
   `on:` with its arrows: `event: TARGET`, `event: TARGET / actions`, or
   `event: / actions` (an internal action). The diagram shows `|` instead of
   `/`: `pressed | LED on`.
 - Events are inputs (`pressed`, `KEY released`, `pin high for 50 ms`), timers
   that run out, `after 10 s`, and events that another machine sends.
+- `variables:` declare numbers and booleans that the machine remembers. Actions
+  change them (`lap++`, `stored += now - run_start`), `print "Lap {lap}"` shows
+  them, and guards read them: `after 2 s [attempt < 5]: READY`. An event can
+  have a value: `set_blinking: button [100, 500]`, with the arrow
+  `set_blinking(period): BLINKING / interval = period`.
 
 Everything a state machine can do, and how it behaves, is in
 [State machines](statemachines.md). The course template has a gallery of

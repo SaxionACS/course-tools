@@ -115,8 +115,8 @@ def data(machines: list[Widget], cache: Path | None, editable: bool = False) -> 
             if editable and m.config.get("editable") is True:
                 entry["yaml"] = m.text
         if not error:
-            for k in ("title", "task"):
-                if r.get(k) is not None:
+            for k in ("title", "task", "notes"):
+                if r.get(k):
                     entry[k] = r[k]
             if r.get("machines"):
                 entry["machines"] = [{k: v for k, v in pic.items() if v is not None} for pic in r["machines"]]

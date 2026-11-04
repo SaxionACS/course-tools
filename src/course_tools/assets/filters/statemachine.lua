@@ -119,6 +119,7 @@ local function typst(entry, id)
   end
   if entry.title then blocks:insert(pandoc.Para(pandoc.Strong(pandoc.Inlines(entry.title)))) end
   if entry.task then blocks:insert(pandoc.Para(pandoc.Inlines(entry.task))) end
+  for _, note in ipairs(entry.notes or {}) do blocks:insert(pandoc.Para(pandoc.Inlines(note))) end
   local dash = false
   for _, m in ipairs(entry.machines) do
     -- the title of a machine stays on the page of its picture
@@ -126,6 +127,7 @@ local function typst(entry, id)
     if m.title then blocks:insert(pandoc.Para(pandoc.Emph(pandoc.Inlines(m.title)))) end
     blocks:insert(picture(m))
     blocks:insert(pandoc.RawBlock('typst', ']'))
+    if m.note then blocks:insert(pandoc.Para(pandoc.Inlines(m.note))) end
     if m.table then
       blocks:insert(transitions(m.table))
       for _, row in ipairs(m.table.rows) do

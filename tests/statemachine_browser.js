@@ -89,9 +89,9 @@ try {
     status: n => T.block(n).querySelector('.sm-status')?.textContent,
   }, true)`);
 
-  ok(await js(`document.querySelectorAll('.course-statemachine').length`) === 6, 'a block for every ```statemachine on the page');
-  ok(await js(`document.querySelectorAll('.course-statemachine .sm-svg').length`) === 5,
-    'every machine is drawn: one, two side by side, one, and the one with warnings');
+  ok(await js(`document.querySelectorAll('.course-statemachine').length`) === 7, 'a block for every ```statemachine on the page');
+  ok(await js(`document.querySelectorAll('.course-statemachine .sm-svg').length`) === 6,
+    'every machine is drawn: one, two side by side, one, the one with warnings, and the one with variables');
   ok(await js(`T.block(3).querySelector('.sm-error')?.textContent`) === 'This state machine cannot be shown: state A, on presed: presed is not an input, a timer or an event that a machine sends. A button? Add it under inputs:, e.g. inputs: {presed: button}',
     'a machine with a mistake shows the mistake');
   ok(await js(`T.block(5).querySelector('.sm-error')?.textContent.startsWith('This state machine cannot be shown: the YAML cannot be read')`),
@@ -156,6 +156,49 @@ try {
   await sleep(600);
   ok(await js(`T.state(2)`) === 'STOPPED' && await js(`T.text(2)`) === 'reset\nrunning\nlap\nstopped' && await js(`T.led(2, 'LED')`) === true,
     'stopwatch: entry actions on lines without dashes all run', await js(`T.text(2)`));
+
+  // variables, guards, a button with values, exit actions; on screen, because a block off screen pauses
+  await js(`(T.block(6).scrollIntoView(), true)`);
+  await sleep(200);
+  const vars = () => js(`[...T.block(6).querySelectorAll('.sm-var')].map(r => r.querySelector('.nm').textContent + '=' + r.querySelector('.val').textContent).join()`);
+  ok(await vars() === 'interval=500,count=0', 'variables: a row per variable, with its first value', await vars());
+  ok(await js(`[...T.block(6).querySelectorAll('.sm-evval .sm-val option')].map(o => o.textContent).join()`) === '200,1000',
+    'a button with values: a list of them next to the button');
+  ok(await js(`T.block(6).querySelectorAll('.sm-val').length`) === 1, 'only the button with values has a list');
+  ok(await js(`[...T.block(6).querySelectorAll('.sm-stack .sm-cap')].map(c => c.textContent).join()`) === 'Variables,Timers'
+    && await js(`(() => { const r = s => T.block(6).querySelector(s).getBoundingClientRect(); return r('.sm-timers').left === r('.sm-vars').left && r('.sm-timers').top > r('.sm-vars').bottom; })()`),
+    'the timers are right under the variables, in one column');
+  ok(!await js(`!!T.block(2).querySelector('.sm-stack')`), 'without variables, the timers have a place of their own, as before');
+  await js(`T.click(6, 'finish')`);
+  ok(await js(`T.status(6)`) === 'finish is ignored: [count >= 2] is false.' && (await js(`T.log(6)`)).includes('[count >= 2] false') && await js(`T.state(6)`) === 'OFF',
+    'guard: a press with a false guard is ignored, and the page says why', await js(`T.status(6)`));
+  await js(`T.click(6, 'count_it')`);
+  await js(`T.click(6, 'count_it')`);
+  ok(await vars() === 'interval=500,count=2' && await js(`T.text(6)`) === 'count 1\ncount 2', 'variables: an internal action counts, and print shows the value', `${await vars()}: ${await js(`T.text(6)`)}`);
+  ok(await js(`[...T.block(6).querySelectorAll('.sm-var.changed .nm')].map(n => n.textContent).join()`) === 'count', 'variables: a value that changes lights up');
+  await js(`((T.block(6).querySelector('.sm-val').selectedIndex = 1), true)`);
+  ok(await js(`T.state(6)`) === 'OFF' && !(await js(`T.log(6)`)).includes('set_blinking'), 'a button with values: choosing a value sends nothing');
+  await js(`T.click(6, 'set_blinking')`);
+  ok(await vars() === 'interval=1000,count=2' && (await js(`T.log(6)`)).includes('set_blinking(1000): OFF -> BLINKING'),
+    'a button with values: the button sends the chosen value; the arrow keeps it in a variable', await js(`T.log(6)`));
+  await sleep(600);
+  ok(await js(`T.state(6)`) === 'BLINKING' && await js(`T.led(6, 'LED')`) === true, 'a time from a variable: the LED is on, BLINKING is lit');
+  for (let k = 0; k < 40 && await js(`T.led(6, 'LED')`); k++) await sleep(100);
+  ok(await js(`T.led(6, 'LED')`) === false && await js(`T.state(6)`) === 'BLINKING' && (await js(`T.log(6)`)).includes('next_toggle in BLINKING: LED toggle'),
+    'a time from a variable: the internal action toggles the LED and stays in BLINKING');
+  await js(`T.click(6, 'stop_it')`);
+  ok((await js(`T.text(6)`)).endsWith('left blinking') && await js(`T.state(6)`) === 'BLINKING',
+    'exit actions: done when the dot leaves, while the state is still lit', await js(`T.text(6)`));
+  ok((await js(`[...T.block(6).querySelectorAll('.act.glow')].map(t => t.textContent).join(' | ')`)).includes('exit: stop next_toggle, | print "left blinking"'),
+    'exit actions: their lines light up', await js(`[...T.block(6).querySelectorAll('.act.glow')].map(t => t.textContent).join(' | ')`));
+  await sleep(600);
+  ok(await js(`T.state(6)`) === 'OFF', 'exit actions: then OFF is entered');
+  await js(`T.click(6, 'finish')`);
+  await sleep(600);
+  ok(await js(`T.state(6)`) === 'DONE' && (await js(`T.text(6)`)).endsWith('done at 2'), 'guard: a press with a true guard');
+  await js(`T.click(6, 'Reset')`);
+  ok(await vars() === 'interval=500,count=0' && await js(`T.state(6)`) === 'OFF', 'Reset brings back the first values', await vars());
+  ok(await js(`T.block(6).querySelector('.sm-val').selectedIndex`) === 1, 'Reset keeps the choice in the list, as it keeps the bounce checkbox');
   await sleep(300);
   ok(!session.errors.length, 'no script errors in the page', session.errors.join('\n'));
 } catch (e) {

@@ -14,6 +14,43 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.11.0 (unreleased)
+
+State machines get what week 4 of the embedded course calls *extended state*:
+variables, guards, events with a value, and exit actions.
+
+- `variables:` with whole numbers and `true`/`false`, at the top of a block
+  (shared by all machines) or under a machine (its own, like the fields of its
+  `struct`). Actions change them: `lap = 1`, `lap++`, `stored += now - run_start`.
+  Expressions have C's operators and order, and C's whole-number division. `now`
+  is the time in ms. On the website, a panel shows the values.
+- `print "Lap {lap}: {time:s}"` prints values; `:s` prints ms as seconds.
+- Guards: `pressed [count < 3]: NEXT`, `after 2 s [attempt == 5]: SUMMARY`. The
+  arrows of a state are tried in order, as `if` and `else if`. An arrow fires
+  in the first moment that its event and guard are both true, as in a superloop:
+  a press with a false guard is lost, and a timeout waits for its guard
+  (`if (request && time_reached(t))`).
+- Events with a value: `set_blinking: button [100, 500, 1000]` is a button with
+  a list next to it, `send set_blinking(250)` sends one, and the arrow
+  `set_blinking(period): BLINKING / interval = period` names it.
+- Times from a variable: `start T interval ms`, `after delay * 2 ms`,
+  `blink LED interval ms`.
+- Exit actions: `exit:` in a state. The order is exit, arrow, entry.
+- New warnings: an internal action on `after` (it runs only once), an arrow back
+  into its own state whose change the entry actions undo, an arrow that can never
+  fire, a variable that no state uses, a button whose values no arrow names.
+- `after` timers and blinking now start after the entry actions, so an entry
+  action can set a time they read. Nothing changes for existing machines.
+- In the PDF: the first values of the variables and the values of buttons, and
+  arrows with guards share a cell of the transition table.
+
+**Platform notes**
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** TODO at release.
+- **macOS:** untested.
+- **Windows:** untested.
+
 ## 2.10.0 (2026-11-04)
 
 A new widget, `type: pwm`: one slice of the RP2040's PWM. Students change the

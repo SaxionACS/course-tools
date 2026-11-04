@@ -68,6 +68,43 @@ const EX = {
       GREEN: {entry: 'RED off, GREEN on', on: {request: 'AMBER', 'after 8 s': 'AMBER', fault: 'FAULT'}},
       AMBER: {entry: 'GREEN off, AMBER on', on: {'after 1.5 s': 'RED', fault: 'FAULT', request: 'AMBER'}},
       FAULT: {entry: 'RED off, GREEN off', do: 'blink AMBER 500 ms', on: {repair: 'RED / print "repaired"'}}}},
+  // an internal action on a named timer, and an exit action
+  blinker: {title: 'The blinker', inputs: {led_set_on: 'button', led_set_off: 'button', led_set_blinking: 'button'}, outputs: {LED: 'amber led'},
+    states: {BLINKER_OFF: {entry: 'LED off', on: {led_set_on: 'BLINKER_ON', led_set_blinking: 'BLINKER_BLINKING'}},
+      BLINKER_ON: {entry: 'LED on', on: {led_set_off: 'BLINKER_OFF', led_set_blinking: 'BLINKER_BLINKING'}},
+      BLINKER_BLINKING: {entry: 'LED on, start next_toggle 500 ms', exit: 'stop next_toggle',
+        on: {led_set_off: 'BLINKER_OFF', led_set_on: 'BLINKER_ON', led_set_blinking: 'BLINKER_BLINKING', next_toggle: '/ LED toggle, start next_toggle 500 ms'}}}},
+  // an event with a value, kept in a variable, which a time reads
+  adjustable: {title: 'The adjustable blinker', inputs: {led_set_on: 'button', led_set_blinking: 'button [100, 500, 1000]'}, outputs: {LED: 'amber led'},
+    variables: {interval: 500},
+    states: {BLINKER_ON: {entry: 'LED on', on: {'led_set_blinking(period)': 'BLINKER_BLINKING / interval = period'}},
+      BLINKER_BLINKING: {entry: 'LED on, start next_toggle interval ms', exit: 'stop next_toggle',
+        on: {led_set_on: 'BLINKER_ON', 'led_set_blinking(period)': 'BLINKER_BLINKING / interval = period', next_toggle: '/ LED toggle, start next_toggle interval ms'}}}},
+  // lesson 2's stopwatch, with its numbers
+  numbers: {title: 'The stopwatch', direction: 'TB', text: 'terminal', inputs: {START: 'button', LAP: 'button'}, outputs: {LED: 'green led'},
+    variables: {stored: 0, run_start: 0, lap: 1},
+    states: {SW_RESET: {entry: 'stored = 0, lap = 1, LED off, print "reset"', on: {START: 'SW_RUNNING'}},
+      SW_RUNNING: {entry: 'run_start = now', do: 'blink LED 250 ms', exit: 'stored += now - run_start',
+        on: {START: 'SW_STOPPED', LAP: '/ print "Lap {lap}: {stored + now - run_start:s}", lap++'}},
+      SW_STOPPED: {entry: 'LED on, print "Stopped at {stored:s}"', on: {START: 'SW_RUNNING', LAP: 'SW_RESET'}}}},
+  // two arrows for one timeout, chosen by guards
+  rounds: {title: 'Rounds', inputs: {pressed: 'button'}, variables: {attempt: 0}, text: 'terminal',
+    states: {READY: {entry: 'print "Attempt {attempt + 1} of 3"', on: {pressed: 'RESULT / attempt++'}},
+      RESULT: {on: {'after 2 s [attempt < 3]': 'READY', 'after 2 s [attempt == 3]': 'SUMMARY'}},
+      SUMMARY: {entry: 'print "done"', on: {pressed: 'READY / attempt = 0'}}}},
+  // a timeout that waits for its guard: the minimum green of a pedestrian crossing
+  crossing: {title: 'The crossing', inputs: {pressed: 'button', withdrawn: 'button'}, outputs: {WAIT: 'amber led'}, variables: {request: false},
+    states: {GREEN: {on: {pressed: '/ request = true, WAIT on', withdrawn: '/ request = false, WAIT off', 'after 8 s [request]': 'AMBER'}},
+      AMBER: {on: {'after 2 s': 'GREEN / request = false, WAIT off'}}}},
+  // guards on one event: a count instead of a state per count; the last arrow has no guard
+  lock: {title: 'Three presses', inputs: {pressed: 'button'}, outputs: {LED: 'green led'}, variables: {count: 0},
+    states: {LOCKED: {entry: 'LED off', on: {'pressed [count < 2]': '/ count++', pressed: 'OPEN / count = 0'}},
+      OPEN: {entry: 'LED on', on: {'after 3 s': 'LOCKED'}}}},
+  // each machine has its own n; total is shared; a machine sends a value to the other
+  pair: {title: 'Two machines', inputs: {go: 'button'}, variables: {total: 0},
+    machines: {
+      a: {variables: {n: 0}, states: {A: {on: {go: '/ n++, total++, send add(n * 10)'}}}},
+      b: {variables: {n: 100}, states: {B: {on: {'add(x) [x < 30]': '/ n += x, total += 1', 'add(x)': 'C / n = x'}}, C: {}}}}},
 };
 const run = (id, config = EX[id]) => {
   const log = [];
@@ -97,7 +134,8 @@ for (const [id, config] of Object.entries(EX)) {
   // the speed buttons: from the times of the machine, or from speeds:
   const auto = Object.fromEntries(Object.keys(EX).map(id => [id, read(EX[id]).speeds.map(I.speedLabel).join(' ')]));
   const want = {switch: '1×', staircase: '1× 2× 5× 10×', staircase2: '1× 2× 5× 10×', alarm: '1× 2× 5× 10×', button: '1/100× 1/10× 1×',
-    side: '1×', stopwatch: '1×', long: '1×', kitchen: '1× 2× 5×', traffic: '1× 2× 5×'};
+    side: '1×', stopwatch: '1×', long: '1×', kitchen: '1× 2× 5×', traffic: '1× 2× 5×', blinker: '1×', adjustable: '1×', numbers: '1×', rounds: '1× 2×',
+    crossing: '1× 2× 5×', lock: '1× 2×', pair: '1×'};
   ok(JSON.stringify(auto) === JSON.stringify(want), 'speed buttons: slower for short times and bounces, faster for long times', JSON.stringify(auto));
   ok(I.autoSpeeds([50]).join() === '0.1,1' && I.autoSpeeds([60000]).join() === '1,10,20,50' && I.autoSpeeds([1500, 2500]).join() === '1,2',
     'speed buttons: 1/10 under 100 ms, up to three speed-ups', [I.autoSpeeds([50]), I.autoSpeeds([60000]), I.autoSpeeds([1500, 2500])].join(' / '));
@@ -163,8 +201,85 @@ c = copy(EX.switch); c.transition = '10 s'; bad(c, /transition: "10 s" is not a 
 c = copy(EX.switch); c.log = 'closed'; bad(c, /log: is open, folded or hidden/, 'log: closed');
 c = copy(EX.switch); c.colour = 'red'; bad(c, /unknown key "colour"/, 'an unknown key');
 c = copy(EX.staircase); c.states.LIGHT_ON.on = {'after 10': 'LIGHT_OFF'}; bad(c, /"10" is not a time/, 'a time without a unit');
-c = copy(EX.staircase); c.states.LIGHT_ON.on = {'[t > 10]': 'LIGHT_OFF'}; bad(c, /guards .* come in a later version/, 'a guard');
+c = copy(EX.staircase); c.states.LIGHT_ON.on = {'[t > 10]': 'LIGHT_OFF'}; bad(c, /a guard needs an event in front of it/, 'a guard without an event');
 c = copy(EX.button); c.machines.button.states.RELEASED.on = {'pin high for 10..50 ms': 'PRESSED'}; bad(c, /a random time .* is not possible here/, 'a random held time');
+// variables, guards and values
+const vm = (variables, A, more = {}) => Object.assign({inputs: {b: 'button'}, variables, states: {A}}, more);
+bad(vm({n: 0}, {on: {b: '/ m++'}}), /there is no variable m \(variables: n\)/, 'a variable with a typo');
+bad({inputs: {b: 'button'}, states: {A: {entry: 'n = 1', on: {b: 'A'}}}}, /there is no variable n. Add it under variables:/, 'a variable that is not declared');
+bad(vm({n: 1.5}, {}), /"1.5" is not a value. A variable starts as a whole number or as true or false/, 'a variable that starts as a fraction');
+bad(vm({n: '500 ms'}, {}), /"500 ms" is not a value/, 'a variable that starts as a time');
+bad(vm({now: 0}, {}), /"now" is a word of the state machine language/, 'a variable named now');
+bad(vm({start: 0}, {}), /"start" is a word of the state machine language/, 'a variable named like an action');
+bad(vm({b: 0}, {}), /b is an input too/, 'a variable named like an input');
+bad(vm({n: 0}, {entry: 'start n 1 s', on: {b: 'A'}}), /n is a timer and a variable/, 'a variable named like a timer');
+bad(vm({n: 0}, {on: {'b [n]': 'A'}}), /the guard \[n\] is a number, and a guard is true or false. Write for example \[n > 0\]/, 'a guard that is a number');
+bad(vm({n: true}, {on: {'b [n > 0]': 'A'}}), /"n > 0": > works on numbers, and n is true or false/, 'a boolean compared as a number');
+bad(vm({n: 0, f: true}, {on: {'b [n == f]': 'A'}}), /== compares two values of one kind/, 'a number compared with a boolean');
+bad(vm({n: 0}, {on: {'b [n && true]': 'A'}}), /&& works on true or false, and n is a number/, 'a number in a logical and');
+bad(vm({f: true}, {entry: 'f++', on: {b: 'A'}}), /"f\+\+": f is true or false, not a number/, '++ on a boolean');
+bad(vm({n: 0}, {entry: 'n = true', on: {b: 'A'}}), /"n = true": n is a number, and true is true or false/, 'a boolean in a number');
+bad(vm({f: true}, {entry: 'f += 1', on: {b: 'A'}}), /"f \+= 1": \+= works on numbers/, '+= on a boolean');
+bad(vm({n: 0}, {entry: 'n = 1.5', on: {b: 'A'}}), /a value is a whole number here. Count in ms: 1500, not 1.5/, 'a fraction in an expression');
+bad(vm({n: 0}, {entry: 'n = (1 + 2', on: {b: 'A'}}), /a \) is missing/, 'a bracket that is not closed');
+bad(vm({n: 0}, {entry: 'n = ', on: {b: 'A'}}), /"" is not a value/, 'an assignment without a value');
+bad(vm({n: 0}, {on: {'b [n > ]': 'A'}}), /"" is not a value/, 'a guard that stops halfway');
+bad(vm({n: 0}, {on: {'b [n > 0 n]': 'A'}}), /the guard \[n > 0 n\] cannot be read after "n > 0"/, 'a guard with something behind it');
+bad(vm({n: 0}, {entry: 'print "{n"', on: {b: 'A'}}), /print: \{ starts a value and needs a \}/, 'a print with a value that is not closed');
+bad(vm({n: 0}, {entry: 'print "{m}"', on: {b: 'A'}}), /there is no variable m/, 'a print with a variable that does not exist');
+bad(vm({f: true}, {entry: 'print "{f:s}"', on: {b: 'A'}}), /only a number can be a time/, 'a boolean as a time');
+bad(vm({f: true}, {entry: 'start T f ms', on: {b: 'A', T: 'A'}}), /a time is a number, and f is true or false/, 'a boolean as a time of a timer');
+bad(vm({n: 0}, {entry: 'start T n', on: {b: 'A', T: 'A'}}), /start needs a timer and a time/, 'a time from a variable without a unit');
+bad(vm({n: 0}, {on: {'after n': 'A', b: 'A'}}), /"n" is not a time/, 'an after from a variable without a unit');
+bad(vm({n: 0}, {on: {'after 1 s [now > 5]': 'A', b: 'A'}}), /uses now, on an event that waits for its guard/, 'a timeout with a guard on now');
+bad(vm({n: 0}, {entry: 'start T 1 s', on: {'T [now > 5]': 'A', b: 'A'}}), /uses now, on an event that waits for its guard/, 'a timer with a guard on now');
+bad({inputs: {b: 'button'}, outputs: {L: 'led'}, variables: {n: 0}, states: {A: {do: 'n = 1', on: {b: 'A'}}}}, /"n =" cannot be a do activity/, 'an assignment under do:');
+bad({inputs: {b: 'button'}, outputs: {L: 'led'}, variables: {n: 1}, states: {A: {entry: 'blink L n ms', on: {b: 'A'}}}}, /blink is a do activity/, 'blink with a variable under entry:');
+bad({inputs: {b: 'button'}, machines: {x: {variables: {n: 0}, states: {A: {on: {b: 'A'}}}}, y: {states: {B: {entry: 'n = 1'}}}}}, /n is a variable of machine x. A machine sees only its own/, 'a variable of another machine');
+bad({inputs: {b: 'button'}, variables: {n: 0}, machines: {x: {variables: {n: 0}, states: {A: {on: {b: 'A'}}}}}}, /n is under the variables of the block too/, 'a name for a shared and an own variable');
+bad({inputs: {b: 'button [1, 2]'}, states: {A: {on: {'b(x)': '/ y = x'}}}}, /there is no variable y/, 'an arrow that assigns to something undeclared');
+bad({inputs: {b: 'button [1, 2]'}, variables: {y: 0}, states: {A: {entry: 'y = x', on: {'b(x)': 'A'}}}}, /there is no variable x/, 'a parameter outside its arrow');
+bad({inputs: {b: 'button'}, states: {A: {on: {'b(x)': 'A'}}}}, /b has no value to call x. Give the button its values/, 'a parameter of a button without values');
+bad({inputs: {b: 'button'}, states: {A: {entry: 'start T 1 s', on: {b: 'A', 'T(x)': 'A'}}}}, /T is a timer: it has no value to call x/, 'a parameter of a timer');
+bad({inputs: {b: 'button'}, states: {A: {on: {b: 'A / send e', 'e(x)': 'A'}}}}, /send e has no value, but .* calls it x. Write send e\(1\)/, 'a parameter of a send without a value');
+bad({inputs: {k: 'hold button'}, states: {A: {on: {'k(x)': 'A'}}}}, /k is a hold button: only a button can have a value/, 'a parameter of a hold button');
+bad({inputs: {b: 'button [1, 2]'}, variables: {x: 0}, states: {A: {on: {'b(x)': 'A'}}}}, /the parameter x has the name of a variable/, 'a parameter named like a variable');
+bad({inputs: {b: 'button [1, 2]'}, variables: {f: true}, states: {A: {on: {'b(x)': '/ f = x'}}}}, /"f = x": f is true or false, and x is a number/, 'a number parameter in a boolean');
+bad({inputs: {b: 'button'}, states: {A: {on: {b: '/ send e(1), send e(true)', 'e(x)': 'A'}}}}, /send e\(true\): the values of e are a number, and true is true or false/, 'two kinds of values for one event');
+bad({inputs: {b: 'button [1, true]'}, states: {A: {on: {'b(x)': 'A'}}}}, /all values are numbers, or all are true and false/, 'values of two kinds');
+bad({inputs: {b: 'button [1, 1]'}, states: {A: {on: {'b(x)': 'A'}}}}, /a value appears twice/, 'a value twice');
+bad({inputs: {b: 'button [one]'}, states: {A: {on: {'b(x)': 'A'}}}}, /"one" is not a value/, 'a value that is a word');
+bad({inputs: {b: 'button []'}, states: {A: {on: {b: 'A'}}}}, /the list of values is empty/, 'an empty list of values');
+bad({inputs: {b: 'hold button [1]'}, states: {A: {}}}, /only a button can send a value/, 'values on a hold button');
+{
+  const w = read({inputs: {b: 'button [1, 2]', c: 'button'}, outputs: {L: 'led'}, variables: {unused: 0, used: 0},
+    states: {A: {on: {b: 'A', 'after 1 s': '/ L toggle', c: 'A', 'c [used > 0]': 'A'}}}}).warnings.join('\n');
+  ok(['variable unused is not used in any state', 'input b has values, but no arrow gives its value a name',
+    'state A, on after 1 s: an internal action on after runs only once', 'tick: / …, start tick 1 s',
+    'state A, on c [used > 0]: this arrow can never fire, because the arrow for c above it has no guard'].every(s => w.includes(s)), 'warnings about variables, values, guards and an internal after', w);
+  const quiet = read({inputs: {b: 'button'}, machines: {x: {variables: {n: 0}, states: {A: {on: {b: 'A', 'after 1..2 s': 'A', 'after 1..2 s [n > 0]': 'A'}}}}}}).warnings.join('\n');
+  ok(!/never fire/.test(quiet), 'no warning for random times, which each arrow draws by itself', quiet);
+  // an arrow back into the state, whose entry actions undo what the arrow did
+  const self = (arrow, entry, more = {}) => read({inputs: {b: 'button'}, outputs: {L: 'led', M: 'led'}, states: {A: {entry, on: {b: 'A', ...arrow}}, ...more}}).warnings.filter(x => /goes back into/.test(x));
+  const trap = self({'after 500 ms': 'A / L toggle'}, 'L on, M on');
+  ok(trap.length === 1 && trap[0].includes('state A, on after 500 ms: this arrow goes back into A, so its entry action L on runs right after L toggle, and the change never shows.')
+    && trap[0].includes('use a named timer: tick: / L toggle, start tick 500 ms'), 'warning: an arrow back into the state whose entry undoes its toggle', trap.join());
+  const press = read({inputs: {b: 'button'}, outputs: {L: 'led'}, states: {A: {entry: 'L on', on: {b: 'A / L off'}}}}).warnings.join();
+  ok(press.includes('its entry action L on runs right after L off') && press.includes('use an internal action: b: / L off'), 'warning: for an event, it proposes an internal action', press);
+  ok(self({'after 1 s': 'A / L toggle'}, 'L toggle').length === 1, 'warning: two toggles cancel each other out');
+  ok(self({'after 1 s': 'A / L on, L toggle'}, 'L off').length === 2, 'warning: for every action on that output that differs');
+  for (const [what, arrow, entry, more] of [
+    ['no entry action on that output: this blinks', {'after 500 ms': 'A / L toggle'}, 'M on'],
+    ['no entry actions', {'after 500 ms': 'A / L toggle'}, undefined],
+    ['the same value', {'after 1 s': 'A / L on'}, 'L on'],
+    ['an entry toggle after an arrow that sets the value: the arrow decides', {'after 1 s': 'A / L on'}, 'L toggle'],
+    ['an internal action: no entry actions run', {'after 500 ms': '/ L toggle'}, 'L on'],
+    ['an arrow to another state', {'after 500 ms': 'B / L toggle'}, 'L on', {B: {entry: 'L off'}}],
+  ]) ok(self(arrow, entry, more).length === 0, `no such warning: ${what}`, self(arrow, entry, more).join());
+  ok(read(EX.blinker).warnings.length === 0, 'no warning for the blinker with an internal action on a named timer');
+  const unusedOwn = read({inputs: {b: 'button'}, machines: {x: {variables: {n: 0}, states: {A: {on: {b: 'A'}}}}}}).warnings.join('\n');
+  ok(unusedOwn.includes('machine x: variable n is not used in any state'), 'a warning for a machine\'s own variable', unusedOwn);
+}
 {
   const m = read({inputs: {b: 'button', x: 'button'}, outputs: {L: 'led', Q: 'buzzer'},
     states: {A: {entry: 'start T 1 s, stop U, send e', on: {b: 'A'}}, B: {}}});
@@ -260,6 +375,154 @@ for (const id of ['staircase', 'staircase2']) {
   b: {states: {B: {on: {y: 'B / send x'}}}}}});
   sim.dispatch('go'); ok(log.some(e => e.error && /Over 500 events/.test(e.error)), 'machines that send each other events forever are stopped'); }
 
+// ---- exit actions --------------------------------------------------------
+{ // the order: exit, arrow, entry. An internal action runs none of them; an arrow back to the state runs both.
+  const {sim} = run('order', {text: 'terminal', inputs: {b: 'button', i: 'button', s: 'button'},
+    states: {A: {entry: 'print "A entry"', exit: 'print "A exit"', on: {b: 'B / print "arrow"', i: '/ print "internal"', s: 'A / print "self"'}}, B: {entry: 'print "B entry"'}}});
+  sim.lines.length = 0;
+  sim.dispatch('i'); ok(sim.lines.join('|') === 'internal', 'exit: an internal action runs no exit or entry', sim.lines.join('|'));
+  sim.lines.length = 0;
+  sim.dispatch('s'); ok(sim.lines.join('|') === 'A exit|self|A entry', 'exit: an arrow back to the state runs exit, the arrow and entry', sim.lines.join('|'));
+  sim.lines.length = 0;
+  sim.dispatch('b'); ok(sim.lines.join('|') === 'A exit|arrow|B entry', 'exit: exit, then the arrow, then entry', sim.lines.join('|')); }
+{ // the page hears where a change comes from, and leave comes first
+  const heard = [];
+  const sim = new Sim(read({inputs: {b: 'button'}, outputs: {L: 'led'}, variables: {n: 0}, states: {A: {exit: 'L on, n = 5', on: {b: 'B / n++'}}, B: {entry: 'n *= 2'}}}), {
+    leave: () => heard.push('leave'), effect: (s, fx, phase) => heard.push(`${phase} ${fx.out ?? fx.variable}=${fx.value}`)}, rnd);
+  sim.dispatch('b');
+  ok(heard.join('|') === 'leave|exit L=true|exit n=5|arrow n=6|entry n=12', 'exit: the page hears exit, arrow and entry, with outputs and variables', heard.join('|')); }
+{ const {sim, st, log} = run('blinker');
+  sim.dispatch('led_set_blinking'); ok(st() === 'BLINKER_BLINKING' && sim.out.LED, 'blinker: on at the start of BLINKING');
+  sim.advance(600); ok(!sim.out.LED, 'blinker: an internal action on a named timer toggles at 500 ms');
+  sim.advance(1100); ok(sim.out.LED && st() === 'BLINKER_BLINKING', 'blinker: and again at 1000 ms, without leaving the state');
+  sim.advance(1600); ok(!sim.out.LED, 'blinker: and at 1500 ms');
+  sim.dispatch('led_set_off'); ok(st() === 'BLINKER_OFF' && sim.timers.next_toggle === null, 'blinker: exit: stop next_toggle');
+  sim.advance(3000); ok(!log.some(e => e.ignored), 'blinker: with the exit action, no timer runs out in another state'); }
+// ---- values of events ----------------------------------------------------
+{ const {sim, st, log} = run('adjustable');
+  ok(sim.shared.interval === 500, 'adjustable: a variable starts with its value');
+  sim.dispatch('led_set_blinking', 'input', 100);
+  ok(st() === 'BLINKER_BLINKING' && sim.shared.interval === 100, 'adjustable: the value of the event, in a variable');
+  ok(log.at(-1).cause === 'led_set_blinking(100)', 'adjustable: the log shows the value', log.at(-1).cause);
+  sim.advance(150); ok(!sim.out.LED, 'adjustable: toggles after 100 ms');
+  sim.advance(250); ok(sim.out.LED, 'adjustable: and after 200 ms');
+  sim.dispatch('led_set_blinking', 'input', 1000);
+  ok(sim.shared.interval === 1000 && sim.timers.next_toggle.total === 1000, 'adjustable: a new value, while blinking; the timer starts over', JSON.stringify(sim.timers.next_toggle));
+  sim.reset(); ok(sim.shared.interval === 500 && st() === 'BLINKER_ON', 'adjustable: a reset brings back the first value'); }
+{ const {sim, st, log} = run('pair');
+  sim.dispatch('go');
+  ok(sim.ms[0].vars.n === 1 && sim.ms[1].vars.n === 110 && sim.shared.total === 2, 'pair: each machine has its own n; total is shared; a value is sent', JSON.stringify([sim.values()]));
+  ok(JSON.stringify(sim.values()) === '{"total":2,"a.n":1,"b.n":110}', 'pair: the variables as the page sees them', JSON.stringify(sim.values()));
+  sim.dispatch('go'); ok(sim.ms[1].vars.n === 130 && st(1) === 'B', 'pair: a guard reads the value of the event');
+  sim.dispatch('go'); ok(sim.ms[1].vars.n === 30 && st(1) === 'C', 'pair: the next arrow, without a guard, when the guard is false');
+  ok(log.some(e => e.cause === 'add(30)'), 'pair: the log shows the value of a sent event'); }
+// ---- guards --------------------------------------------------------------
+{ const {sim, st} = run('lock');
+  sim.dispatch('pressed'); sim.dispatch('pressed'); ok(st() === 'LOCKED' && sim.shared.count === 2, 'lock: the guard is true twice: internal actions');
+  sim.dispatch('pressed'); ok(st() === 'OPEN' && sim.shared.count === 0 && sim.out.LED, 'lock: then the arrow without a guard'); }
+{ const {sim, st, log} = run('rounds');
+  for (let k = 0; k < 3; k++) { ok(st() === 'READY', `rounds: attempt ${k + 1}`); sim.dispatch('pressed'); sim.advance(sim.t + 2100); }
+  ok(st() === 'SUMMARY' && sim.lines.join('|') === 'Attempt 1 of 3|Attempt 2 of 3|Attempt 3 of 3|done', 'rounds: guards choose between two arrows for one timeout', sim.lines.join('|'));
+  ok(!log.some(e => e.waiting), 'rounds: one of the guards is always true, so nothing waits');
+  sim.dispatch('pressed'); ok(st() === 'READY' && sim.shared.attempt === 0 && sim.lines.at(-1) === 'Attempt 1 of 3', 'rounds: the arrow starts a new round'); }
+{ // a press with a false guard is lost: it is true for one iteration, as in C
+  const {sim, st, log} = run('gate', {inputs: {b: 'button', open: 'button'}, variables: {f: false}, states: {A: {on: {'b [f]': 'B', open: '/ f = true'}}, B: {}}});
+  sim.dispatch('b'); ok(st() === 'A' && log.at(-1).ignored && log.at(-1).guards.join() === 'f', 'guard: a press with a false guard is ignored; the log says why', JSON.stringify(log.at(-1)));
+  sim.dispatch('open'); sim.advance(sim.t + 1000); ok(st() === 'A', 'guard: a press that was lost does not come back when the guard turns true');
+  sim.dispatch('b'); ok(st() === 'B', 'guard: a press with a true guard'); }
+// A timeout waits for its guard, as time_reached() stays true: `if (request && time_reached(t))`
+{ const {sim, st} = run('crossing');
+  sim.advance(1000); sim.dispatch('pressed'); sim.advance(7900); ok(st() === 'GREEN', 'crossing: true before the deadline: not yet');
+  sim.advance(8100); ok(st() === 'AMBER' && sim.t === 8100, 'crossing: true at the deadline: it fires'); }
+{ const {sim, st, log} = run('crossing');
+  sim.advance(10000); ok(st() === 'GREEN' && log.some(e => e.waiting && e.t === 8000 && e.cause === 'after 8 s'), 'crossing: false at the deadline: it waits, and the log says when', JSON.stringify(log.at(-1)));
+  ok(sim.pending(sim.ms[0])[0].blocked && sim.soonest(sim.ms[0]) === Infinity, 'crossing: the page sees that it waits for the guard, and no time is due');
+  sim.dispatch('pressed'); sim.advance(sim.t); ok(st() === 'AMBER' && sim.t === 10000, 'crossing: the moment the guard turns true, it fires', `${st()} at ${sim.t}`); }
+{ // true from 1 to 7 s, false at the deadline: it must not fire. Earlier true values do not count.
+  const {sim, st} = run('crossing');
+  sim.advance(1000); sim.dispatch('pressed'); sim.advance(7000); sim.dispatch('withdrawn');
+  sim.advance(9000); ok(st() === 'GREEN', 'crossing: true before the deadline, false at it: it does not fire');
+  sim.dispatch('pressed'); sim.advance(sim.t); ok(st() === 'AMBER', 'crossing: and it still waits for the guard'); }
+{ // the time starts over when the machine enters the state again
+  const {sim, st} = run('crossing');
+  sim.advance(8500); sim.dispatch('pressed'); sim.advance(sim.t); ok(st() === 'AMBER', 'crossing: to AMBER');
+  sim.advance(sim.t + 2100); ok(st() === 'GREEN' && !sim.shared.request, 'crossing: back in GREEN');
+  sim.dispatch('pressed'); sim.advance(sim.t + 7000); ok(st() === 'GREEN', 'crossing: the new 8 s are not over'); }
+{ // a named timer waits for its guard as long as the machine stays in the state
+  const config = {inputs: {arm: 'button', go: 'button', other: 'button'}, variables: {f: false},
+    states: {A: {entry: 'start T 1 s', on: {'T [f]': 'B', arm: '/ f = true', go: 'A', other: 'C'}}, B: {}, C: {on: {'T': 'B', arm: '/ f = true'}}}};
+  let {sim, st, log} = run('late', config);
+  sim.advance(2000); ok(st() === 'A' && log.some(e => e.waiting && e.cause === 'T') && !log.some(e => e.ignored), 'named timer: ran out, the guard is false: it waits, and is not ignored');
+  sim.dispatch('arm'); sim.advance(sim.t); ok(st() === 'B', 'named timer: fires when the guard turns true');
+  ({sim, st, log} = run('late', config));
+  sim.advance(2000); sim.dispatch('go'); sim.dispatch('arm'); sim.advance(sim.t + 500);
+  ok(st() === 'A', 'named timer: start T ends the waiting, the time starts over');
+  sim.advance(sim.t + 600); ok(st() === 'B', 'named timer: and it runs out again');
+  ({sim, st, log} = run('late', config));
+  sim.advance(2000); sim.dispatch('other'); sim.advance(sim.t + 100); ok(st() === 'C', 'named timer: leaving the state ends the waiting'); }
+{ // a held condition waits for its guard too
+  const {sim, st} = run('held', {inputs: {KEY: 'hold button', arm: 'button'}, variables: {f: false}, states: {A: {on: {'KEY pressed for 1 s [f]': 'B', arm: '/ f = true'}}, B: {}}});
+  sim.press('KEY', true); sim.advance(1500); ok(st() === 'A', 'held: the time is over, the guard is false');
+  sim.dispatch('arm'); sim.advance(sim.t); ok(st() === 'B', 'held: fires when the guard turns true'); }
+{ // Skip ahead stops at the deadline of a guarded timeout once, and then has nothing to do
+  const {sim, st} = run('crossing');
+  const to = sim.skip(); ok(to.what === 'after 8 s [request]' && sim.t === 8000 && st() === 'GREEN', 'skip: to the deadline of a guarded timeout', JSON.stringify(to));
+  ok(sim.skip() === null, 'skip: then nothing is waiting for a time'); }
+// ---- expressions, in C's order and with C's whole numbers ------------------
+{ const value = (expr, variables = {}) => {
+    const {sim} = run('expr', {inputs: {b: 'button'}, variables: {r: 0, ...variables}, states: {A: {entry: `r = ${expr}`, on: {b: 'A'}}}});
+    return sim.shared.r;
+  };
+  for (const [expr, want] of [['2 + 3 * 4', 14], ['(2 + 3) * 4', 20], ['7 / 2', 3], ['-7 / 2', -3], ['7 % 3', 1], ['-7 % 3', -1], ['10 - 2 - 3', 5], ['2 * 3 % 4', 2], ['- 3 + 5', 2]]) {
+    ok(Object.is(value(expr) + 0, want + 0), `expression: ${expr} is ${want}`, String(value(expr)));
+  }
+  const truth = (expr, variables = {}) => {
+    const {sim} = run('truth', {inputs: {b: 'button'}, variables: {r: false, ...variables}, states: {A: {entry: `r = ${expr}`, on: {b: 'A'}}}});
+    return sim.shared.r;
+  };
+  for (const [expr, want] of [['1 < 2 && 2 < 3', true], ['1 > 2 || 2 > 3', false], ['true || false && false', true], ['!true || true', true], ['1 + 1 == 2', true], ['1 != 1', false], ['2 <= 2', true], ['2 >= 3', false], ['!(1 == 2)', true]]) {
+    ok(truth(expr) === want, `expression: ${expr} is ${want}`, String(truth(expr)));
+  }
+  const {sim, log} = run('div', {inputs: {b: 'button'}, variables: {n: 7, z: 0, f: false, r: 0, g: false},
+    states: {A: {entry: 'g = f && 1 / z == 0', on: {b: '/ r = n / z, r = n % z, n /= z'}}}});
+  ok(!log.some(e => e.error), 'expression: && stops at the first false, so 1 / z is not worked out');
+  sim.dispatch('b');
+  ok(sim.shared.r === 0 && sim.shared.n === 0 && log.filter(e => e.error).length === 3 && /division by zero/.test(log.find(e => e.error).error), 'expression: a division by zero gives 0 and a message', JSON.stringify(log.filter(e => e.error)));
+  sim.dispatch('b'); ok(log.filter(e => e.error).length === 3, 'expression: the same message only once');
+  const ops = run('ops', {inputs: {b: 'button'}, variables: {n: 10}, states: {A: {on: {b: '/ n++, n += 4, n -= 3, n *= 2, n /= 5, n %= 3, n--'}}}});
+  ops.sim.dispatch('b'); ok(ops.sim.shared.n === 0, 'expression: every kind of assignment', String(ops.sim.shared.n));
+  const twoLines = read({outputs: {L: 'led'}, variables: {n: 0}, inputs: {b: 'button'}, states: {A: {entry: 'n = n + 1 L on start T n * 2 + 1 ms stop T n++', on: {b: 'A', T: 'A'}}}}).machines[0].states.A.entry.map(a => a.src);
+  ok(twoLines.join('|') === 'n = n + 1|L on|start T n * 2 + 1 ms|stop T|n++', 'expressions: actions one after another, without commas (YAML lines without dashes)', twoLines.join('|')); }
+// ---- print with values; now; times from variables ------------------------
+{ ok([[1730, '1.73 s'], [12340, '12.34 s'], [5, '0.00 s'], [1999, '1.99 s'], [-1500, '-1.50 s'], [0, '0.00 s'], [60000, '60.00 s']].every(([ms, s]) => I.inSeconds(ms) === s),
+    ':s: a time in ms in seconds, cut off to hundredths, as lesson 2\'s stopwatch prints it');
+  const p = read({inputs: {b: 'button'}, variables: {n: 3}, states: {A: {entry: 'print "\\{n\\} is {n}, {n * 2}!"', on: {b: 'A'}}}});
+  const {sim} = run('print', {inputs: {b: 'button'}, variables: {n: 3, f: true}, states: {A: {entry: 'print "\\{n} is {n}, {n * 2}, {f}!"', on: {b: 'A'}}}});
+  ok(sim.display === '{n} is 3, 6, true!', 'print: values, and \\{ for the character', sim.display);
+  ok(p.machines[0].states.A.entry[0].parts.length > 1, 'print: a print with values is in parts'); }
+{ const {sim, st} = run('numbers');
+  ok(sim.lines.at(-1) === 'reset' && sim.shared.lap === 1, 'numbers: reset');
+  sim.dispatch('START'); ok(st() === 'SW_RUNNING' && sim.shared.run_start === 0, 'numbers: running from 0 ms');
+  sim.advance(1730); sim.dispatch('LAP');
+  ok(sim.lines.at(-1) === 'Lap 1: 1.73 s' && sim.shared.lap === 2 && st() === 'SW_RUNNING', 'numbers: lap time, as the lesson prints it, an internal action', sim.lines.at(-1));
+  sim.advance(3100); sim.dispatch('LAP'); ok(sim.lines.at(-1) === 'Lap 2: 3.10 s', 'numbers: lap 2', sim.lines.at(-1));
+  sim.advance(4020); sim.dispatch('START');
+  ok(st() === 'SW_STOPPED' && sim.shared.stored === 4020 && sim.lines.at(-1) === 'Stopped at 4.02 s', 'numbers: stopped; the exit action adds the run before the entry action prints', sim.lines.at(-1));
+  sim.advance(9000); sim.dispatch('START'); sim.advance(11530); sim.dispatch('START');
+  ok(sim.shared.stored === 6550 && sim.lines.at(-1) === 'Stopped at 6.55 s', 'numbers: resume, and the time goes on where it stopped', sim.lines.at(-1));
+  sim.dispatch('LAP'); ok(st() === 'SW_RESET' && sim.shared.stored === 0 && sim.shared.lap === 1, 'numbers: LAP resets when stopped');
+  ok(read(EX.numbers).clock, 'numbers: a machine that uses now has a clock');
+  ok(read({inputs: {b: 'button'}, variables: {t: 0}, states: {A: {on: {b: '/ t = now'}}}}).clock, 'now alone gives a machine a clock');
+  ok(!read({inputs: {b: 'button'}, variables: {t: 0}, states: {A: {on: {b: '/ t++'}}}}).clock, 'a variable alone does not'); }
+{ const {sim, st} = run('times', {inputs: {b: 'button'}, outputs: {L: 'led'}, variables: {wait: 2000},
+    states: {A: {on: {b: 'B / wait = 500'}}, B: {entry: 'wait = wait * 2', do: 'blink L wait ms', on: {'after wait ms': 'C', b: '/ start T 1 s'}}, C: {on: {b: '/ start T wait s', T: 'A'}}}});
+  sim.dispatch('b'); ok(st() === 'B' && sim.ms[0].afters[0].total === 1000 && sim.ms[0].blinks[0].period === 1000, 'times: after and blink read a variable after the entry actions', JSON.stringify(sim.ms[0].afters[0].total));
+  sim.advance(1100); ok(st() === 'C', 'times: after from a variable');
+  sim.dispatch('b'); ok(sim.timers.T.total === 1000000, 'times: a variable in seconds', String(sim.timers.T.total)); }
+{ const {sim, log} = run('zero', {inputs: {b: 'button'}, variables: {t: 0}, states: {A: {on: {b: '/ start T t ms', T: 'B'}}, B: {}}});
+  sim.dispatch('b'); ok(log.some(e => e.error && /t ms is not longer than 0/.test(e.error)) && sim.timers.T.total === 1, 'times: 0 from a variable: 1 ms and a message', JSON.stringify(log.at(-1))); }
+ok(read({inputs: {b: 'button'}, variables: {t: 60000}, states: {A: {on: {b: '/ start T t ms', T: 'A'}}}}).speeds.join() === '1,10,20,50', 'times: the speed buttons follow the first value of a variable');
+
 // ---- layout --------------------------------------------------------------
 const overlap = (a, b, gap = 0) => a.x0 < b.x1 + gap && b.x0 < a.x1 + gap && a.y0 < b.y1 + gap && b.y0 < a.y1 + gap;
 const rect = (x, y, w, hh) => ({x0: x - w / 2, x1: x + w / 2, y0: y - hh / 2, y1: y + hh / 2});
@@ -335,6 +598,20 @@ for (const [id, config] of Object.entries(EX)) {
   ok(print({states: {A: {entry: 'X on'}}}).error === 'state A, entry: there is no output X. Add it under outputs:, e.g. outputs: {X: red led}',
     'print: a mistake is the error, with no picture');
   ok(print(EX.kitchen).machines[0].svg.includes('print &quot;Cooking, wait...&quot;'), 'print: quotes in the SVG are escaped');
+  // guards, exit actions, values and variables
+  const rt = print(EX.rounds).machines[0].table;
+  ok(rt.head.join('|') === 'State|pressed|after 2 s' && rt.rows[1].join('|') === 'RESULT|–|[attempt < 3] READY; [attempt == 3] SUMMARY',
+    'print: arrows for one event with different guards share a column and a cell', JSON.stringify(rt));
+  const n = print(EX.numbers);
+  ok(n.notes.join('|') === 'Variables: stored = 0, run_start = 0, lap = 1.' && n.machines[0].note === null, 'print: the variables and what they start with', JSON.stringify(n.notes));
+  ok(n.machines[0].svg.includes('>exit: stored += now - run_start<'), 'print: an exit action in its box');
+  const a = print(EX.adjustable);
+  ok(a.notes.includes('Values of led_set_blinking: 100, 500, 1000.') && a.machines[0].svg.includes('led_set_blinking(period)')
+    && a.machines[0].table.head.includes('led_set_blinking(period)'), 'print: an event with a value', JSON.stringify(a.notes));
+  ok(print(EX.pair).machines.map(m => m.note).join('|') === 'Variables: n = 0.|Variables: n = 100.' && print(EX.pair).notes.join() === 'Variables: total = 0.', 'print: each machine\'s own variables, and the shared ones');
+  ok(print(EX.crossing).machines[0].svg.includes('after 8 s [request]'), 'print: a guard on an arrow');
+  const long = read({inputs: {set_interval: 'button [1, 2]'}, variables: {current_value: 0}, states: {A: {on: {'set_interval(x) [x > current_value]': 'A / current_value = x'}}}}).machines[0].states.A.on[0];
+  ok(I.edgeLines(long).join('|') === 'set_interval(x)|[x > current_value]|| current_value = x', 'a long guard has a line of its own', I.edgeLines(long).join('|'));
 }
 
 console.log(failed.length ? `FAILED:\n  ${failed.join('\n  ')}` : '');

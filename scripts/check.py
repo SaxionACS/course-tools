@@ -492,9 +492,9 @@ def check_statemachines(c: Checks, read, dist: Path) -> None:
     p = main_content(html)
     divs = re.findall(r'<div class="course-statemachine" id="([\w-]+)"(?: data-config="([^"]*)")?>', p)
     configs = [json.loads(htmllib.unescape(cfg)) if cfg else {} for _, cfg in divs]
-    c.ok(len(divs) == 6, "a state machine for every ```statemachine block, not for one shown inside a code block",
+    c.ok(len(divs) == 7, "a state machine for every ```statemachine block, not for one shown inside a code block",
          f"found {len(divs)}")
-    if len(divs) == 6:
+    if len(divs) == 7:
         c.ok([d[0] for d in divs[:3]] == ["statemachine-1", "debouncer", "statemachine-3"],
              "every state machine has an id: the block's own, or statemachine-<n>")
         states = configs[0].get("states", {})
@@ -789,6 +789,8 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     t = text("lessons/week_02/lesson4.pdf")
     c.ok("SM-TITLE SM-TASK" in t and "State pressed OFF ON | LED on ON OFF | LED off" in t
          and "Try it on the website." in t, "state machine PDF: title, task, picture and transition table, and a link")
+    c.ok("Variables: interval = 500, count = 0." in t and "Values of set_blinking: 200, 1000." in t and "[count >= 2] DONE" in t,
+         "state machine PDF: the first values of the variables, the values of a button, a guard in the table")
     c.ok("btn_just_pressed()" in t and "PRESSED | send pressed – PRESSED – RELEASED" in t and 'RUNNING STOPPED | print "lap"' in t,
          "state machine PDF: machines side by side, a dash for an ignored event, an internal action")
     c.ok("This state machine cannot be shown: state A, on presed" in t, "state machine PDF: a machine with a mistake says so")

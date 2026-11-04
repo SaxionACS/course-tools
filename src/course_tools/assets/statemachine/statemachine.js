@@ -107,12 +107,14 @@
   // Reading the YAML: read(config) -> model, or an Error with a message for the author
   // ========================================================================
   const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-  const TOP_KEYS = ['title', 'task', 'direction', 'text', 'log', 'speed', 'speeds', 'clock', 'transition', 'inputs', 'outputs', 'initial', 'states', 'machines', 'editable'];
-  const MACHINE_KEYS = ['title', 'direction', 'initial', 'states', 'folded'];
-  const STATE_KEYS = ['entry', 'do', 'on'];
+  const TOP_KEYS = ['title', 'task', 'direction', 'text', 'log', 'speed', 'speeds', 'clock', 'transition', 'inputs', 'outputs', 'variables', 'initial', 'states', 'machines', 'editable'];
+  const MACHINE_KEYS = ['title', 'direction', 'initial', 'variables', 'states', 'folded'];
+  const STATE_KEYS = ['entry', 'do', 'exit', 'on'];
   const LEDS = ['red', 'green', 'amber', 'yellow', 'blue', 'white'];
   const WORDS = {button: ['pressed', 'released'], pin: ['high', 'low']};
   const RESERVED = ['print', 'clear', 'start', 'stop', 'send', 'blink', 'after', 'on', 'off', 'toggle'];
+  // no variable or parameter can have these names, or those of RESERVED
+  const VALUE_WORDS = ['true', 'false', 'now', 'ms', 's'];
 
   const fail = msg => { throw new Error(msg); };
   const isMap = v => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -189,16 +191,221 @@
     return out;
   }
 
+  // ========================================================================
+  // Variables and expressions: whole numbers and true/false, with C's operators
+  // in C's order. A value is a number or a boolean; time values are in ms.
+  // ========================================================================
+  const BINARY = [['||'], ['&&'], ['==', '!='], ['<=', '>=', '<', '>'], ['+', '-'], ['*', '/', '%']];
+  const typeName = type => (type === 'int' ? 'a number' : 'true or false');
+  function valueName(name, what) {
+    nameOf(name, what);
+    if (VALUE_WORDS.includes(name)) fail(`${what}: "${name}" is a word of the state machine language (${VALUE_WORDS.join(', ')}): choose another name`);
+  }
+  function readVariables(spec, ctx, where) {
+    if (spec == null) return {};
+    if (!isMap(spec)) fail(`${where}: write one variable per line, e.g. lap: 1`);
+    for (const [name, value] of Object.entries(spec)) {
+      valueName(name, where);
+      if (ctx.inputs[name] || ctx.outputs[name]) fail(`${where}: ${name} is ${ctx.inputs[name] ? 'an input' : 'an output'} too: give them different names`);
+      if (!Number.isSafeInteger(value) && typeof value !== 'boolean') fail(`${where}, ${name}: "${value}" is not a value. A variable starts as a whole number or as true or false (times are numbers of ms)`);
+    }
+    return spec;
+  }
+  function useVariable(name, ctx, where) {
+    const own = Object.hasOwn(ctx.own, name);
+    if (!own && !Object.hasOwn(ctx.shared, name)) {
+      const other = Object.entries(ctx.privates).find(([, vars]) => Object.hasOwn(vars, name));
+      if (other) fail(`${where}: ${name} is a variable of machine ${other[0]}. A machine sees only its own variables and those at the top of the block`);
+      const known = [...Object.keys(ctx.own), ...Object.keys(ctx.shared)];
+      fail(known.length ? `${where}: there is no variable ${name} (variables: ${known.join(', ')})`
+        : `${where}: there is no variable ${name}. Add it under variables:, e.g. variables: {${name}: 0}`);
+    }
+    ctx.usedVars.add(own ? `${ctx.machine}.${name}` : name);
+    return {k: 'var', name, shared: !own, type: typeof (own ? ctx.own : ctx.shared)[name] === 'boolean' ? 'bool' : 'int', src: name};
+  }
+  // Reads an expression from `start` as far as it goes -> {expr, end}. What follows
+  // may be the next action ("lap = lap + 1 LED on"), a unit or a closing bracket.
+  function parseExpr(text, start, ctx, where) {
+    let p = start;
+    const space = () => { while (/\s/.test(text[p] ?? '')) p++; };
+    const opAt = ops => {
+      space();
+      return ops.find(op => {
+        if (!text.startsWith(op, p)) return false;
+        // lap += 1 and lap++ are actions, not operators
+        return !('+-*/%'.includes(op) && (text[p + 1] === '=' || (text[p + 1] === op && '+-'.includes(op))));
+      });
+    };
+    const span = (node, from) => { node.src = clean(text.slice(from, p)); return node; };
+    function primary() {
+      space();
+      const from = p;
+      if (text[p] === '(') {
+        p++;
+        const e = level(0);
+        space();
+        if (text[p] !== ')') fail(`${where}: "${clean(text.slice(from))}": a ) is missing`);
+        p++;
+        return span(e, from);
+      }
+      const rest = text.slice(p);
+      let m;
+      if ((m = /^\d+/.exec(rest))) {
+        p += m[0].length;
+        if (/^\.\d/.test(text.slice(p))) fail(`${where}: "${clean(rest)}": a value is a whole number here. Count in ms: 1500, not 1.5`);
+        return span({k: 'num', v: Number(m[0])}, from);
+      }
+      if ((m = /^[A-Za-z_]\w*/.exec(rest))) {
+        const word = m[0];
+        if (RESERVED.includes(word) || word === 'ms' || word === 's') fail(`${where}: "${word}" is not a value. A value is a number, a variable, true, false or now`);
+        p += word.length;
+        if (word === 'true' || word === 'false') return span({k: 'bool', v: word === 'true'}, from);
+        if (word === 'now') { ctx.usesNow = true; return span({k: 'now'}, from); }
+        if (ctx.param?.name === word) return span({k: 'param', name: word, event: ctx.param.event}, from);
+        return useVariable(word, ctx, where);
+      }
+      fail(`${where}: "${clean(rest)}" is not a value. A value is a number, a variable, true, false or now`);
+    }
+    function unary() {
+      space();
+      const from = p;
+      if (text[p] === '!' && text[p + 1] !== '=') { p++; return span({k: 'not', a: unary()}, from); }
+      if (text[p] === '-' && text[p + 1] !== '=' && text[p + 1] !== '-') { p++; return span({k: 'neg', a: unary()}, from); }
+      return primary();
+    }
+    function level(i) {
+      if (i === BINARY.length) return unary();
+      space();
+      const from = p;
+      let a = level(i + 1);
+      for (;;) {
+        const op = opAt(BINARY[i]);
+        if (!op) return a;
+        p += op.length;
+        const b = level(i + 1);
+        a = span({k: 'bin', op, a, b}, from);
+      }
+    }
+    const expr = level(0);
+    return {expr, end: p};
+  }
+  // the type of an expression; a mistake if its parts do not fit together
+  function typeOf(e, ctx, where) {
+    const need = (sub, type, op) => {
+      const t = typeOf(sub, ctx, where);
+      if (t !== type) fail(`${where}: "${e.src}": ${op} works on ${type === 'int' ? 'numbers' : 'true or false'}, and ${sub.src} is ${typeName(t)}`);
+    };
+    switch (e.k) {
+      case 'num': case 'now': return 'int';
+      case 'bool': return 'bool';
+      case 'var': return e.type;
+      case 'param': return eventType(e.event, ctx);
+      case 'not': need(e.a, 'bool', '!'); return 'bool';
+      case 'neg': need(e.a, 'int', '-'); return 'int';
+      default:
+    }
+    if (e.op === '&&' || e.op === '||') { need(e.a, 'bool', e.op); need(e.b, 'bool', e.op); return 'bool'; }
+    if (e.op === '==' || e.op === '!=') {
+      const a = typeOf(e.a, ctx, where), b = typeOf(e.b, ctx, where);
+      if (a !== b) fail(`${where}: "${e.src}": ${e.op} compares two values of one kind, and ${e.a.src} is ${typeName(a)}, ${e.b.src} is ${typeName(b)}`);
+      return 'bool';
+    }
+    need(e.a, 'int', e.op); need(e.b, 'int', e.op);
+    return e.op === '<' || e.op === '<=' || e.op === '>' || e.op === '>=' ? 'bool' : 'int';
+  }
+  // the kind of value an event has: from its input's list, or from what is sent
+  function eventType(event, ctx) {
+    if (Object.hasOwn(ctx.eventTypes, event)) return ctx.eventTypes[event];
+    ctx.eventTypes[event] = 'int';           // a machine that sends its own parameter on
+    const input = ctx.inputs[event], send = ctx.sends.find(s => s.event === event && s.arg);
+    if (input?.values) ctx.eventTypes[event] = input.type;
+    else if (send) ctx.eventTypes[event] = typeOf(send.arg, ctx, send.where);
+    return ctx.eventTypes[event];
+  }
+  const usesNow = e => e.k === 'now' || (e.a && usesNow(e.a)) || (e.b && usesNow(e.b));
+  // the value of a time at the start, for the speed buttons; null if not known then
+  function startValue(e, ctx) {
+    if (e.k === 'num') return e.v;
+    if (e.k === 'var') { const v = (e.shared ? ctx.shared : ctx.own)[e.name]; return typeof v === 'number' ? v : null; }
+    if (e.k !== 'bin' || !'+-*'.includes(e.op)) return null;
+    const a = startValue(e.a, ctx), b = startValue(e.b, ctx);
+    if (a == null || b == null) return null;
+    return e.op === '+' ? a + b : e.op === '-' ? a - b : a * b;
+  }
+  // a time from an expression: start T interval ms
+  function exprTime(expr, unit, ctx, where) {
+    const factor = unit === 's' ? 1000 : 1;
+    ctx.later.push(() => {
+      const t = typeOf(expr, ctx, where);
+      if (t !== 'int') fail(`${where}: "${expr.src} ${unit}": a time is a number, and ${expr.src} is true or false`);
+    });
+    const v = startValue(expr, ctx);
+    if (v > 0) ctx.times.push(v * factor);
+    return {expr, factor, text: `${expr.src} ${unit}`};
+  }
+  // a time on the left side of on: 500 ms, 2..5 s or interval ms
+  function triggerTime(text, ctx, where) {
+    const t = clean(text);
+    const m = /^(.*\S) (ms|s)$/.exec(t);
+    if (!m || /^[\d. ]+$/.test(m[1])) return time(t, where);
+    const {expr, end} = parseExpr(m[1], 0, ctx, where);
+    if (end < m[1].length) fail(`${where}: "${t}" is not a time (write 500 ms or 10 s, 2..5 s for a random time, or interval ms with a variable)`);
+    return exprTime(expr, m[2], ctx, where);
+  }
+  // The text of a print: {expression} is a value, {expression:s} a time in ms, in seconds.
+  function printParts(raw, ctx, where) {
+    const parts = [];
+    let text = '', i = 0;
+    while (i < raw.length) {
+      if (raw[i] === '\\' && i + 1 < raw.length) { text += raw[i + 1]; i += 2; continue; }
+      if (raw[i] !== '{') { text += raw[i++]; continue; }
+      if (!raw.includes('}', i)) fail(`${where}: print: { starts a value and needs a }, as in print "Lap {lap}". For the character { itself, write \\{`);
+      const {expr, end} = parseExpr(raw, i + 1, ctx, where);
+      const m = /^\s*(:s)?\s*\}/.exec(raw.slice(end));
+      if (!m) fail(`${where}: print: "${clean(raw.slice(i))}": after the value comes a } (or :s}, for a time in seconds)`);
+      if (m[1]) ctx.later.push(() => { if (typeOf(expr, ctx, where) !== 'int') fail(`${where}: print: {${expr.src}:s}: only a number can be a time`); });
+      else ctx.later.push(() => typeOf(expr, ctx, where));
+      if (text) parts.push(text);
+      text = '';
+      parts.push({expr, seconds: !!m[1]});
+      i = end + m[0].length;
+    }
+    if (text || !parts.length) parts.push(text);
+    return parts;
+  }
+  // 1730 ms as 1.73 s: cut off, not rounded, as C's integer division does
+  const inSeconds = ms => {
+    const h = Math.abs(Math.trunc(ms / 10));
+    return `${ms < 0 && h ? '-' : ''}${Math.trunc(h / 100)}.${String(h % 100).padStart(2, '0')} s`;
+  };
+
+  // the values of a button: [100, 500, 1000] or [true, false]
+  function inputValues(list, name) {
+    const where = `inputs, ${name}`;
+    const items = list.split(',').map(clean);
+    if (!list.trim()) fail(`${where}: the list of values is empty: write ${name}: button [100, 500, 1000]`);
+    const values = items.map(s => {
+      if (s === 'true' || s === 'false') return s === 'true';
+      if (!/^-?\d+$/.test(s)) fail(`${where}: "${s}" is not a value. Values are whole numbers or true and false`);
+      return Number(s);
+    });
+    const type = typeof values[0] === 'boolean' ? 'bool' : 'int';
+    if (values.some(v => (typeof v === 'boolean' ? 'bool' : 'int') !== type)) fail(`${where}: all values are numbers, or all are true and false`);
+    if (new Set(values).size < values.length) fail(`${where}: a value appears twice in [${list}]`);
+    return {values, type};
+  }
+
   function readInputs(spec, ctx) {
     if (spec == null) return;
     if (!isMap(spec)) fail('inputs: write one input per line, e.g. pressed: button');
     for (const [name, kind] of Object.entries(spec)) {
       nameOf(name, 'inputs');
       const k = clean(kind ?? '');
-      const m = /^(bouncy )?(button|hold button|pin)$/.exec(k);
-      if (!m) fail(`inputs, ${name}: "${k}" is not an input. Inputs are: button (a click), hold button, pin, bouncy button, bouncy pin`);
+      const m = /^(bouncy )?(button|hold button|pin)(?: ?\[(.*)\])?$/.exec(k);
+      if (!m) fail(`inputs, ${name}: "${k}" is not an input. Inputs are: button (a click), button [100, 500] (a click with a value), hold button, pin, bouncy button, bouncy pin`);
+      if (m[3] != null && (m[1] || m[2] !== 'button')) fail(`inputs, ${name}: only a button can send a value: ${name}: button [100, 500, 1000]`);
       const pin = m[2] === 'pin';
-      ctx.inputs[name] = m[2] === 'button' && !m[1] ? {name, hold: false}
+      ctx.inputs[name] = m[2] === 'button' && !m[1] ? {name, hold: false, ...(m[3] != null ? inputValues(m[3], name) : {})}
         : {name, hold: true, kind: pin ? 'pin' : 'button', bouncy: !!m[1], words: WORDS[pin ? 'pin' : 'button']};
     }
   }
@@ -237,6 +444,11 @@
     ['send', new RegExp(`send\\s+(${ID})${END}`, 'y')],
     ['blink', new RegExp(`blink\\s+(${ID})\\s+(${TIME})${END}`, 'y')],
     ['set', new RegExp(`(${ID})\\s+(on|off|toggle)${END}`, 'y')],
+    // these go on with an expression
+    ['startExpr', new RegExp(`start\\s+(${ID})\\s+`, 'y')],
+    ['blinkExpr', new RegExp(`blink\\s+(${ID})\\s+`, 'y')],
+    ['sendValue', new RegExp(`send\\s+(${ID})\\s*\\(`, 'y')],
+    ['assign', new RegExp(`(${ID})\\s*(\\+\\+|--|[-+*/%]=|=(?!=))`, 'y')],
   ];
   function readActions(value, ctx, where, isDo) {
     if (value == null) return [];
@@ -258,16 +470,73 @@
       let m = null, kind;
       for ([kind, m] of ACTIONS.map(([k, re]) => { re.lastIndex = p; return [k, re.exec(text)]; })) if (m) break;
       if (!m) fail(notAnAction(text.slice(p), ctx, where, isDo));
+      const from = p;
       p += m[0].length;
-      out.push(makeAction(kind, m, ctx, where, isDo));
+      if (kind === 'startExpr' || kind === 'blinkExpr' || kind === 'sendValue' || kind === 'assign') {
+        const made = exprAction(kind, m, text, p, ctx, where, isDo);
+        if (!made) fail(notAnAction(text.slice(from), ctx, where, isDo));
+        out.push(made.action);
+        p = made.end;
+      } else out.push(makeAction(kind, m, ctx, where, isDo));
     }
   }
+  const noDo = (m, where, isDo) => { if (isDo) fail(`${where}: "${clean(m[0])}" cannot be a do activity. The only one is blink <output> <time>, e.g. blink LED 500 ms`); };
+  // an action with an expression, which starts at p -> {action, end}; null if there is none
+  function exprAction(kind, m, text, p, ctx, where, isDo) {
+    if (kind === 'startExpr' || kind === 'blinkExpr') {
+      // start T print "x": a time is missing, and print is no variable
+      const word = /^\s*([A-Za-z_]\w*)/.exec(text.slice(p));
+      if (word && RESERVED.includes(word[1])) return null;
+      const {expr, end} = parseExpr(text, p, ctx, where);
+      const unit = new RegExp(`\\s*(ms|s)${END}`, 'y');
+      unit.lastIndex = end;
+      const u = unit.exec(text);
+      if (!u) return null;
+      const t = exprTime(expr, u[1], ctx, where);
+      if (kind === 'startExpr') {
+        noDo(m, where, isDo);
+        ctx.timers.add(m[1]);
+        return {action: {kind: 'start', timer: m[1], time: t, src: `start ${m[1]} ${t.text}`}, end: unit.lastIndex};
+      }
+      if (!isDo) fail(`${where}: blink is a do activity: write it under do:`);
+      useOutput(m[1], ctx, where);
+      return {action: {kind: 'blink', out: m[1], time: t, src: `blink ${m[1]} ${t.text}`}, end: unit.lastIndex};
+    }
+    noDo(m, where, isDo);
+    if (kind === 'sendValue') {
+      const {expr, end} = parseExpr(text, p, ctx, where);
+      const close = /^\s*\)/.exec(text.slice(end));
+      if (!close) fail(`${where}: "${clean(m[0] + text.slice(p))}": a ) is missing`);
+      ctx.sent.add(m[1]);
+      ctx.sends.push({event: m[1], arg: expr, where});
+      return {action: {kind: 'send', event: m[1], arg: expr, src: `send ${m[1]}(${expr.src})`}, end: end + close[0].length};
+    }
+    // lap++, lap = 1, lap += 2
+    const target = useVariable(m[1], ctx, where);
+    if (m[2] === '++' || m[2] === '--') {
+      ctx.later.push(() => { if (target.type !== 'int') fail(`${where}: "${m[1]}${m[2]}": ${m[1]} is true or false, not a number`); });
+      return {action: {kind: 'assign', target, op: `${m[2][0]}=`, expr: {k: 'num', v: 1, src: '1'}, src: `${m[1]}${m[2]}`}, end: p};
+    }
+    const {expr, end} = parseExpr(text, p, ctx, where);
+    const src = `${m[1]} ${m[2]} ${expr.src}`;
+    ctx.later.push(() => {
+      const t = typeOf(expr, ctx, where);
+      if (m[2] !== '=' && (target.type !== 'int' || t !== 'int')) fail(`${where}: "${src}": ${m[2]} works on numbers`);
+      if (t !== target.type) fail(`${where}: "${src}": ${m[1]} is ${typeName(target.type)}, and ${expr.src} is ${typeName(t)}`);
+    });
+    return {action: {kind: 'assign', target, op: m[2], expr, src}, end};
+  }
   function makeAction(kind, m, ctx, where, isDo) {
-    if (isDo && kind !== 'blink') fail(`${where}: "${clean(m[0])}" cannot be a do activity. The only one is blink <output> <time>, e.g. blink LED 500 ms`);
+    if (kind !== 'blink') noDo(m, where, isDo);
     switch (kind) {
-      case 'print':
+      case 'print': {
         ctx.prints = true;
-        return {kind, text: m[1].replace(/\\(.)/g, '$1'), src: `print "${m[1]}"`};
+        const parts = printParts(m[1], ctx, where);
+        const a = {kind, src: `print "${m[1]}"`};
+        if (parts.some(x => typeof x !== 'string')) a.parts = parts;
+        else a.text = parts.join('');
+        return a;
+      }
       case 'clear':
         ctx.prints = true;
         return {kind, src: 'clear'};
@@ -278,13 +547,16 @@
         return {kind, timer: m[1], time: t, src: `start ${m[1]} ${t.text}`};
       }
       case 'stop': ctx.stops.add(m[1]); return {kind, timer: m[1], src: `stop ${m[1]}`};
-      case 'send': ctx.sent.add(m[1]); return {kind, event: m[1], src: `send ${m[1]}`};
+      case 'send':
+        ctx.sent.add(m[1]);
+        ctx.sends.push({event: m[1], arg: null, where});
+        return {kind, event: m[1], src: `send ${m[1]}`};
       case 'blink': {
         if (!isDo) fail(`${where}: blink is a do activity: write it under do:`);
         useOutput(m[1], ctx, where);
         const t = time(m[2], where, false);
         ctx.times.push(t.min);
-        return {kind, out: m[1], period: t.min, src: `blink ${m[1]} ${t.text}`};
+        return {kind, out: m[1], time: t, src: `blink ${m[1]} ${t.text}`};
       }
       default:
         useOutput(m[1], ctx, where);
@@ -303,18 +575,49 @@
     if (word === 'blink') return `${where}: "${shown}": blink needs an output and a time: blink LED 500 ms`;
     if (ctx.outputs[word]) return `${where}: "${shown}": write ${word} on, ${word} off or ${word} toggle`;
     const out = Object.keys(ctx.outputs)[0] || 'LED';
-    return `${where}: "${shown}" is not an action. Actions are: ${out} on, ${out} off, ${out} toggle, print "text", clear, start T 10 s, stop T, send event`;
+    return `${where}: "${shown}" is not an action. Actions are: ${out} on, ${out} off, ${out} toggle, print "text", clear, start T 10 s, stop T, send event, n = 1, n++`;
   }
 
-  // the left side of on: -> {kind: event|after|held, ...}
+  // the left side of on: -> {kind: event|after|held, label, base (the label
+  // without the guard), guard, guardSrc, and for an event its parameter}
   function readTrigger(key, ctx, where) {
-    const k = clean(key);
+    const full = clean(key);
+    if (full.startsWith('[')) fail(`${where}: a guard needs an event in front of it: pressed [count < 3]. An arrow with only a guard is not possible yet`);
+    const g = /^(.*\S) ?\[(.*)\]$/.exec(full);
+    const t = readEvent(g ? g[1] : full, ctx, where);
+    t.base = t.label;
+    if (g) {
+      ctx.param = t.param ? {name: t.param, event: t.event} : null;
+      const {expr, end} = parseExpr(g[2], 0, ctx, where);
+      ctx.param = null;
+      if (end < g[2].length) fail(`${where}: the guard [${clean(g[2])}] cannot be read after "${expr.src}"`);
+      ctx.later.push(() => {
+        // such a guard could turn true at any moment, between two frames of the page
+        if ((t.kind !== 'event' || ctx.timers.has(t.event)) && usesNow(expr)) fail(`${where}: the guard [${expr.src}] uses now, on an event that waits for its guard. Use a timer instead`);
+        const type = typeOf(expr, ctx, where);
+        if (type !== 'bool') fail(`${where}: the guard [${expr.src}] is a number, and a guard is true or false. Write for example [${expr.src} > 0]`);
+      });
+      t.guard = expr;
+      t.guardSrc = clean(g[2]);
+      t.label = `${t.base} [${t.guardSrc}]`;
+    }
+    return t;
+  }
+  function readEvent(k, ctx, where) {
     let m;
-    if (k.startsWith('[')) fail(`${where}: guards ([…]) come in a later version`);
     if ((m = /^after (.+)$/.exec(k))) {
-      const t = time(m[1], where);
-      ctx.times.push(t.min, t.max);
+      const t = triggerTime(m[1], ctx, where);
+      if (!t.expr) ctx.times.push(t.min, t.max);
       return {kind: 'after', time: t, label: `after ${t.text}`};
+    }
+    // an event with a value: the arrow names it
+    if ((m = /^([A-Za-z_]\w*) ?\( ?([A-Za-z_]\w*) ?\)$/.exec(k))) {
+      valueName(m[2], where);
+      if (Object.hasOwn(ctx.own, m[2]) || Object.hasOwn(ctx.shared, m[2])) fail(`${where}: the parameter ${m[2]} has the name of a variable: give them different names`);
+      if (ctx.inputs[m[1]]?.hold) fail(`${where}: ${m[1]} is a ${ctx.inputs[m[1]].kind === 'pin' ? 'pin' : 'hold button'}: only a button can have a value`);
+      ctx.handled.add(m[1]);
+      ctx.named.push({event: m[1], param: m[2], where});
+      return {kind: 'event', event: m[1], param: m[2], label: `${m[1]}(${m[2]})`};
     }
     if ((m = /^([A-Za-z_]\w*) (\w+)(?: for (.+))?$/.exec(k)) && ctx.inputs[m[1]]) {
       const input = ctx.inputs[m[1]];
@@ -334,7 +637,7 @@
       ctx.handled.add(k);
       return {kind: 'event', event: k, label: k};
     }
-    fail(`${where}: "${k}" is not an event. Write an input (pressed), a timer (exit_delay), after 10 s, or for an input that is held down: KEY pressed, KEY released, KEY pressed for 1 s`);
+    fail(`${where}: "${k}" is not an event. Write an input (pressed), a timer (exit_delay), after 10 s, or for an input that is held down: KEY pressed, KEY released, KEY pressed for 1 s. Then optionally a guard: pressed [count < 3]`);
   }
 
   // the right side of on: TARGET, TARGET / actions, / actions. | works as / too; the
@@ -363,22 +666,27 @@
     if (!isMap(raw) || !Object.keys(raw).length) fail(`${W}states: needs one or more states`);
     const names = Object.keys(raw);
     for (const n of names) if (!NAME.test(n)) fail(`${W}"${n}" is not a state name (letters, digits and _)`);
+    ctx.machine = name;
+    ctx.own = ctx.privates[name] ?? {};
     const states = {};
     for (const n of names) {
       const sw = `${W}state ${n}`;
-      const st = {name: n, entry: [], do: [], on: []};
+      const st = {name: n, entry: [], do: [], exit: [], on: []};
       const s = raw[n];
       if (s != null) {
-        if (!isMap(s)) fail(`${sw}: write entry:, do: and on: under it`);
+        if (!isMap(s)) fail(`${sw}: write entry:, do:, exit: and on: under it`);
         keysOf(s, STATE_KEYS, sw);
         st.entry = readActions(s.entry, ctx, `${sw}, entry`, false);
         st.do = readActions(s.do, ctx, `${sw}, do`, true);
+        st.exit = readActions(s.exit, ctx, `${sw}, exit`, false);
         if (s.on != null) {
           if (!isMap(s.on)) fail(`${sw}: on: needs lines like pressed: LIGHT_ON`);
           for (const [key, value] of Object.entries(s.on)) {
             const tw = `${sw}, on ${clean(key)}`;
             const trigger = readTrigger(key, ctx, tw);
+            ctx.param = trigger.param ? {name: trigger.param, event: trigger.event} : null;
             const arrow = readArrow(value, names, ctx, tw);
+            ctx.param = null;
             if (!arrow.target && trigger.kind === 'held') fail(`${tw}: ${trigger.label} must lead to a state`);
             st.on.push({id: `${name}|${n}|${clean(key)}`, machine: name, from: n, trigger, target: arrow.target,
               actions: arrow.actions, internal: !arrow.target, where: tw});
@@ -392,16 +700,38 @@
     const dir = spec.direction != null ? clean(spec.direction) : direction;
     if (!['LR', 'TB'].includes(dir)) fail(`${W}direction: is LR or TB`);
     if (spec.folded != null && typeof spec.folded !== 'boolean') fail(`${W}folded: is true or false`);
-    return {name, title: spec.title != null ? String(spec.title) : name, direction: dir, initial, states, folded: spec.folded === true};
+    return {name, title: spec.title != null ? String(spec.title) : name, direction: dir, initial, variables: ctx.own, states, folded: spec.folded === true};
+  }
+
+  // What needs all machines read first: who gives an event its value, and whether
+  // the values fit where they are used.
+  function checkValues(ctx) {
+    for (const {event, param, where} of ctx.named) {
+      const input = ctx.inputs[event];
+      if (input && !input.values) fail(`${where}: ${event} has no value to call ${param}. Give the button its values: ${event}: button [100, 500, 1000]`);
+      if (ctx.timers.has(event)) fail(`${where}: ${event} is a timer: it has no value to call ${param}`);
+      if (!input) {
+        const bare = ctx.sends.find(s => s.event === event && !s.arg);
+        if (bare) fail(`${bare.where}: send ${event} has no value, but ${where} calls it ${param}. Write send ${event}(1)`);
+      }
+    }
+    for (const s of ctx.sends) if (s.arg) {
+      const t = typeOf(s.arg, ctx, s.where);
+      if (t !== eventType(s.event, ctx)) fail(`${s.where}: send ${s.event}(${s.arg.src}): the values of ${s.event} are ${typeName(eventType(s.event, ctx))}, and ${s.arg.src} is ${typeName(t)}`);
+    }
+    for (const check of ctx.later) check();
   }
 
   function read(config) {
     if (!isMap(config)) fail('the YAML must be a mapping: title:, inputs:, outputs:, states: …');
     keysOf(config, TOP_KEYS, 'statemachine');
     const ctx = {inputs: {}, outputs: {}, timers: new Set(), stops: new Set(), sent: new Set(), handled: new Set(),
-      usedOutputs: new Set(), usedInputs: new Set(), prints: false, times: []};
+      usedOutputs: new Set(), usedInputs: new Set(), prints: false, times: [],
+      shared: {}, own: {}, privates: {}, machine: null, param: null, usedVars: new Set(), usesNow: false,
+      sends: [], named: [], eventTypes: {}, later: []};
     readInputs(config.inputs, ctx);
     readOutputs(config.outputs, ctx);
+    ctx.shared = readVariables(config.variables, ctx, 'variables');
     const text = clean(config.text ?? 'display');
     if (!['display', 'terminal'].includes(text)) fail('text: is display (a print replaces the text) or terminal (a print adds a line)');
     const log = clean(config.log ?? 'open');
@@ -414,6 +744,12 @@
       if (config.states != null) fail('write states: for one machine or machines: for several, not both');
       if (config.initial != null) fail('initial: belongs in each machine under machines:');
       if (!isMap(config.machines) || !Object.keys(config.machines).length) fail('machines: needs one or more machines, each with states:');
+      // all first: a mistake can then name the machine a variable belongs to
+      for (const [name, spec] of Object.entries(config.machines)) if (isMap(spec)) {
+        const vars = readVariables(spec.variables, ctx, `machine ${name}, variables`);
+        for (const v of Object.keys(vars)) if (Object.hasOwn(ctx.shared, v)) fail(`machine ${name}, variables: ${v} is under the variables of the block too: give them different names`);
+        ctx.privates[name] = vars;
+      }
       machines = Object.entries(config.machines).map(([name, spec]) => {
         if (!NAME.test(name)) fail(`machines: "${name}" is not a name (letters, digits and _)`);
         return readMachine(name, spec, ctx, direction, `machine ${name}`);
@@ -433,12 +769,34 @@
       }
     }
     for (const t of ctx.timers) if (ctx.outputs[t]) fail(`${t} is a timer and an output: give them different names`);
+    for (const t of ctx.timers) if (Object.hasOwn(ctx.shared, t) || Object.values(ctx.privates).some(vars => Object.hasOwn(vars, t))) fail(`${t} is a timer and a variable: give them different names`);
+    checkValues(ctx);
     const warnings = [];
     for (const t of ctx.timers) if (!ctx.handled.has(t)) warnings.push(`timer ${t} runs out, but no state reacts to it`);
     for (const t of ctx.stops) if (!ctx.timers.has(t)) warnings.push(`stop ${t}: timer ${t} is never started`);
     for (const e of ctx.sent) if (!ctx.handled.has(e)) warnings.push(`send ${e}: no state reacts to ${e}`);
     for (const [n, i] of Object.entries(ctx.inputs)) if (!(i.hold ? ctx.usedInputs.has(n) : ctx.handled.has(n))) warnings.push(`input ${n} is not used in any state`);
     for (const o of Object.keys(ctx.outputs)) if (!ctx.usedOutputs.has(o)) warnings.push(`output ${o} is never switched`);
+    for (const v of Object.keys(ctx.shared)) if (!ctx.usedVars.has(v)) warnings.push(`variable ${v} is not used in any state`);
+    for (const [name, vars] of Object.entries(ctx.privates)) for (const v of Object.keys(vars)) if (!ctx.usedVars.has(`${name}.${v}`)) warnings.push(`machine ${name}: variable ${v} is not used in any state`);
+    for (const i of Object.values(ctx.inputs)) if (i.values && !ctx.named.some(n => n.event === i.name)) warnings.push(`input ${i.name} has values, but no arrow gives its value a name: write ${i.name}(value): …`);
+    for (const m of machines) for (const st of Object.values(m.states)) {
+      st.on.forEach((tr, k) => {
+        if (tr.internal && tr.trigger.kind === 'after') warnings.push(`${tr.where}: an internal action on after runs only once, because nothing starts the time again. To repeat it, use a named timer: tick: / …, start tick ${tr.trigger.time.text}`);
+        // an arrow back into the state: its entry actions run right after the arrow's
+        if (tr.target === st.name) for (const a of tr.actions) if (a.kind === 'set') {
+          const later = st.entry.filter(x => x.kind === 'set' && x.out === a.out).at(-1);
+          if (later && (later.value === 'toggle' ? a.value === 'toggle' : a.value !== later.value)) {
+            warnings.push(`${tr.where}: this arrow goes back into ${st.name}, so its entry action ${later.src} runs right after ${a.src}, and the change never shows. `
+              + (tr.trigger.kind === 'after' ? `To repeat it, use a named timer: tick: / ${a.src}, start tick ${tr.trigger.time.text}` : `To change ${a.out} and stay, use an internal action: ${tr.trigger.base}: / ${a.src}`));
+          }
+        }
+        // the first arrow that may fire does: nothing gets past one without a guard
+        const random = tr.trigger.time && tr.trigger.time.min !== tr.trigger.time.max;   // each arrow draws its own time
+        const before = random ? null : st.on.slice(0, k).find(x => !x.trigger.guard && x.trigger.kind === tr.trigger.kind && (x.trigger.event ?? x.trigger.base) === (tr.trigger.event ?? tr.trigger.base));
+        if (before) warnings.push(`${tr.where}: this arrow can never fire, because the arrow for ${before.trigger.base} above it has no guard`);
+      });
+    }
     for (const m of machines) {
       const seen = new Set([m.initial]), todo = [m.initial];
       while (todo.length) for (const tr of m.states[todo.pop()].on) if (tr.target && !seen.has(tr.target)) { seen.add(tr.target); todo.push(tr.target); }
@@ -454,18 +812,20 @@
     const speed = config.speed != null ? speedOf(config.speed, 'speed') : speeds.includes(1) ? 1 : speeds[0];
     speeds = [...new Set([...speeds, speed])].sort((a, b) => a - b);
     // the clock and its controls (pause, speed, skip ahead): for machines that use time, unless clock: says otherwise
-    const timed = ctx.timers.size > 0 || Object.values(ctx.inputs).some(i => i.bouncy) || machines.some(m => Object.values(m.states).some(st =>
+    const timed = ctx.timers.size > 0 || ctx.usesNow || Object.values(ctx.inputs).some(i => i.bouncy) || machines.some(m => Object.values(m.states).some(st =>
       st.do.length || st.on.some(tr => tr.trigger.kind === 'after' || tr.trigger.kind === 'held')));
     const transition = config.transition != null ? transitionOf(config.transition) : TRANSITION;
     return {title: config.title != null ? String(config.title) : '', task: config.task != null ? String(config.task) : '',
       text, log, speed, speeds, clock: config.clock ?? timed, transition, direction, inputs: ctx.inputs, outputs: ctx.outputs, timers: [...ctx.timers],
-      prints: ctx.prints, machines, warnings};
+      variables: ctx.shared, prints: ctx.prints, machines, warnings};
   }
 
   // ========================================================================
   // Running the machines
   // ========================================================================
   const fmt = ms => (ms < 1000 ? `${Math.max(0, Math.round(ms))} ms` : `${(ms / 1000).toFixed(1)} s`);
+  // an event as the log and the status line show it: pressed, or set_blinking(500)
+  const eventText = e => (e.value === undefined ? e.name : `${e.name}(${e.value})`);
   // print or clear on t: a display (one text) or a terminal (lines, the last 200)
   function write(t, a, terminal) {
     if (a.kind === 'clear') { t.display = ''; t.lines = []; }
@@ -489,64 +849,143 @@
       for (const i of Object.values(M.inputs)) if (i.hold) this.holds[i.name] = {input: i, level: false, since: 0, flips: [], trace: [{t: 0, level: false}], bouncy: i.bouncy};
       this.display = ''; this.lines = []; this.textVersion = 0;
       this.queue = [];
-      this.ms = M.machines.map(m => ({m, state: null, since: 0, afters: [], blinks: []}));
+      this.warned = new Set();
+      this.shared = {...M.variables};
+      this.ms = M.machines.map(m => ({m, state: null, since: 0, afters: [], blinks: [], late: new Set(), vars: {...m.variables}}));
       for (const s of this.ms) { this.enter(s, s.m.initial); this.say({machine: s.m.name, start: true, to: s.m.initial}); }
       this.drain();
     }
-    pick(t) { return Math.round(t.min + this.random() * (t.max - t.min)); }
+    // the time of a timer in ms; a time from an expression must be longer than 0
+    pick(t, s, arg) {
+      if (!t.expr) return Math.round(t.min + this.random() * (t.max - t.min));
+      const ms = this.value(t.expr, s, arg) * t.factor;
+      if (ms > 0) return ms;
+      this.mistake(`${t.text} is not longer than 0 (it is ${ms} ms). The machine uses 1 ms.`);
+      return 1;
+    }
     say(entry) { entry.t = this.t; this.hooks.log?.(entry); }
+    // a mistake that shows only while running, in the log; once per kind until a reset
+    mistake(text) { if (!this.warned.has(text)) { this.warned.add(text); this.say({error: text}); } }
+    // the value of an expression; arg: the value of the event of the arrow
+    value(e, s, arg) {
+      switch (e.k) {
+        case 'num': case 'bool': return e.v;
+        case 'now': return Math.floor(this.t);
+        case 'var': return (e.shared ? this.shared : s.vars)[e.name];
+        case 'param': return arg;
+        case 'not': return !this.value(e.a, s, arg);
+        case 'neg': return 0 - this.value(e.a, s, arg);
+        default:
+      }
+      const a = this.value(e.a, s, arg);
+      if (e.op === '&&') return a && this.value(e.b, s, arg);
+      if (e.op === '||') return a || this.value(e.b, s, arg);
+      return this.calc(e.op, a, this.value(e.b, s, arg), e.src);
+    }
+    calc(op, a, b, src) {
+      switch (op) {
+        case '+': return a + b;
+        case '-': return a - b;
+        case '*': return a * b;
+        case '/': case '%':
+          if (b === 0) { this.mistake(`${src}: a division by zero. The machine uses 0.`); return 0; }
+          return op === '/' ? Math.trunc(a / b) : a % b;
+        case '==': return a === b;
+        case '!=': return a !== b;
+        case '<': return a < b;
+        case '<=': return a <= b;
+        case '>': return a > b;
+        default: return a >= b;
+      }
+    }
+    // may this arrow fire? Its guard, if it has one, is true.
+    open(s, tr, arg) { return !tr.trigger.guard || this.value(tr.trigger.guard, s, arg); }
+    // all variables, as the page shows them: name, or machine.name for one machine's own
+    values() {
+      const out = {...this.shared};
+      for (const s of this.ms) for (const [name, v] of Object.entries(s.vars)) out[`${s.m.name}.${name}`] = v;
+      return out;
+    }
     enter(s, name) {
       const st = s.m.states[name];
       s.state = name; s.since = this.t;
-      s.afters = st.on.filter(tr => tr.trigger.kind === 'after').map(tr => { const total = this.pick(tr.trigger.time); return {tr, due: this.t + total, total}; });
-      s.blinks = st.do.map(a => ({a, next: this.t + a.period}));
+      s.afters = []; s.blinks = []; s.late.clear();
       this.run(s, st.entry, 'entry');
+      // now, because the entry actions may set a variable that a time reads
+      s.afters = st.on.filter(tr => tr.trigger.kind === 'after').map(tr => { const total = this.pick(tr.trigger.time, s); return {tr, due: this.t + total, total}; });
+      s.blinks = st.do.map(a => { const period = this.pick(a.time, s); return {a, period, next: this.t + period}; });
     }
-    // The page hears of every change to an output or the text (hooks.effect) and
-    // where it comes from: 'arrow', 'entry' or 'do' (blinking).
-    run(s, actions, phase) {
+    // The page hears of every change to an output, a variable or the text
+    // (hooks.effect) and where it comes from: 'exit', 'arrow', 'entry' or 'do' (blinking).
+    run(s, actions, phase, arg) {
       for (const a of actions) {
         if (a.kind === 'set') {
           this.out[a.out] = a.value === 'toggle' ? !this.out[a.out] : a.value === 'on';
           this.hooks.effect?.(s, {out: a.out, value: this.out[a.out]}, phase);
         } else if (a.kind === 'print' || a.kind === 'clear') {
-          write(this, a, this.model.text === 'terminal');
+          const text = a.parts ? {kind: a.kind, text: a.parts.map(p => this.part(p, s, arg)).join('')} : a;
+          write(this, text, this.model.text === 'terminal');
           this.textVersion++;
-          this.hooks.effect?.(s, {text: a}, phase);
-        } else if (a.kind === 'start') { const total = this.pick(a.time); this.timers[a.timer] = {due: this.t + total, total}; }
-        else if (a.kind === 'stop') this.timers[a.timer] = null;
-        else if (a.kind === 'send') this.queue.push({name: a.event, source: 'sent'});
+          this.hooks.effect?.(s, {text}, phase);
+        } else if (a.kind === 'assign') {
+          const store = a.target.shared ? this.shared : s.vars, v = this.value(a.expr, s, arg);
+          store[a.target.name] = a.op === '=' ? v : this.calc(a.op[0], store[a.target.name], v, a.src);
+          this.hooks.effect?.(s, {variable: a.target.shared ? a.target.name : `${s.m.name}.${a.target.name}`, value: store[a.target.name]}, phase);
+        } else if (a.kind === 'start') {
+          const total = this.pick(a.time, s, arg);
+          this.timers[a.timer] = {due: this.t + total, total};
+          for (const x of this.ms) x.late.delete(a.timer);
+        } else if (a.kind === 'stop') {
+          this.timers[a.timer] = null;
+          for (const x of this.ms) x.late.delete(a.timer);
+        } else if (a.kind === 'send') this.queue.push({name: a.event, source: 'sent', value: a.arg ? this.value(a.arg, s, arg) : undefined});
       }
     }
-    fire(s, tr, cause) {
+    part(p, s, arg) {
+      if (typeof p === 'string') return p;
+      const v = this.value(p.expr, s, arg);
+      return p.seconds ? inSeconds(v) : String(v);
+    }
+    fire(s, tr, cause, arg) {
       const from = s.state;
       this.hooks.leave?.(s, tr);
       if (tr.internal) {
-        this.run(s, tr.actions, 'arrow');
+        this.run(s, tr.actions, 'arrow', arg);
         this.say({machine: s.m.name, cause, from, internal: true, text: tr.actions.map(a => a.src).join(', ')});
       } else {
-        s.afters = []; s.blinks = [];          // exit
-        this.run(s, tr.actions, 'arrow');
+        s.afters = []; s.blinks = []; s.late.clear();          // exit
+        this.run(s, s.m.states[from].exit, 'exit');
+        this.run(s, tr.actions, 'arrow', arg);
         this.enter(s, tr.target);
         this.say({machine: s.m.name, cause, from, to: tr.target});
       }
       this.hooks.fired?.(s, tr);
     }
-    dispatch(name, source = 'input') { this.queue.push({name, source}); this.drain(); }
-    // one event at a time, to every machine; sent events queue up behind it
+    dispatch(name, source = 'input', value = undefined) { this.queue.push({name, source, value}); this.drain(); }
+    // One event at a time, to every machine; sent events queue up behind it. In a
+    // state, the first arrow for the event whose guard is true fires. If all guards
+    // are false, an input or a sent event is lost, but a timer that ran out waits
+    // (s.late), as time_reached() stays true in C: see next().
     drain() {
       let n = 0;
       while (this.queue.length) {
         if (++n > 500) { this.queue = []; this.say({error: 'Over 500 events in a row: do the machines send each other events in a loop?'}); return; }
         const e = this.queue.shift();
+        const cause = eventText(e), guards = [];
         let handled = false;
         for (const s of this.ms) {
-          const tr = s.m.states[s.state].on.find(x => x.trigger.kind === 'event' && x.trigger.event === e.name);
-          if (tr) { handled = true; this.fire(s, tr, e.name); }
+          const arrows = s.m.states[s.state].on.filter(x => x.trigger.kind === 'event' && x.trigger.event === e.name);
+          const tr = arrows.find(x => this.open(s, x, e.value));
+          if (tr) { handled = true; this.fire(s, tr, cause, e.value); }
+          else if (arrows.length && e.source === 'timer') {
+            handled = true;
+            s.late.add(e.name);
+            this.say({machine: s.m.name, cause, waiting: true, guards: arrows.map(x => x.trigger.guardSrc)});
+          } else guards.push(...arrows.map(x => x.trigger.guardSrc));
         }
         if (!handled && !(e.source === 'edge' && e.bouncy)) {
-          this.say({cause: e.name, ignored: true, source: e.source, states: this.ms.map(s => [s.m.name, s.state])});
-          this.hooks.ignored?.(e, this.ms);
+          this.say({cause, ignored: true, source: e.source, states: this.ms.map(s => [s.m.name, s.state]), guards});
+          this.hooks.ignored?.(e, this.ms, guards);
         }
       }
     }
@@ -587,12 +1026,23 @@
       for (const s of this.ms) {
         for (const tr of s.m.states[s.state].on) if (tr.trigger.kind === 'held') {
           const h = this.holds[tr.trigger.input];
-          if (h.level === tr.trigger.level) consider(Math.max(h.since, s.since) + tr.trigger.time.min, 1, 'held', tr.trigger.label, () => { this.fire(s, tr, tr.trigger.label); this.drain(); });
+          if (h.level === tr.trigger.level && this.open(s, tr)) consider(Math.max(h.since, s.since) + tr.trigger.time.min, 1, 'held', tr.trigger.label, () => { this.fire(s, tr, tr.trigger.label); this.drain(); });
         }
-        for (const a of s.afters) consider(a.due, 2, 'after', a.tr.trigger.label, () => { s.afters = s.afters.filter(x => x !== a); this.fire(s, a.tr, a.tr.trigger.label); this.drain(); });
+        for (const a of s.afters) {
+          if (this.open(s, a.tr)) consider(a.due, 2, 'after', a.tr.trigger.label, () => { s.afters = s.afters.filter(x => x !== a); this.fire(s, a.tr, a.tr.trigger.label); this.drain(); });
+          else if (!a.late) consider(a.due, 2.5, 'after', a.tr.trigger.label, () => {     // the time is up: from now on it waits for the guard (behind an arrow that may fire)
+            a.late = true;
+            this.say({machine: s.m.name, cause: a.tr.trigger.base, waiting: true, guards: [a.tr.trigger.guardSrc]});
+          });
+        }
+        // a named timer that ran out and waits for a guard to turn true
+        for (const name of s.late) {
+          const tr = s.m.states[s.state].on.find(x => x.trigger.kind === 'event' && x.trigger.event === name && this.open(s, x));
+          if (tr) consider(this.t, 3, 'timer', name, () => { s.late.delete(name); this.fire(s, tr, name); this.drain(); });
+        }
         if (blinks) for (const b of s.blinks) consider(b.next, 4, 'blink', b.a.src, () => {
           this.out[b.a.out] = !this.out[b.a.out];
-          b.next += b.a.period;
+          b.next += b.period;
           this.hooks.effect?.(s, {out: b.a.out, value: this.out[b.a.out]}, 'do');
         });
       }
@@ -613,18 +1063,23 @@
     // what the current state of a machine waits for in time
     pending(s) {
       const list = [];
-      for (const a of s.afters) list.push({label: a.tr.trigger.label, left: a.due - this.t, total: a.total});
+      // blocked: the time is up, but the guard is false
+      for (const a of s.afters) {
+        const left = a.due - this.t;
+        list.push({label: a.tr.trigger.label, left, total: a.total, blocked: left <= 0 && !this.open(s, a.tr)});
+      }
       for (const tr of s.m.states[s.state].on) if (tr.trigger.kind === 'held') {
         const h = this.holds[tr.trigger.input], total = tr.trigger.time.min;
         const counting = h.level === tr.trigger.level;
-        list.push({label: tr.trigger.label, total, waiting: !counting, left: counting ? Math.max(h.since, s.since) + total - this.t : total});
+        const left = counting ? Math.max(h.since, s.since) + total - this.t : total;
+        list.push({label: tr.trigger.label, total, waiting: !counting, left, blocked: counting && left <= 0 && !this.open(s, tr)});
       }
       return list;
     }
     // how long until a machine moves by itself (after, held, a timer it has an arrow for); Infinity if nothing is due
     soonest(s) {
       let left = Infinity;
-      for (const p of this.pending(s)) if (!p.waiting) left = Math.min(left, p.left);
+      for (const p of this.pending(s)) if (!p.waiting && !p.blocked) left = Math.min(left, p.left);
       for (const tr of s.m.states[s.state].on) {
         const tm = tr.trigger.kind === 'event' && this.timers[tr.trigger.event];
         if (tm) left = Math.min(left, tm.due - this.t);
@@ -659,15 +1114,17 @@
       out.push({text, kind, id, indent: i ? measure(prefix, kind) : 0}));
     if (st.entry.length) add('entry: ', st.entry.map(a => a.src), 'action', 'entry');
     if (st.do.length) add('do: ', st.do.map(a => a.src), 'action');
+    if (st.exit.length) add('exit: ', st.exit.map(a => a.src), 'action', 'exit');
     for (const tr of st.on) if (tr.internal) add(`${tr.trigger.label} | `, tr.actions.map(a => a.src), 'internal', tr.id);
     return out;
   }
-  // the label of an arrow: the event, and its actions after a |
+  // the label of an arrow: the event, its guard (on a line of its own if it is long), and its actions after a |
   function edgeLines(tr) {
-    const acts = tr.actions.map(a => a.src);
-    if (!acts.length) return [tr.trigger.label];
-    const one = `${tr.trigger.label} | ${acts.join(', ')}`;
-    return one.length <= 24 ? [one] : [tr.trigger.label, ...wrapItems('| ', acts, 26)];
+    const t = tr.trigger, acts = tr.actions.map(a => a.src);
+    const head = t.guard && t.label.length > 26 ? [t.base, `[${t.guardSrc}]`] : [t.label];
+    if (!acts.length) return head;
+    const one = `${t.label} | ${acts.join(', ')}`;
+    return one.length <= 24 ? [one] : [...head, ...wrapItems('| ', acts, 26)];
   }
 
   const INIT = '•init';   // not a valid state name
@@ -818,7 +1275,7 @@
         n.lines.forEach((l, i) => {
           const t = make('text', {class: l.kind === 'internal' ? 'act internal' : 'act', x: r1(x + 12 + l.indent), y: r1(y + HEAD + 18 + i * LINE), text: l.text});
           g.append(t);
-          if (l.id) (pic.lines[l.id === 'entry' ? `${n.name}|entry` : l.id] ||= []).push(t);   // an internal action's lines, or the entry lines
+          if (l.id) (pic.lines[l.id === 'entry' || l.id === 'exit' ? `${n.name}|${l.id}` : l.id] ||= []).push(t);   // an internal action's lines, or the entry or exit lines
         });
       } else g.append(make('text', {class: 'name', x: r1(n.x), y: r1(n.y + 5.3), 'text-anchor': 'middle', text: n.name}));
       const st = {g, w: n.w - 16};
@@ -838,17 +1295,24 @@
   // The PDF: a picture and a transition table per machine (print.js)
   // ========================================================================
   // A row per state, a column per event; a dash: the state ignores the event.
+  // Arrows for one event with different guards share a cell.
   function transitionTable(m) {
     const events = [];
-    for (const st of Object.values(m.states)) for (const tr of st.on) if (!events.includes(tr.trigger.label)) events.push(tr.trigger.label);
-    const rows = Object.values(m.states).map(st => [st.name, ...events.map(label => {
-      const tr = st.on.find(x => x.trigger.label === label);
-      if (!tr) return '–';
+    for (const st of Object.values(m.states)) for (const tr of st.on) if (!events.includes(tr.trigger.base)) events.push(tr.trigger.base);
+    const cell = tr => {
       const acts = tr.actions.map(a => a.src).join(', ');
-      return tr.internal ? `| ${acts}` : tr.target + (acts ? ` | ${acts}` : '');
+      return (tr.trigger.guard ? `[${tr.trigger.guardSrc}] ` : '') + (tr.internal ? `| ${acts}` : tr.target + (acts ? ` | ${acts}` : ''));
+    };
+    const rows = Object.values(m.states).map(st => [st.name, ...events.map(label => {
+      const arrows = st.on.filter(x => x.trigger.base === label);
+      return arrows.length ? arrows.map(cell).join('; ') : '–';
     })]);
     return {head: ['State', ...events], rows};
   }
+  const variablesText = vars => {
+    const list = Object.entries(vars).map(([name, v]) => `${name} = ${v}`);
+    return list.length ? `Variables: ${list.join(', ')}.` : null;
+  };
 
   function print(config) {
     let model;
@@ -856,9 +1320,12 @@
     const multi = model.machines.length > 1;
     const machines = model.machines.map(m => {
       const pic = drawMachine(layoutMachine(m), m, svgText, true);
-      return {title: multi ? m.title : null, svg: pic.svg.toString(), width: pic.width, height: pic.height, table: transitionTable(m)};
+      return {title: multi ? m.title : null, svg: pic.svg.toString(), width: pic.width, height: pic.height, table: transitionTable(m), note: variablesText(m.variables)};
     });
-    return {title: model.title || null, task: model.task || null, machines, warnings: model.warnings};
+    // what the diagrams do not show: the values variables start with, and the values of the buttons
+    const notes = [variablesText(model.variables),
+      ...Object.values(model.inputs).filter(i => i.values).map(i => `Values of ${i.name}: ${i.values.join(', ')}.`)].filter(Boolean);
+    return {title: model.title || null, task: model.task || null, notes, machines, warnings: model.warnings};
   }
 
   // ========================================================================
@@ -876,10 +1343,10 @@
     const reacts = [], sends = [];
     for (const st of Object.values(m.states)) {
       for (const tr of st.on) {
-        if (!reacts.includes(tr.trigger.label)) reacts.push(tr.trigger.label);
+        if (!reacts.includes(tr.trigger.base)) reacts.push(tr.trigger.base);
         for (const a of tr.actions) if (a.kind === 'send' && !sends.includes(a.event)) sends.push(a.event);
       }
-      for (const a of st.entry) if (a.kind === 'send' && !sends.includes(a.event)) sends.push(a.event);
+      for (const a of [...st.entry, ...st.exit]) if (a.kind === 'send' && !sends.includes(a.event)) sends.push(a.event);
     }
     v.pill = h('span', {class: 'sm-pill'});
     const fold = h('button', {class: 'sm-fold', type: 'button', 'aria-expanded': 'true'}, 'Fold');
@@ -926,12 +1393,22 @@
     const clicks = inputs.filter(i => !i.hold);
     if (inputs.length) {
       groups.push(h('div', {class: 'sm-group'}, h('div', {class: 'sm-cap', text: 'Inputs'}),
-        clicks.length ? h('div', {class: 'sm-buttons'}, clicks.map(i => h('button', {class: 'sm-ev', type: 'button', onClick: () => sim.dispatch(i.name)}, i.name))) : null,
+        clicks.length ? h('div', {class: 'sm-buttons'}, clicks.map(clickView)) : null,
         holdViews.map(v => v.el)));
     }
     const outEls = {};
     const outs = Object.values(model.outputs);
     if (outs.length) groups.push(h('div', {class: 'sm-group'}, h('div', {class: 'sm-cap', text: 'Outputs'}), h('div', {class: 'sm-outs'}, outs.map(o => (outEls[o.name] = outputView(o))))));
+    // the variables: those of the block, then each machine's own
+    const varRows = [];
+    const varRow = (key, name, sub) => {
+      const val = h('span', {class: 'val'});
+      varRows.push({key, val, el: h('div', {class: 'sm-var'}, h('span', {class: 'nm'}, name, sub ? h('small', {text: sub}) : null), val)});
+    };
+    for (const name of Object.keys(model.variables)) varRow(name, name, multi ? 'all machines' : null);
+    for (const m of model.machines) for (const name of Object.keys(m.variables)) varRow(`${m.name}.${name}`, name, m.title);
+    const varsGroup = varRows.length ? h('div', {class: 'sm-group'}, h('div', {class: 'sm-cap', text: 'Variables'}), h('div', {class: 'sm-vars'}, varRows.map(r => r.el))) : null;
+    if (varsGroup) groups.push(varsGroup);
     let textEl = null;
     if (model.prints) {
       textEl = h('div', {class: model.text === 'terminal' ? 'sm-terminal' : 'sm-display', 'aria-live': 'polite'});
@@ -941,7 +1418,10 @@
     let timersEl = null;
     if (timed) {
       timersEl = h('div', {class: 'sm-timers'});
-      groups.push(h('div', {class: 'sm-group'}, h('div', {class: 'sm-cap', text: 'Timers'}), timersEl));
+      const timersGroup = h('div', {class: 'sm-group'}, h('div', {class: 'sm-cap', text: 'Timers'}), timersEl);
+      // with variables, the timers go right under them, in one column of the board
+      if (varsGroup) groups[groups.indexOf(varsGroup)] = h('div', {class: 'sm-stack'}, varsGroup, timersGroup);
+      else groups.push(timersGroup);
     }
     top.append(h('div', {class: 'sm-board'}, groups));
 
@@ -973,6 +1453,13 @@
     if (model.log !== 'hidden') top.append(h('details', {class: 'sm-logbox', open: model.log === 'open'}, h('summary', {text: 'Log'}), logEl));
     host.replaceChildren(top);
 
+    // A click button; one with values has a list next to it, and sends what is chosen there.
+    function clickView(i) {
+      if (!i.values) return h('button', {class: 'sm-ev', type: 'button', onClick: () => sim.dispatch(i.name)}, i.name);
+      const list = h('select', {class: 'sm-val', 'aria-label': `The value of ${i.name}`}, i.values.map(v => h('option', {text: String(v)})));
+      return h('div', {class: 'sm-evval'},
+        h('button', {class: 'sm-ev', type: 'button', onClick: () => sim.dispatch(i.name, 'input', i.values[list.selectedIndex])}, i.name), list);
+    }
     // A hold button is down while it is held (mouse, touch, Space or Enter); a pin
     // is a switch: a click sets it high or low.
     function holdView(i) {
@@ -1067,16 +1554,21 @@
     }
     function show(fx) {
       if (fx.text) { write(shown, fx.text, model.text === 'terminal'); shown.version++; }
+      else if (fx.variable) shown.vars[fx.variable] = fx.value;
       else shown.out[fx.out] = fx.value;
     }
     // with no dot on its way, the page shows the machines as they are
     function resync() {
-      shown = {out: {...sim.out}, display: sim.display, lines: sim.lines.slice(), version: (shown?.version ?? 0) + 1};
+      shown = {out: {...sim.out}, vars: sim.values(), display: sim.display, lines: sim.lines.slice(), version: (shown?.version ?? 0) + 1};
     }
     const viewOf = s => views.find(x => x.m === s.m);
     const hooks = {
       log: addLog,
-      leave: s => land(viewOf(s)),
+      leave: (s, tr) => {
+        const v = viewOf(s);
+        land(v);
+        if (!tr.internal) glow(v, `${s.state}|exit`);
+      },
       effect: (s, fx, phase) => {
         const v = viewOf(s);
         if (phase === 'entry') v.buf.push(fx);              // for the move that follows (fired)
@@ -1094,10 +1586,11 @@
         if (f.edge) { pulse(f.edge.g, 'fired', Math.max(1000, ms + 600)); pulse(f.edge.label, 'fired', Math.max(1000, ms + 600)); }
         if (!(f.edge && !v.folded && ms >= 40 && token(v, f, ms))) land(v);
       },
-      ignored: (e, ms) => {
+      ignored: (e, ms, guards = []) => {
         if (e.source !== 'input' && e.source !== 'edge') return;
-        const where = ms.map(s => (multi ? `${s.m.name} is in ${s.state}` : s.state)).join(', ');
-        status(multi ? `${e.name} is ignored: ${where}, and none of them has an arrow for it.` : `${e.name} is ignored: ${where} has no arrow for it.`);
+        const where = ms.map(s => (multi ? `${s.m.name} is in ${s.state}` : s.state)).join(', '), name = eventText(e);
+        if (guards.length) status(`${name} is ignored: ${guards.map(g => `[${g}]`).join(' and ')} ${guards.length > 1 ? 'are' : 'is'} false.`);
+        else status(multi ? `${name} is ignored: ${where}, and none of them has an arrow for it.` : `${name} is ignored: ${where} has no arrow for it.`);
         for (const v of views) if (v.shown) pulse(v.pic.states[v.shown].g, 'ignored', 800);
       },
     };
@@ -1109,7 +1602,10 @@
       else if (e.start) msg = h('span', {}, who, `-> ${e.to}`);
       else if (e.ignored) {
         const where = e.states.map(([m, s]) => (multi ? `${m} in ${s}` : `in ${s}`)).join(', ');
-        msg = h('span', {}, h('b', {text: e.cause}), h('span', {class: 'ign', text: e.source === 'timer' ? ' ran out, ignored ' : ' ignored '}), h('span', {class: 'who', text: where}));
+        const why = e.guards?.length ? ` (${e.guards.map(g => `[${g}]`).join(' and ')} false)` : '';
+        msg = h('span', {}, h('b', {text: e.cause}), h('span', {class: 'ign', text: e.source === 'timer' ? ' ran out, ignored ' : ' ignored '}), h('span', {class: 'who', text: where + why}));
+      } else if (e.waiting) {
+        msg = h('span', {}, who, h('b', {text: e.cause}), h('span', {class: 'ign', text: ` time is up, waits: ${e.guards.map(g => `[${g}]`).join(' and ')} false`}));
       } else if (e.internal) msg = h('span', {}, who, h('b', {text: e.cause}), ` in ${e.from}: ${e.text || 'nothing'}`);
       else msg = h('span', {}, who, h('b', {text: e.cause}), `: ${e.from} -> ${e.to}`);
       const stick = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 6;
@@ -1122,11 +1618,11 @@
     function paintTimers() {
       const rows = [];
       for (const name of model.timers) {
-        const tm = sim.timers[name];
-        rows.push({key: `T|${name}`, name, sub: 'timer', left: tm ? tm.due - sim.t : null, total: tm ? tm.total : 0, idle: !tm});
+        const tm = sim.timers[name], late = sim.ms.some(s => s.late.has(name));
+        rows.push({key: `T|${name}`, name, sub: 'timer', left: tm ? tm.due - sim.t : null, total: tm ? tm.total : 0, idle: !tm && !late, blocked: late});
       }
       sim.ms.forEach(s => sim.pending(s).forEach(p => rows.push({key: `${s.m.name}|${s.state}|${p.label}`, name: p.label,
-        sub: multi ? `${s.m.name}, ${s.state}` : s.state, left: p.left, total: p.total, waiting: p.waiting})));
+        sub: multi ? `${s.m.name}, ${s.state}` : s.state, left: p.left, total: p.total, waiting: p.waiting, blocked: p.blocked})));
       const sig = rows.map(r => r.key).join('\n');
       if (sig !== timerSig) {
         timerSig = sig;
@@ -1139,9 +1635,9 @@
       }
       rows.forEach((r, k) => {
         const tr = timerRows[k];
-        const frac = r.idle || r.waiting || !r.total ? 0 : Math.min(1, Math.max(0, 1 - r.left / r.total));
+        const frac = r.blocked ? 1 : r.idle || r.waiting || !r.total ? 0 : Math.min(1, Math.max(0, 1 - r.left / r.total));
         tr.fill.style.width = `${(frac * 100).toFixed(1)}%`;
-        tr.left.textContent = r.idle ? 'not running' : r.waiting ? 'waiting' : `${fmt(r.left)} left`;
+        tr.left.textContent = r.blocked ? 'guard is false' : r.idle ? 'not running' : r.waiting ? 'waiting' : `${fmt(r.left)} left`;
       });
     }
     // the level of a hold input over the last 8 s of real time
@@ -1166,11 +1662,17 @@
           if (v.pill) v.pill.textContent = v.at;
         }
         const node = v.pic.states[v.at];
-        const p = !v.flight && v.at === s.state ? sim.pending(s).filter(x => !x.waiting).sort((a, b) => a.left - b.left)[0] : null;
+        const p = !v.flight && v.at === s.state ? sim.pending(s).filter(x => !x.waiting && !x.blocked).sort((a, b) => a.left - b.left)[0] : null;
         node.g.classList.toggle('timed', !!p);
         if (p) node.bar.setAttribute('width', r1(node.w * Math.min(1, Math.max(0, 1 - p.left / p.total))));
       });
       for (const o of outs) outEls[o.name].classList.toggle('on', !!shown.out[o.name]);
+      for (const r of varRows) {
+        const text = String(shown.vars[r.key]);
+        if (r.val.textContent === text) continue;
+        if (r.val.textContent) pulse(r.el, 'changed', 700);
+        r.val.textContent = text;
+      }
       if (textEl && shownText !== shown.version) {
         shownText = shown.version;
         if (model.text === 'terminal') { textEl.textContent = shown.lines.join('\n'); textEl.scrollTop = textEl.scrollHeight; }
@@ -1275,7 +1777,7 @@
 
   root.CourseStatemachines = {read, Sim, print, fmt,
     // for the tests (tests/statemachine.js)
-    internals: {layoutMachine, drawMachine, selfLoop, transitionTable, textWidth, measure, stateLines, edgeLines, svgText, speedOf, speedLabel, autoSpeeds}};
+    internals: {layoutMachine, drawMachine, selfLoop, transitionTable, textWidth, measure, stateLines, edgeLines, svgText, speedOf, speedLabel, autoSpeeds, inSeconds}};
 
   if (hasDom) {
     const mountAll = () => document.querySelectorAll('.course-statemachine[data-config]').forEach(el => {

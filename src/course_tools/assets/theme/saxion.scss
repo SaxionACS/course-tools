@@ -1036,6 +1036,16 @@ svg.cw-wv { display: block; max-width: none; }
 .sm-buttons { display: flex; flex-wrap: wrap; gap: .5rem; }
 .sm-ev, .sm-hold, .sm-pin { font: 700 .88rem var(--sm-mono); color: var(--sm-accent-dark); background: var(--sm-surface); border: 1.5px solid var(--sm-accent); border-radius: .35rem; padding: .4rem .8rem; cursor: pointer; box-shadow: 0 3px 0 var(--sm-accent); transition: transform .05s, box-shadow .05s, background .05s; touch-action: none; user-select: none; -webkit-user-select: none; }
 .sm-ev:active, .sm-hold[aria-pressed="true"], .sm-pin[aria-pressed="true"] { transform: translateY(3px); box-shadow: 0 0 0 var(--sm-accent); background: var(--sm-accent-soft); }
+.sm-evval { display: inline-flex; gap: .35rem; align-items: center; }
+.sm-val { font: .88rem var(--sm-mono); color: var(--sm-fg); background: var(--sm-surface); border: 1px solid var(--sm-line); border-radius: .3rem; padding: .35rem .25rem; cursor: pointer; }
+.sm-stack { display: grid; gap: .9rem; min-width: 0; }
+.sm-vars { display: grid; gap: .35rem; }
+.sm-var { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .6rem; font-size: .85rem; align-items: baseline; }
+.sm-var .nm { font-family: var(--sm-mono); overflow-wrap: anywhere; }
+.sm-var .nm small { display: block; font-family: $font-family-sans-serif; color: var(--sm-muted); }
+.sm-var .val { font-family: var(--sm-mono); font-weight: 700; font-variant-numeric: tabular-nums; }
+.sm-var.changed .val { animation: sm-changed .7s ease-out; }
+@keyframes sm-changed { 0%, 35% { color: var(--sm-warm); } 100% { color: var(--sm-fg); } }
 .sm-hold, .sm-pin { display: inline-grid; justify-items: start; line-height: 1.2; }
 .sm-hold small, .sm-pin small { font: 400 .7rem $font-family-sans-serif; color: var(--sm-muted); }
 .sm-holdrow { display: grid; gap: .3rem; }
@@ -1101,7 +1111,7 @@ svg.cw-wv { display: block; max-width: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .sm-state .box, .sm-ev, .sm-hold, .sm-pin, .sm-led i { transition: none; }
-  .sm-state.ignored .box, .sm-state .act.glow, .sm-buzz.on .wave { animation: none; }
+  .sm-state.ignored .box, .sm-state .act.glow, .sm-buzz.on .wave, .sm-var.changed .val { animation: none; }
 }
 
 // ------------------------------------------------------------------------

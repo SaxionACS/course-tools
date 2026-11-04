@@ -1,7 +1,7 @@
 # State machines
 
-State machines of every kind. The last ones have mistakes on purpose: the
-build reports them.
+State machines of every kind. Those under *Mistakes* have mistakes on purpose:
+the build reports them.
 
 ## A switch
 
@@ -135,4 +135,36 @@ states:
 
 ```statemachine
 states: [unclosed
+```
+
+## Variables, guards, a button with values and exit actions
+
+```statemachine
+title: SM-VARIABLES
+text: terminal
+inputs:
+  set_blinking: button [200, 1000]
+  stop_it: button
+  count_it: button
+  finish: button
+outputs:
+  LED: green led
+variables:
+  interval: 500
+  count: 0
+states:
+  OFF:
+    entry: LED off
+    on:
+      set_blinking(period): BLINKING / interval = period
+      count_it: / count++, print "count {count}"
+      finish [count >= 2]: DONE
+  BLINKING:
+    entry: LED on, start next_toggle interval ms
+    exit: stop next_toggle, print "left blinking"
+    on:
+      next_toggle: / LED toggle, start next_toggle interval ms
+      stop_it: OFF
+  DONE:
+    entry: print "done at {count}"
 ```
