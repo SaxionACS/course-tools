@@ -48,6 +48,7 @@ what changed recently.
 | `tests/course/` | test course that uses every feature |
 | `scripts/check.py` | builds the test course and checks the output |
 | `tests/widgets.js` | tests of the widgets' logic and PDF answers (`quarto run tests/widgets.js`, also run by `check.py`) |
+| `tests/pwm_browser.js` | the test course's PWM widgets in Chrome Headless Shell, driven over the DevTools protocol: challenges, dragging by mouse and touch, slow motion, LEDs, reduced motion (run by `check.py` after the build; also takes the template's PWM gallery page, and a folder for screenshots) |
 | `tests/statemachine.js` | tests of the state machines: running, mistakes, layouts that must not overlap, the PDF form (`quarto run tests/statemachine.js`, also run by `check.py`) |
 | `tests/statemachine_browser.js` | the test course's state machines in Chrome Headless Shell, driven over the DevTools protocol (run by `check.py` after the build) |
 | `tests/superloop.js` | tests of the superloop interpreter: C's integer rules, every row of the undefined-behaviour table (the values a Pico gives), mistakes, the lesson programs with scripted presses, goals and the PDF form (`quarto run tests/superloop.js`, also run by `check.py`) |

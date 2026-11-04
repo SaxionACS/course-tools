@@ -1,6 +1,6 @@
 /*
- * Course widgets: interactive widgets for bits, numbers, registers and data on
- * a wire (course-tools; see docs/authoring.md, "Widgets").
+ * Course widgets: interactive widgets for bits, numbers, registers, data on a
+ * wire and PWM (course-tools; see docs/authoring.md, "Widgets").
  *
  * A page writes a widget as a ```widget block with YAML. The build passes it
  * to the page as JSON: <div class="course-widget" data-config="...">.
@@ -14,8 +14,8 @@
  *   the browser before it is printed.
  *
  * A type is registered with Widget.define(name, {keys, views, controls,
- * defaults, render, print, exercise}). Nothing here belongs to a particular
- * processor: registers, fields and names come from the YAML.
+ * defaults, render, print, exercise}). Registers, fields and names come from
+ * the YAML; only type: pwm belongs to a particular processor (the RP2040).
  */
 (function (root) {
   'use strict';
@@ -167,6 +167,78 @@
   // The stdint.h type of a reading: uint8_t, int16_t, …; '' for widths without one (4, 12, …)
   const cType = (w, kind) => ([8, 16, 32, 64].includes(w) ? `${kind === 'signed' ? '' : 'u'}int${w}_t` : '');
 
+  // Quantities with units, as YAML gives them: 125 MHz, 10 kHz, 25%, 1.2 V, 500 ms, 10 us.
+  // A plain number is in the base unit (Hz, s, V; a fraction for %).
+  const PREFIXES = {n: 1e-9, u: 1e-6, 'µ': 1e-6, 'μ': 1e-6, m: 1e-3, k: 1e3, M: 1e6};
+  const UNITS = {Hz: ['frequency', '10 kHz'], s: ['time', '100 us'], V: ['voltage', '1.2 V'], '%': ['percentage', '25%']};
+  // The value of one quantity in `unit`, or null
+  function quantityValue(text, unit) {
+    if (typeof text === 'number') return Number.isFinite(text) ? text : null;
+    const m = /^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:e[+-]?\d+)?)\s*(?:(n|u|µ|μ|m|k|M)?(Hz|s|V)|(%))?$/.exec(String(text).trim());
+    if (!m) return null;
+    const x = Number(m[1].replace(',', '.'));
+    if (m[4]) return unit === '%' ? x / 100 : null;
+    if (!m[3]) return x;
+    return m[3] === unit ? x * (m[2] ? PREFIXES[m[2]] : 1) : null;
+  }
+  function quantityError(text, unit, what) {
+    const [name, example] = UNITS[unit];
+    return new Error(`${what}: "${text}" is not a ${name}. Write a number and a unit, e.g. ${example}`);
+  }
+  // quantity('10 kHz', 'Hz', 'frequency') → 10000; quantity('25%', '%', 'duty') → 0.25
+  function quantity(text, unit, what) {
+    const v = quantityValue(text, unit);
+    if (v === null) throw quantityError(text, unit, what);
+    return v;
+  }
+  // With a tolerance: '10 kHz +/- 100 Hz' (in the unit), '10 kHz +/- 1%' (relative), '25% +/- 0.1%'
+  // (percentage points). → {value, tol, rel}; tol is null when none is given. (± and +- are read too.)
+  function quantityTol(text, unit, what) {
+    const example = {Hz: '10 kHz +/- 100 Hz', s: '100 us +/- 1 us', V: '1.2 V +/- 0.1 V', '%': '25% +/- 0.1%'}[unit];
+    const wrong = () => new Error(`${what}: "${text}" is not a ${UNITS[unit][0]} with a tolerance. Write it like ${example}`);
+    const parts = String(text).split(/\+\/-|\+-|±/);
+    if (parts.length > 2) throw wrong();
+    if (parts.length === 1) {
+      // two quantities with a dash between them: a range, which is written with +/-
+      if (quantityValue(text, unit) === null && /\d\s*\S*\s*[-–—]\s*\d/.test(String(text))) throw wrong();
+      return {value: quantity(text, unit, what), tol: null, rel: false};
+    }
+    const value = quantityValue(parts[0], unit), t = parts[1].trim();
+    if (value === null) throw wrong();
+    const percent = /%$/.test(t);
+    if (unit === '%' && !percent) throw wrong();   // a plain number would be a fraction: 1 would mean 100 %
+    const tol = quantityValue(t, percent ? '%' : unit);
+    if (tol === null || tol < 0) throw wrong();
+    return {value, tol, rel: percent && unit !== '%'};
+  }
+  // For readouts: 10 kHz, 1.907 kHz, 524.3 µs, 8 ns (4 significant digits)
+  function fmtQuantity(v, unit, digits = 4) {
+    if (v === 0) return `0 ${unit}`;
+    const steps = [[1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n']];
+    // the largest prefix at which the rounded number is at least 1 (999.96 µs is 1 ms)
+    const [f, p] = steps.find(([f]) => Math.abs(Number((v / f).toPrecision(digits))) >= 1) || steps[steps.length - 1];
+    return `${Number((v / f).toPrecision(digits))} ${p}${unit}`;
+  }
+  // A fraction as a percentage: 25 %, ≈ 19.9997 %, ≈ 99.9985 %
+  function fmtPercent(x) {
+    const p = x * 100, t = Number(p.toFixed(4));
+    return `${Math.abs(t - p) > 1e-9 ? '≈ ' : ''}${t} %`;
+  }
+  // A value that misses its goal must not read as the goal: as many digits as that takes (999.98 Hz is not 1 kHz)
+  function fmtApart(v, goal, unit) {
+    for (let d = 4; d < 10; d++) {
+      const t = fmtQuantity(v, unit, d);
+      if (t !== fmtQuantity(goal, unit, d)) return t;
+    }
+    return fmtQuantity(v, unit, 10);
+  }
+  // In a sum: up to 6 digits, and ≈ when that rounds: 524.288 µs, ≈ 1.90735 kHz
+  function fmtExact(v, unit) {
+    return `${Math.abs(Number(v.toPrecision(6)) - v) > Math.abs(v) * 1e-12 ? '≈ ' : ''}${fmtQuantity(v, unit, 6)}`;
+  }
+  // 50 000 000: groups of three digits, with spaces that do not break
+  const groupDigits = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
   // ========================================================================
   // Kit: shared parts of the interactive widgets
   // ========================================================================
@@ -262,14 +334,75 @@
         },
       };
     },
+    // A range and a text box side by side, kept in sync. The text box takes what `parse` takes
+    // (it returns the value, or throws with the message shown under the box); the range covers
+    // min … max (log: a logarithmic range, for wraps up to 65535). onChange(value) after each change.
+    // Returns {el, set(value), setMax(max)}.
+    slider({label, min = 0, max, step = 1, value, format = String, parse = Number, log = false, width = '5.5rem', onChange}) {
+      const POS = 1000;
+      let lo = min, hi = max, v = value;
+      const toPos = x => (log ? Math.round(POS * Math.log(x - lo + 1) / Math.log(hi - lo + 1)) : x);
+      const fromPos = p => (log ? lo + Math.round(Math.exp(p / POS * Math.log(hi - lo + 1)) - 1) : p);
+      const id = nextId('sl');
+      const range = h('input', {type: 'range', class: 'cw-range', 'aria-label': label, min: log ? 0 : lo, max: log ? POS : hi, step: log ? 1 : step});
+      const text = h('input', {type: 'text', class: 'form-control form-control-sm', id, spellcheck: 'false', autocomplete: 'off', style: `width: ${width}`});
+      const err = h('span', {class: 'cw-err'});
+      const show = (except) => {
+        if (except !== range) range.value = String(toPos(Math.min(Math.max(v, lo), hi)));
+        if (except !== text) text.value = format(v);
+        range.setAttribute('aria-valuetext', format(v));
+      };
+      const change = (x, except) => {
+        v = x; show(except);
+        text.classList.remove('is-invalid'); err.textContent = '';
+        onChange(v);
+      };
+      range.addEventListener('input', () => change(fromPos(Number(range.value)), range));
+      // arrow keys move by `step` (exactly, also on a logarithmic range); Page Up/Down by a tenth of the range
+      range.addEventListener('keydown', e => {
+        const d = {ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1}[e.key];
+        const page = {PageUp: 1, PageDown: -1}[e.key];
+        if (!d && !page) return;
+        e.preventDefault();
+        const next = d ? v + d * step : log ? fromPos(toPos(v) + page * POS / 10) : v + page * Math.round((hi - lo) / 10);
+        change(Math.min(Math.max(next, lo), hi));
+      });
+      text.addEventListener('input', () => {
+        let x;
+        try { x = parse(text.value); } catch (e) { text.classList.add('is-invalid'); err.textContent = e.message; return; }
+        change(x, text);
+      });
+      text.addEventListener('blur', () => { text.classList.remove('is-invalid'); err.textContent = ''; show(); });
+      show();
+      const el = h('div', {class: 'cw-ctl cw-slider'}, h('label', {for: id, text: label}), h('span', {class: 'cw-row'}, range, text), err);
+      return {el, set(x) { v = x; show(); }, setMax(m) { hi = m; if (!log) range.max = m; show(); }};
+    },
+    // An LED: {el, set(on, brightness = 1)}; brightness 0 … 1 is how bright it looks (the glow).
+    led(color = 'red', label = '') {
+      oneOf(color, LED_COLORS, 'the colour of an LED');
+      const el = h('span', {class: `cw-led cw-${color}`, role: 'img'}, h('i'), label ? h('small', {text: label}) : null);
+      return {
+        el,
+        set(on, brightness = 1) {
+          el.classList.toggle('on', on);
+          el.style.setProperty('--b', on ? brightness.toFixed(3) : '0');
+        },
+      };
+    },
   };
+  const LED_COLORS = ['red', 'green', 'amber', 'yellow', 'blue', 'white'];
+  // How bright light looks: the CIE lightness L* of the luminance y (0 … 1), as 0 … 1.
+  // An LED that is on half the time looks 76 % bright (as in superloop.js).
+  const lightness = y => (y <= 216 / 24389 ? y * 24389 / 2700 : 1.16 * Math.cbrt(y) - 0.16);
+  // The other way round: the share of time on that looks this bright
+  const luminance = l => (l <= 0.08 ? l * 2700 / 24389 : ((l + 0.16) / 1.16) ** 3);
 
   // ========================================================================
   // Pictures for the PDF, as SVG text (print)
   // ========================================================================
   const INK = {
     fg: '#494c4e', muted: '#6c757d', line: '#b8c2ca', paper: '#ffffff', accent: '#009c82', onAccent: '#ffffff',
-    accentSoft: '#ecf6ee', warm: '#e87511', warmSoft: '#fdeedf', bad: '#c0392b', sig: '#2f3133', grid: '#e4e9ec',
+    accentSoft: '#ecf6ee', band: '#f4f6f7', warm: '#e87511', warmSoft: '#fdeedf', bad: '#c0392b', sig: '#2f3133', grid: '#e4e9ec',
     hatch: '#a5b2ae', field: ['#cfe6ff', '#ffdcbd', '#d4efc9', '#f2d3ee', '#fff0a8', '#d5ddff'],
   };
   const MONO = 'DejaVu Sans Mono, monospace';
@@ -300,6 +433,18 @@
     `.cw-wh-wrap-u{stroke:${INK.warm};stroke-width:2.5}`, `.cw-wh-wrap-s{stroke:${INK.accent};stroke-width:2.5;stroke-dasharray:5 3}`,
     `.cw-wh-center{font-size:18px;fill:${INK.fg};text-anchor:middle;font-weight:bold}`,
     `.cw-wh-center2{font-size:11px;fill:${INK.muted};text-anchor:middle}`,
+    `.cw-pwm-area{fill:${INK.grid};fill-opacity:.55;stroke:none}`, `.cw-pwm-stair{fill:none;stroke:${INK.sig};stroke-width:1.6;stroke-linejoin:round}`,
+    `.cw-pwm-wrapline{stroke:${INK.grid};stroke-width:1}`, '.cw-pwm-level{stroke-width:1.5;stroke-dasharray:5 3}',
+    `.cw-pwm-level.c{stroke:${INK.accent}}`, `.cw-pwm-level.t{stroke:${INK.warm}}`,
+    `.cw-pwm-lvl{font-size:10.5px;font-weight:bold;text-anchor:end;paint-order:stroke;stroke:${INK.paper};stroke-width:3px}`,
+    `.cw-pwm-lvl.c,.cw-pwm-edge.c,.cw-pwm-name.c{fill:${INK.accent}}`, `.cw-pwm-lvl.t,.cw-pwm-edge.t,.cw-pwm-name.t{fill:${INK.warm}}`,
+    `.cw-pwm-val{font-size:9.5px;fill:${INK.muted};text-anchor:middle}`, '.cw-pwm-edge{font-size:9.5px;text-anchor:middle}',
+    `.cw-pwm-axis{font-size:10px;fill:${INK.muted};text-anchor:end}`, '.cw-pwm-axis.start{text-anchor:start}', '.cw-pwm-axis.middle{text-anchor:middle}',
+    `.cw-pwm-period{stroke:${INK.line};stroke-width:1;stroke-dasharray:2 3}`, `.cw-pwm-tick{stroke:${INK.grid};stroke-width:1}`,
+    `.cw-pwm-axisline{stroke:${INK.muted};stroke-width:1}`,
+    `.cw-pwm-band{fill:${INK.band}}`, `.cw-pwm-divider{stroke:${INK.line};stroke-width:1.5}`, `.cw-pwm-section{font-size:10px;font-weight:bold;fill:${INK.muted};paint-order:stroke;stroke:${INK.band};stroke-width:3px}`,
+    '.cw-pwm-axis.lab{font-size:10.5px}', '.cw-pwm-axis.lab.ch{font-weight:bold}', `.cw-pwm-axis.lab.counter{fill:${INK.sig};font-weight:bold}`,
+    '.cw-pwm-lead{stroke-width:1}', `.cw-pwm-lead.c{stroke:${INK.accent}}`, `.cw-pwm-lead.t{stroke:${INK.warm}}`,
   ].join('');
 
   // Rows of boxes, one column per bit (or per cell), with a label column on the
@@ -2382,13 +2527,776 @@
   });
 
   // ========================================================================
+  // type: pwm: one PWM slice of the RP2040: a counter, the channel levels, the outputs
+  // ========================================================================
+  // The counter counts 0, 1, … wrap and starts again, so a period is wrap + 1 ticks of
+  // clkdiv / clock. A channel's output is high in the ticks where counter < level.
+  const PWM_CHANNELS = ['A', 'B'];
+  const PWM_SHOW = ['counter', 'outputs', 'numbers', 'code', 'led'];
+  const PWM_GOALS = ['frequency', 'period', 'duty', 'brightness', 'wrap', 'levels'];
+  const PWM_TOP = 65535;             // the largest wrap and level (16 bits)
+  const PWM_EYE = 0.02;              // the eye averages light over about 20 ms (as superloop.js)
+  const PWM_FLICKER = 70;            // below this frequency (Hz) an LED is seen to flicker; above it, it looks steady
+  const PWM_CLS = {A: 'c', B: 't'};  // the channels' colours: the waveform's accent and warm
+  const PWM_SPEEDS = [{value: 2.5, label: 'slow'}, {value: 1, label: 'normal'}, {value: 0.4, label: 'fast'}];
+
+  function pwmInt(v, what) {
+    const n = typeof v === 'number' ? v : Bits.parse(v ?? '') === null ? NaN : Number(Bits.parse(v));
+    if (!Number.isInteger(n)) throw new Error(`${what} is a whole number 0 … ${PWM_TOP}, not "${v}"`);
+    if (n < 0 || n > PWM_TOP) throw new Error(`${what} is 0 … ${PWM_TOP}, not ${n}`);
+    return n;
+  }
+  function pwmClkdiv(v) {
+    const d = typeof v === 'number' ? v : Number(String(v).trim().replace(/f$/i, ''));
+    if (!Number.isFinite(d) || d < 1 || d >= 256) throw new Error(`clkdiv is 1 … 255.9375, not ${v}`);
+    if (d * 16 !== Math.round(d * 16)) throw new Error(`clkdiv is a multiple of 1/16 (8 integer bits, 4 fraction bits), e.g. 2, 2.5 or 1.0625, not ${v}`);
+    return d;
+  }
+  // The settings of a pwm widget: {clock, wrap, levels: {A, B}, clkdiv, periods, show, check}
+  function pwmSettings(c) {
+    const clock = quantity(c.clock ?? '125 MHz', 'Hz', 'clock');
+    if (!(clock > 0)) throw new Error(`clock is a frequency above 0, not ${c.clock}`);
+    if (c.level != null && c.levels != null) throw new Error('give level or levels, not both');
+    const given = c.levels != null ? c.levels : {A: c.level ?? 0};
+    if (typeof given !== 'object' || Array.isArray(given)) throw new Error('levels is a mapping: {A: 1, B: 3}');
+    for (const k of Object.keys(given)) if (!PWM_CHANNELS.includes(k)) throw new Error(`a channel is A or B, not "${k}"`);
+    const levels = {};
+    for (const k of PWM_CHANNELS) if (k in given) levels[k] = pwmInt(given[k], `level ${k}`);
+    if (!Object.keys(levels).length) throw new Error('levels: give the level of channel A, B or both');
+    const periods = int(c.periods ?? 3);
+    if (periods < 1 || periods > 8) throw new Error(`periods is 1 … 8, not ${periods}`);
+    const show = listOf(c.show ?? ['counter', 'outputs', 'numbers', 'code']);
+    for (const s of show) oneOf(s, PWM_SHOW, 'a part to show');
+    return {clock, wrap: pwmInt(c.wrap ?? PWM_TOP, 'wrap'), levels, clkdiv: pwmClkdiv(c.clkdiv ?? 1), periods, show,
+      check: oneOf(c.check ?? 'button', ['button', 'live'], 'check')};
+  }
+  // All in whole ticks: {tickS, periodTicks, periodS, freq, channels: [{name, level, highTicks, duty}]}
+  function pwmModel(st) {
+    const periodTicks = st.wrap + 1, tickS = st.clkdiv / st.clock;
+    const channels = Object.entries(st.levels).map(([name, level]) => {
+      const highTicks = Math.min(level, periodTicks);
+      return {name, level, highTicks, duty: highTicks / periodTicks};
+    });
+    return {tickS, periodTicks, periodS: periodTicks * tickS, freq: st.clock / (st.clkdiv * periodTicks), channels};
+  }
+  // How bright an LED looks at time t (s): its light averaged by the eye (exponentially, over
+  // PWM_EYE), in the steady state of a signal that is high for highS of every periodS.
+  function eyeLevel(periodS, highS, t) {
+    if (highS <= 0) return 0;
+    if (highS >= periodS) return 1;
+    const b0 = Math.exp(-periodS / PWM_EYE) * Math.expm1(highS / PWM_EYE) / -Math.expm1(-periodS / PWM_EYE);   // at a period's start
+    const ph = ((t % periodS) + periodS) % periodS;
+    if (ph < highS) return 1 + (b0 - 1) * Math.exp(-ph / PWM_EYE);
+    return (1 + (b0 - 1) * Math.exp(-highS / PWM_EYE)) * Math.exp(-(ph - highS) / PWM_EYE);
+  }
+  // Slow motion: how long one period takes on the screen (s), at the normal speed
+  const pwmSlowPeriod = st => (st.wrap <= 31 ? Math.min(6.4, Math.max(1.6, 0.4 * (st.wrap + 1))) : 4);
+  const pwmRange = (a, b) => (a === b ? `${a}` : `${a} … ${b}`);
+  const fmtTime = s => (s === 0 ? '0' : fmtQuantity(s, 's'));
+  const fmtFreq = f => fmtQuantity(f, 'Hz');
+
+  // The formulas with the numbers filled in: [label, text]. opts.clkdiv: the divider is a control.
+  function pwmNumbers(st, opts = {}) {
+    const m = pwmModel(st), tick = fmtQuantity(m.tickS, 's', 6);
+    const equals = t => (t.startsWith('≈') ? t : `= ${t}`);   // = 8 ns, but ≈ 7.5188 ns
+    const lines = [
+      ['One tick', st.clkdiv === 1 && !opts.clkdiv ? `Δt = 1 / ${fmtFreq(st.clock)} ${equals(fmtExact(m.tickS, 's'))}` : `Δt = clkdiv / clock = ${st.clkdiv} / ${fmtFreq(st.clock)} ${equals(fmtExact(m.tickS, 's'))}`],
+      ['Period', `T = (wrap + 1) · Δt = (${st.wrap} + 1) · ${tick} ${equals(fmtExact(m.periodS, 's'))}, so the frequency is ${fmtExact(m.freq, 'Hz')}`],
+    ];
+    for (const ch of m.channels) {
+      lines.push([`Duty ${ch.name}`, ch.level > st.wrap + 1 ? `100 % (level ${ch.name} = ${ch.level} is above wrap + 1, so the output is always high)`
+        : `level / (wrap + 1) = ${ch.level} / ${m.periodTicks} ${equals(fmtPercent(ch.duty))}`]);
+    }
+    return lines;
+  }
+  // The SDK calls that give these settings
+  function pwmCode(st, clkdiv) {
+    const lines = [];
+    if (clkdiv || st.clkdiv !== 1) lines.push(`pwm_set_clkdiv(slice, ${Number.isInteger(st.clkdiv) ? st.clkdiv.toFixed(1) : st.clkdiv}f);`);
+    lines.push(`pwm_set_wrap(slice, ${st.wrap});`);
+    for (const [ch, l] of Object.entries(st.levels)) lines.push(`pwm_set_chan_level(slice, PWM_CHAN_${ch}, ${l});`);
+    return lines;
+  }
+
+  // ---- goals ---------------------------------------------------------------
+  // goal: decode, or {frequency | period, duty, brightness, wrap, levels}. Without a tolerance, a
+  // frequency or period is met by the nearest whole number of ticks (so wrap + 1 matters at every
+  // wrap); a duty within ± 0.05 percentage points, but 0 % and 100 % exactly (always low, always
+  // high); a brightness within ± 1 point. duty and brightness: 25% (channel A) or {A: …, B: …}.
+  // With a tolerance, the author's: 10 kHz +/- 100 Hz, 100 us +/- 1 us, 25% +/- 0.1%.
+  function pwmGoal(c, st) {
+    const g = c.goal;
+    if (g === 'decode') return {decode: true};
+    if (!g || typeof g !== 'object' || Array.isArray(g)) throw new Error(`a goal is decode, or a mapping with ${PWM_GOALS.join(', ')}`);
+    for (const k of Object.keys(g)) if (!PWM_GOALS.includes(k)) throw new Error(`a goal has ${PWM_GOALS.join(', ')}, not "${k}"`);
+    if (g.frequency != null && g.period != null) throw new Error('a goal has a frequency or a period, not both');
+    const out = {};
+    for (const [k, unit] of [['frequency', 'Hz'], ['period', 's']]) {
+      if (g[k] == null) continue;
+      const q = quantityTol(g[k], unit, k);
+      if (!(q.value > 0)) throw new Error(`${k} is above 0, not ${g[k]}`);
+      out[k] = q.tol === null ? {value: q.value, nearest: true, dflt: true} : q;
+    }
+    for (const [k, tol] of [['duty', 0.0005], ['brightness', 0.01]]) {
+      if (g[k] == null) continue;
+      const each = typeof g[k] === 'object' && !Array.isArray(g[k]) ? g[k] : {A: g[k]};
+      out[k] = {};
+      for (const [ch, v] of Object.entries(each)) {
+        if (!PWM_CHANNELS.includes(ch)) throw new Error(`${k}: a channel is A or B, not "${ch}"`);
+        if (!(ch in st.levels)) throw new Error(`${k} of channel ${ch}: channel ${ch} is not shown (add it to levels)`);
+        const q = quantityTol(v, '%', `${k} ${ch}`);
+        if (q.value < 0 || q.value > 1) throw new Error(`${k} ${ch} is 0 % … 100 %, not ${v}`);
+        out[k][ch] = q.tol === null ? {value: q.value, tol: k === 'duty' && (q.value === 0 || q.value === 1) ? 0 : tol, rel: false, dflt: true} : q;
+      }
+    }
+    if (g.wrap != null) out.wrap = pwmInt(g.wrap, 'the goal\'s wrap');
+    if (g.levels != null) {
+      if (typeof g.levels !== 'object' || Array.isArray(g.levels)) throw new Error('the goal\'s levels is a mapping: {A: 3125}');
+      out.levels = {};
+      for (const [ch, v] of Object.entries(g.levels)) {
+        if (!(ch in st.levels)) throw new Error(`the goal's levels: channel ${ch} is not shown (add it to levels)`);
+        out.levels[ch] = pwmInt(v, `the goal's level ${ch}`);
+      }
+    }
+    if (!Object.keys(out).length) throw new Error('the goal is empty');
+    return out;
+  }
+  const within = (have, q) => Math.abs(have - q.value) <= (q.rel ? q.tol * q.value : q.tol) * (1 + 1e-9) + 1e-15;
+  const tolText = (q, fmt, always = false) => (q.nearest || (q.dflt && !always) ? '' : q.rel ? ` ± ${Number((q.tol * 100).toPrecision(3))} %` : ` ± ${fmt(q.tol)}`);
+  const pctText = x => `${Number((x * 100).toPrecision(4))} %`;
+  const looksText = x => `${Number((x * 100).toFixed(1))} %`;   // how bright an LED looks
+
+  // Whether the settings meet the goal: {ok, first}; first is the first part that is not met:
+  // {live: what it is and what the goal is, blind: only that it is not right, hint: about a typical mistake}
+  function pwmGoalMet(goal, st, opts = {}) {
+    const m = pwmModel(st), byName = Object.fromEntries(m.channels.map(x => [x.name, x]));
+    const misses = [], tick = fmtTime(m.tickS);
+    const ticksFor = f => st.clock / (st.clkdiv * f);   // the ticks of a period with frequency f
+    for (const k of ['frequency', 'period']) {
+      const q = goal[k];
+      if (!q) continue;
+      const have = k === 'frequency' ? m.freq : m.periodS, fmt = k === 'frequency' ? fmtFreq : fmtTime, unit = k === 'frequency' ? 'Hz' : 's';
+      const T = k === 'frequency' ? ticksFor(q.value) : q.value / m.tickS;
+      if (q.nearest ? Math.abs(m.periodTicks - T) <= 0.5 + 1e-9 : within(have, q)) continue;
+      const ticks = Math.round(T);
+      let hint = null;
+      if (ticks === st.wrap && ticks >= 1) hint = `Close: wrap = ${st.wrap} gives wrap + 1 = ${st.wrap + 1} ticks per period, because the counter also counts 0. ${fmt(q.value)} needs ${Math.abs(T - ticks) < 1e-6 ? '' : 'about '}${ticks} ticks.`;
+      else if (T > PWM_TOP + 1 && opts.clkdiv) hint = 'Even the largest wrap gives a period that is too short: the clock divider makes each tick longer.';
+      else if (T > PWM_TOP + 1) hint = 'Even the largest wrap gives a period that is too short.';
+      misses.push({live: `the ${k} is ${fmtApart(have, q.value, unit)}. The goal is ${fmt(q.value)}${tolText(q, fmt)}.`, blind: `the ${k} is not ${fmt(q.value)}${tolText(q, fmt)}.`,
+        hint, general: `One period is wrap + 1 ticks of ${tick}.`});
+    }
+    if (goal.wrap != null && st.wrap !== goal.wrap) misses.push({live: `the wrap is ${st.wrap}. The goal is ${goal.wrap}.`, blind: 'the wrap is not the one asked for.'});
+    for (const [name, q] of Object.entries(goal.duty || {})) {
+      const ch = byName[name];
+      if (within(ch.duty, q)) continue;
+      let hint = null;
+      if (q.value === 1 && ch.level === PWM_TOP && st.wrap === PWM_TOP) hint = `The largest level is ${PWM_TOP}, and with this wrap a period has ${PWM_TOP + 1} ticks: one tick stays low.`;
+      else if (q.value === 1 && ch.level === st.wrap && st.wrap > 0) hint = 'Close: when the counter is wrap, counter < level is false, so the output is low in that tick.';
+      else if (ch.level === Math.round(q.value * st.wrap) && ch.level !== Math.round(q.value * (st.wrap + 1))) hint = 'Close: the duty is level / (wrap + 1), not level / wrap.';
+      misses.push({live: `the duty of channel ${name} is ${fmtPercent(ch.duty)}. The goal is ${pctText(q.value)}.`, blind: `the duty of channel ${name} is not ${pctText(q.value)}.`,
+        hint, general: 'The output is high while the counter is less than the level.'});
+    }
+    for (const [name, want] of Object.entries(goal.levels || {})) {
+      if (byName[name].level !== want) misses.push({live: `level ${name} is ${byName[name].level}. The goal is ${want}.`, blind: `level ${name} is not the one asked for.`});
+    }
+    for (const [name, q] of Object.entries(goal.brightness || {})) {
+      const ch = byName[name], b = lightness(ch.duty);
+      if (within(b, q)) continue;
+      const hint = Math.abs(ch.duty - q.value) < 0.02 && q.value > 0.05 && q.value < 0.95
+        ? `An LED that is on ${pctText(ch.duty)} of the time looks brighter than that: ${looksText(b)}. Your eye sees small amounts of light well.` : null;
+      misses.push({live: `LED ${name} looks ${looksText(b)} bright. The goal is ${pctText(q.value)}.`,
+        blind: `LED ${name} looks too ${b > q.value ? 'bright' : 'dim'}.`, hint});
+    }
+    return {ok: misses.length === 0, first: misses[0] || null, model: m};
+  }
+  // What a right answer is: the settings that were changed, and what they give
+  function pwmRightText(goal, st, c) {
+    const m = pwmModel(st), parts = [], what = [];
+    if (has(c.controls, 'clkdiv') || st.clkdiv !== 1) parts.push(`clkdiv = ${st.clkdiv}`);
+    parts.push(`wrap = ${st.wrap}`);
+    const chans = new Set([...Object.keys(goal.duty || {}), ...Object.keys(goal.brightness || {}), ...Object.keys(goal.levels || {})]);
+    for (const ch of m.channels) if (chans.has(ch.name) || has(c.controls, 'levels')) parts.push(`level ${ch.name} = ${ch.level}`);
+    if (goal.frequency) what.push(fmtFreq(m.freq));
+    if (goal.period) what.push(`a period of ${fmtTime(m.periodS)}`);
+    for (const ch of m.channels) {
+      if (goal.duty && goal.duty[ch.name]) what.push(`a duty of ${fmtPercent(ch.duty)}${m.channels.length > 1 ? ` on ${ch.name}` : ''}`);
+      if (goal.brightness && goal.brightness[ch.name]) what.push(`on ${fmtPercent(ch.duty)} of the time, LED ${ch.name} looks ${looksText(lightness(ch.duty))} bright`);
+    }
+    return `${parts.join(', ')}${what.length ? `: ${what.join(', ')}` : ''}.`;
+  }
+  // A decode exercise: do the student's wrap and levels give the same signal?
+  function pwmDecodeMet(st, answer) {
+    if (answer.wrap !== st.wrap) {
+      const hint = answer.wrap === st.wrap + 1 ? 'Close: you counted the ticks. The counter also counts 0, so one period is wrap + 1 ticks.' : 'Count the ticks of one period: the counter counts 0 … wrap.';
+      return {ok: false, text: `the wrap is not right. ${hint}`};
+    }
+    for (const [ch, l] of Object.entries(st.levels)) {
+      const P = st.wrap + 1, want = Math.min(l, P), have = Math.min(answer.levels[ch], P);
+      if (want === have) continue;
+      const hint = have === want - 1 ? 'Close: the output is high while counter < level, not counter ≤ level.' : `Count the ticks in which ${ch} is high.`;
+      return {ok: false, text: `level ${ch} is not right. ${hint}`};
+    }
+    return {ok: true};
+  }
+
+  // The answer for the PDF, and for Show the answer: settings that meet the goal. What is not in
+  // controls stays as configured. Throws with the reason when there are none.
+  function pwmAnswer(c, st, goal) {
+    const ctl = k => has(c.controls, k);
+    const timeGoal = goal.frequency || goal.period;
+    const targetF = goal.frequency ? goal.frequency.value : goal.period ? 1 / goal.period.value : null;
+    if (goal.wrap != null && !ctl('wrap') && goal.wrap !== st.wrap) throw new Error(`the goal's wrap is ${goal.wrap}, but wrap is not a control and is ${st.wrap}`);
+    for (const [ch, l] of Object.entries(goal.levels || {})) {
+      if (!ctl('levels') && l !== st.levels[ch]) throw new Error(`the goal's level ${ch} is ${l}, but levels are not a control and level ${ch} is ${st.levels[ch]}`);
+    }
+    // dividers: the configured one; with clkdiv a control and a time goal, 1, 2, … 255, then the fractions
+    const divs = [st.clkdiv];
+    if (ctl('clkdiv') && timeGoal) {
+      for (let d = 1; d <= 255; d++) divs.push(d);
+      for (let k = 17; k < 4096; k++) if (k % 16) divs.push(k / 16);
+    }
+    const wraps = d => {
+      if (goal.wrap != null) return [goal.wrap];
+      if (!ctl('wrap')) return [st.wrap];
+      if (timeGoal) { const w = Math.round(st.clock / (d * targetF)) - 1; return [w, w - 1, w + 1].filter(x => x >= 0 && x <= PWM_TOP); }
+      return [st.wrap, ...Array.from({length: PWM_TOP + 1}, (_, k) => PWM_TOP - k).filter(x => x !== st.wrap)];
+    };
+    const levelChoices = (ch, w) => {
+      if (goal.levels && goal.levels[ch] != null) return [goal.levels[ch]];
+      const P = w + 1, d = goal.duty && goal.duty[ch], b = goal.brightness && goal.brightness[ch];
+      if (!ctl('levels') || (!d && !b)) return [st.levels[ch]];
+      const y = d ? d.value : luminance(b.value);
+      const l = y === 1 ? P : Math.round(y * P);
+      return [...new Set([l, l - 1, l + 1])].filter(x => x >= 0 && x <= PWM_TOP);
+    };
+    const tried = new Set();
+    for (const d of divs) {
+      for (const w of wraps(d)) {
+        const key = `${d}/${w}`;
+        if (tried.has(key)) continue;
+        tried.add(key);
+        // each channel on its own (they do not depend on each other)
+        const levels = {};
+        let ok = true;
+        for (const ch of Object.keys(st.levels)) {
+          const found = levelChoices(ch, w).find(l => pwmGoalMet(pwmOneChannel(goal, ch), Object.assign({}, st, {clkdiv: d, wrap: w, levels: {[ch]: l}})).ok);
+          if (found === undefined) { ok = false; break; }
+          levels[ch] = found;
+        }
+        if (!ok) continue;
+        const ans = Object.assign({}, st, {clkdiv: d, wrap: w, levels});
+        if (pwmGoalMet(goal, ans).ok) return ans;
+      }
+    }
+    // no setting: why not
+    if (targetF) {
+      const maxDiv = ctl('clkdiv') ? 255.9375 : st.clkdiv;
+      const lowest = st.clock / (maxDiv * (PWM_TOP + 1)), highest = st.clock / (ctl('clkdiv') ? 1 : st.clkdiv);
+      if (targetF < lowest * (1 - 0.01)) throw new Error(`no setting gives ${fmtFreq(targetF)}: the lowest frequency with clkdiv ${maxDiv} is ${fmtFreq(lowest)}.${ctl('clkdiv') ? '' : ' Add clkdiv to controls, or choose a higher frequency'}`);
+      if (targetF > highest * 1.01) throw new Error(`no setting gives ${fmtFreq(targetF)}: the highest frequency is ${fmtFreq(highest)} (wrap 0)`);
+      if (!ctl('wrap') && !ctl('clkdiv')) throw new Error(`no setting gives ${fmtFreq(targetF)}: wrap and clkdiv are not controls, and they give ${fmtFreq(pwmModel(st).freq)}`);
+    }
+    for (const [ch, q] of Object.entries(goal.duty || {})) {
+      if (q.value === 1 && !ctl('wrap') && st.wrap === PWM_TOP) throw new Error(`100 % needs a level of wrap + 1 = ${PWM_TOP + 1}, but the largest level is ${PWM_TOP}. Add wrap to controls`);
+      if (!ctl('wrap') && !timeGoal) throw new Error(`no level gives ${pctText(q.value)}${tolText(q, pctText, true)} on channel ${ch} at wrap ${st.wrap} (wrap is not a control)`);
+    }
+    for (const [ch, q] of Object.entries(goal.brightness || {})) {
+      if (!ctl('wrap')) throw new Error(`no level makes LED ${ch} look ${pctText(q.value)}${tolText(q, pctText, true)} bright at wrap ${st.wrap} (wrap is not a control)`);
+    }
+    throw new Error('no setting meets the goal');
+  }
+  // The goal for one channel only (and the parts of the goal that are not about channels)
+  function pwmOneChannel(goal, ch) {
+    const g = {frequency: goal.frequency, period: goal.period, wrap: goal.wrap};
+    for (const k of ['duty', 'brightness', 'levels']) if (goal[k] && goal[k][ch] != null) g[k] = {[ch]: goal[k][ch]};
+    return g;
+  }
+
+  // ---- the picture: the settings (the counter, wrap, the levels) above the result (the outputs) --
+  // An SVG, in the browser (make = sv) or as text for the PDF (make = svgText). opts: width;
+  // counter, outputs: draw them; values: false hides the counter's values and the levels (decode);
+  // units: 'time' or 'ticks' on the time axis; badge: a text in the corner, or [text, shorter text]
+  // (slow motion); grab: handles on the levels, to drag them.
+  // Returns {svg, X, total, cy (the counter's y of a value), bottom, cheight, lanes: [{name, hi, lo}], levelY: {A: y}, top, end}
+  function pwmPlot(make, st, opts) {
+    const m = pwmModel(st), P = m.periodTicks, total = st.periods * P;
+    // as wide as the space for it, on a phone too: scrolled sideways, the handles of the levels would be out of reach
+    const W = Math.max(240, Math.round(opts.width || 640)), values = opts.values !== false, two = opts.counter && opts.outputs;
+    // the left column has a label for every line, and is as wide as the longest of them
+    const digits = Math.max(String(P).length, ...m.channels.map(ch => String(ch.level).length));
+    const LW = Math.max(72, opts.counter ? Math.ceil((10 + digits) * 6.4) + 12 : 0), RW = opts.grab ? 22 : 12;
+    const X = t => LW + (t / total) * (W - LW - RW);
+    const tickW = (W - LW - RW) / total, stairs = st.wrap <= 31;
+    const ticksText = n => `${n} tick${n === 1 ? '' : 's'}`;
+    const fmtT = ticks => (opts.units === 'ticks' ? (ticks === 0 ? '0' : ticksText(ticks)) : fmtTime(ticks * m.tickS));
+    const svg = make('svg', {class: 'cw-wv cw-pwm-plot', role: 'img',
+      'aria-label': `PWM, wrap ${values ? st.wrap : '?'}: ${m.channels.map(ch => `channel ${ch.name} high for ${values ? ch.highTicks : '?'} of every ${values ? P : '?'} ticks`).join(', ')}`});
+    const bands = make('g', {}), back = make('g', {}), front = make('g', {});
+    svg.append(bands, back, front);
+    let y = opts.badge ? 26 : 4;
+    const section = text => { front.append(make('text', {x: 6, y: y + 11, class: 'cw-pwm-section', text})); y += 16; };
+    const out = {X, total, cy: null, bottom: 0, lanes: [], levelY: {}, stairs};
+    const top0 = two ? y + 16 : y;
+
+    if (opts.counter) {
+      if (two) section('SETTINGS: wrap and levels');
+      const top = y + 16, H = 104, bottom = top + H;
+      const cy = v => bottom - (Math.min(v, P) / P) * H;   // 0 at the bottom, wrap + 1 at the top
+      out.cy = cy; out.bottom = bottom; out.cheight = H;
+      back.append(make('line', {x1: LW, x2: X(total), y1: cy(st.wrap), y2: cy(st.wrap), class: 'cw-pwm-wrapline'}));
+      let d;
+      if (stairs) {
+        d = `M${X(0)} ${cy(0)}`;
+        for (let t = 0; t < total; t++) { d += ` H${X(t + 1)}`; if (t + 1 < total) d += ` V${cy((t + 1) % P)}`; }
+        if (values && tickW >= 14) {
+          for (let t = 0; t < total; t++) front.append(make('text', {x: X(t + 0.5), y: cy(t % P) - 4, class: 'cw-pwm-val', text: String(t % P)}));
+        }
+      } else {
+        d = '';
+        for (let p = 0; p < st.periods; p++) d += `${p ? ' L' : 'M'}${X(p * P)} ${cy(0)} L${X((p + 1) * P)} ${cy(st.wrap)}${p + 1 < st.periods ? ` V${cy(0)}` : ''}`;
+      }
+      back.append(make('path', {d: `${d} V${bottom} H${X(0)} Z`, class: 'cw-pwm-area'}));
+      front.append(make('path', {d, class: 'cw-pwm-stair'}));
+      // the labels of the lines, in the left column; those that would touch are moved apart, with a short line to theirs
+      const labels = [{y: cy(0), text: '0', cls: ''}, {y: (cy(0) + cy(st.wrap || 0.5)) / 2, text: 'counter', cls: ' counter'}];
+      if (st.wrap > 0) labels.push({y: cy(st.wrap), text: values ? `wrap = ${st.wrap}` : 'wrap', cls: ''});
+      if (values) {
+        for (const ch of m.channels) {
+          const above = ch.level > P, yy = above ? top - 8 : cy(ch.level), cls = PWM_CLS[ch.name];
+          out.levelY[ch.name] = yy;
+          front.append(make('line', {x1: LW, x2: X(total), y1: yy, y2: yy, class: `cw-pwm-level ${cls}`}));
+          labels.push({y: yy, text: `level ${ch.name} = ${ch.level}`, cls: ` ch cw-pwm-name ${cls}`, lead: cls});
+          const note = above ? 'above wrap: always high' : ch.level === P ? 'wrap + 1: always high' : ch.level === 0 ? 'always low' : '';
+          if (note) front.append(make('text', {x: X(total) - 3, y: above ? yy + 13 : yy - 4, class: `cw-pwm-lvl ${cls}`, text: note}));
+          if (opts.grab) {
+            const hx = X(total) + 10;
+            front.append(make('rect', {x: LW, y: yy - 6, width: X(total) - LW, height: 12, class: 'cw-pwm-grab', 'data-ch': ch.name}, make('title', {text: `Drag to change level ${ch.name}`})));
+            front.append(make('g', {class: `cw-pwm-handle ${cls}`, 'data-ch': ch.name}, make('title', {text: `Drag to change level ${ch.name}`}),
+              make('circle', {cx: hx, cy: yy, r: 8}),
+              make('path', {d: `M${hx - 3.6} ${yy - 1.4} L${hx} ${yy - 5.8} L${hx + 3.6} ${yy - 1.4} Z M${hx - 3.6} ${yy + 1.4} L${hx} ${yy + 5.8} L${hx + 3.6} ${yy + 1.4} Z`})));
+          }
+        }
+      }
+      labels.sort((a, b) => a.y - b.y);
+      const placed = labels.map(l => l.y), last = placed.length - 1;
+      for (let k = 1; k <= last; k++) placed[k] = Math.max(placed[k], placed[k - 1] + 12);
+      if (placed[last] > bottom + 3) {   // clear of the line under the settings
+        placed[last] = bottom + 3;
+        for (let k = last - 1; k >= 0; k--) placed[k] = Math.min(placed[k], placed[k + 1] - 12);
+      }
+      labels.forEach((l, k) => {
+        front.append(make('text', {x: LW - 8, y: placed[k] + 3.5, class: `cw-pwm-axis lab${l.cls}`, text: l.text}));
+        if (l.lead && Math.abs(placed[k] - l.y) > 1.5) front.append(make('line', {x1: LW - 6, x2: LW, y1: placed[k], y2: l.y, class: `cw-pwm-lead ${l.lead}`}));
+      });
+      y = bottom + 10;
+    }
+
+    const bandTop = y;
+    if (two) { front.append(make('line', {x1: 0, x2: W, y1: y, y2: y, class: 'cw-pwm-divider'})); y += 2; section('RESULT: the outputs'); }
+    if (opts.outputs) {
+      for (const ch of m.channels) {
+        const hi = y + 6, lo = y + 30, H = ch.highTicks, cls = PWM_CLS[ch.name];
+        front.append(make('text', {x: LW - 8, y: (hi + lo) / 2 + 3.5, class: `cw-pwm-axis lab ch cw-pwm-name ${cls}`, text: `output ${ch.name}`}));
+        let d = `M${X(0)} ${H > 0 ? hi : lo}`;
+        for (let p = 0; p < st.periods; p++) {
+          const t0 = p * P;
+          if (p > 0 && H > 0 && H < P) d += ` V${hi}`;
+          if (H > 0 && H < P) d += ` H${X(t0 + H)} V${lo}`;
+          d += ` H${X(t0 + P)}`;
+        }
+        front.append(make('path', {d, class: `cw-wv-sig ${cls}`}));
+        // what each part means, on hover
+        const tip = (high, a, b) => (values
+          ? `${high ? 'high' : 'low'}: the counter (${pwmRange(a, b)}) is ${high ? '' : 'not '}less than level ${ch.name} (${ch.level})`
+          : (high ? 'high' : 'low'));
+        for (let p = 0; p < st.periods; p++) {
+          const t0 = p * P;
+          if (H > 0) front.append(make('rect', {x: X(t0), y: hi - 3, width: X(t0 + H) - X(t0), height: lo - hi + 6, class: 'cw-wv-hit'}, make('title', {text: tip(true, 0, H - 1)})));
+          if (H < P) front.append(make('rect', {x: X(t0 + H), y: hi - 3, width: X(t0 + P) - X(t0 + H), height: lo - hi + 6, class: 'cw-wv-hit'}, make('title', {text: tip(false, H, st.wrap)})));
+        }
+        // how long it is high, under the first high part
+        if (H > 0 && H < P) {
+          const text = `high ${fmtT(H)}`, half = text.length * 2.9;
+          front.append(make('text', {x: Math.min(Math.max(X(H / 2), LW + half), X(total) - half), y: lo + 12, class: `cw-pwm-edge ${cls}`, text}));
+        }
+        out.lanes.push({name: ch.name, hi, lo});
+        y = lo + (H > 0 && H < P ? 18 : 8);
+      }
+    }
+    if (two) bands.append(make('rect', {x: 0, y: bandTop, width: W, height: y - bandTop, class: 'cw-pwm-band'}));
+
+    // the periods (dotted), the ticks (faint), the time axis
+    const end = y, top = top0 + 2;
+    if (stairs && tickW >= 5) for (let t = 1; t < total; t++) if (t % P) back.append(make('line', {x1: X(t), x2: X(t), y1: top, y2: end, class: 'cw-pwm-tick'}));
+    for (let p = 0; p <= st.periods; p++) back.append(make('line', {x1: X(p * P), x2: X(p * P), y1: top, y2: end + 4, class: 'cw-pwm-period'}));
+    front.append(make('line', {x1: LW, x2: X(total), y1: end + 4, y2: end + 4, class: 'cw-pwm-axisline'}));
+    if (stairs && tickW >= 5) for (let t = 0; t <= total; t++) front.append(make('line', {x1: X(t), x2: X(t), y1: end + 4, y2: end + (t % P ? 7 : 9), class: 'cw-pwm-axisline'}));
+    // the time at each period's start; one that would touch another is left out (the first and the last stay)
+    const stamps = [...Array(st.periods + 1).keys()].map(p => ({x: X(p * P), text: fmtT(p * P), anchor: p === 0 ? 'start' : p === st.periods ? 'end' : 'middle'}));
+    const extent = o => { const w = o.text.length * 6; return o.anchor === 'start' ? [o.x, o.x + w] : o.anchor === 'end' ? [o.x - w, o.x] : [o.x - w / 2, o.x + w / 2]; };
+    const shown = [stamps[0], stamps[st.periods]];
+    for (const o of stamps.slice(1, -1)) {
+      const [a, b] = extent(o);
+      if (shown.every(other => { const [c, d] = extent(other); return b + 8 <= c || d + 8 <= a; })) shown.push(o);
+    }
+    for (const o of shown.sort((u, v) => u.x - v.x)) front.append(make('text', {x: o.x, y: end + 20, class: `cw-pwm-axis ${o.anchor}`, text: o.text}));
+    if (opts.badge) {
+      const [long, short] = listOf(opts.badge), wide = t => t.length * 6.7 + 18;
+      const text = wide(long) + 12 <= W || !short ? long : short;
+      front.append(make('g', {class: 'cw-pwm-badge'}, make('rect', {x: 6, y: 3, width: wide(text), height: 19, rx: 9.5}),
+        make('text', {x: 15, y: 16.5, text})));
+    }
+    const height = end + 28;
+    svg.setAttribute('width', W); svg.setAttribute('height', height); svg.setAttribute('viewBox', `0 0 ${W} ${height}`);
+    out.svg = svg; out.height = height; out.top = top; out.end = end;
+    return out;
+  }
+
+  Widget.define('pwm', {
+    keys: ['clock', 'wrap', 'levels', 'level', 'clkdiv', 'periods', 'show', 'check'],
+    controls: ['wrap', 'levels', 'clkdiv'],
+    defaults: {controls: []},
+    render(root, c, kit) {
+      const st0 = pwmSettings(c);
+      const goal = c.goal != null ? pwmGoal(c, st0) : null;
+      const decode = !!(goal && goal.decode);
+      if (decode && listOf(c.controls).length) throw new Error('a decode goal has no controls: students read the settings from the signal');
+      const st = Object.assign({}, st0, {levels: Object.assign({}, st0.levels)});
+      const ctl = k => has(c.controls, k);
+      const shows = k => st.show.includes(k) || (k === 'led' && goal && goal.brightness) || (k === 'outputs' && decode);
+      // blind: a challenge checked with the Check button; its numbers wait until the answer is right
+      const blind = !!goal && (decode || st.check === 'button');
+      let revealed = !blind, wrong = false;
+      // a challenge hides what gives the answer away (the frequency, the duty); a decode exercise
+      // hides the settings themselves (the counter, the levels), until the answer is right
+      const secret = () => blind && !decode && !revealed, settingsHidden = () => decode && !revealed;
+      const reduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      let playing = !reduced, speed = 1, pos = 0, last = null, visible = true, raf = null, plot = null, dyn = null, nowKey = '';
+
+      // ---- controls -------------------------------------------------------
+      const top = h('div', {class: 'cw-controls'});
+      const sliders = {};
+      const parseInt16 = what => text => {
+        const v = Bits.parse(text);
+        if (v === null) throw new Error('not a number');
+        if (v < 0n || v > BigInt(PWM_TOP)) throw new Error(`${what} is 0 … ${PWM_TOP}`);
+        return Number(v);
+      };
+      if (ctl('wrap')) {
+        sliders.wrap = kit.slider({label: 'Wrap', max: PWM_TOP, log: true, value: st.wrap, parse: parseInt16('wrap'), onChange: v => { st.wrap = v; changed(); }});
+        top.append(sliders.wrap.el);
+      }
+      if (ctl('levels')) {
+        for (const ch of Object.keys(st.levels)) {
+          sliders[ch] = kit.slider({label: `Level ${ch}`, max: Math.min(PWM_TOP, st.wrap + 1), value: st.levels[ch], parse: parseInt16('a level'),
+            onChange: v => { st.levels[ch] = v; changed(); }});
+          sliders[ch].el.classList.add(`cw-pwm-ch-${PWM_CLS[ch]}`);
+          top.append(sliders[ch].el);
+        }
+      }
+      if (ctl('clkdiv')) {
+        const input = h('input', {type: 'text', class: 'form-control form-control-sm', id: nextId('div'), value: String(st.clkdiv), spellcheck: 'false', autocomplete: 'off', style: 'width: 6rem'});
+        const err = h('span', {class: 'cw-err'});
+        input.addEventListener('input', () => {
+          try { st.clkdiv = pwmClkdiv(input.value); input.classList.remove('is-invalid'); err.textContent = ''; changed(); }
+          catch (e) { input.classList.add('is-invalid'); err.textContent = e.message.replace(/^clkdiv is /, ''); }
+        });
+        input.addEventListener('blur', () => { input.classList.remove('is-invalid'); err.textContent = ''; input.value = String(st.clkdiv); });
+        sliders.clkdiv = {set(v) { input.value = String(v); }};
+        top.append(h('div', {class: 'cw-ctl'}, h('label', {for: input.id, text: 'Clock divider'}), input, err));
+      }
+
+      // ---- slow motion: play, step, speed --------------------------------
+      const playBtn = kit.button('', () => { playing = !playing; last = null; showPlay(); wake(); });
+      const stepBtn = kit.button('', () => { playing = false; showPlay(); step(); });
+      const showPlay = () => { playBtn.textContent = playing ? 'Pause' : 'Play'; };
+      const slowNote = h('span', {class: 'cw-note'});
+      const playRow = h('div', {class: 'cw-row cw-pwm-play'}, playBtn, stepBtn,
+        kit.segmented(PWM_SPEEDS, speed, v => { speed = v; showSlow(); }), slowNote);
+      showPlay();
+
+      // ---- the picture, the readout, the LEDs, numbers, code -----------------
+      const view = h('div', {class: 'cw-wave cw-pwm-view'});
+      const now = h('div', {class: 'cw-pwm-now', 'aria-hidden': 'true'});
+      const board = h('div', {class: 'cw-pwm-board'});
+      const ledNote = h('div', {class: 'cw-note'});
+      const given = h('div', {class: 'cw-explain cw-pwm-given'});   // a challenge always says how long one tick lasts
+      const numbers = h('div', {class: 'cw-explain cw-pwm-numbers'});
+      const code = h('div', {class: 'cw-code'});
+      const status = kit.status();
+      const leds = {};
+      for (const ch of Object.keys(st.levels)) {
+        const slow = kit.led('red', 'slow motion'), real = kit.led('red', 'real speed');
+        const goalLed = goal && goal.brightness && goal.brightness[ch] ? kit.led('red', 'goal') : null;
+        if (goalLed) goalLed.set(goal.brightness[ch].value > 0, goal.brightness[ch].value);
+        const looks = h('small', {class: 'cw-pwm-looks'});
+        board.append(h('div', {class: 'cw-pwm-leds'}, h('b', {class: `cw-pwm-name ${PWM_CLS[ch]}`, text: `LED ${ch}`}),
+          h('div', {class: 'cw-row'}, slow.el, real.el, goalLed ? goalLed.el : null), looks));
+        leds[ch] = {slow, real, looks};
+      }
+
+      // ---- checking ---------------------------------------------------------
+      const checkBox = h('div', {class: 'cw-decode'});
+      const answerBtn = kit.button('Show the answer', () => showAnswer());
+      answerBtn.hidden = true;
+      const decodeInputs = {};
+      if (decode) {
+        const box = (key, label) => {
+          const input = h('input', {type: 'text', class: 'form-control form-control-sm', id: nextId('dec'), spellcheck: 'false', autocomplete: 'off', placeholder: '?'});
+          decodeInputs[key] = input;
+          checkBox.append(kit.control(label, input));
+        };
+        box('wrap', 'Wrap');
+        for (const ch of Object.keys(st.levels)) box(ch, `Level ${ch}`);
+      }
+      if (blind) checkBox.append(kit.button('Check', () => check(), true), answerBtn);
+
+      function check() {
+        if (decode) {
+          const read = {levels: {}};
+          for (const [k, input] of Object.entries(decodeInputs)) {
+            const v = Bits.parse(input.value);
+            if (v === null) { status.no(`Fill in ${k === 'wrap' ? 'the wrap' : `level ${k}`} as a number.`); input.focus(); return; }
+            if (k === 'wrap') read.wrap = Number(v); else read.levels[k] = Number(v);
+          }
+          const r = pwmDecodeMet(st, read);
+          if (r.ok) { revealed = true; status.ok(`Right! wrap = ${st.wrap}, ${Object.entries(st.levels).map(([k, l]) => `level ${k} = ${l}`).join(', ')}. The counter and the numbers are now shown.`); }
+          else { wrong = true; status.no(`Not yet: ${r.text}`); }
+        } else {
+          const r = pwmGoalMet(goal, st, {clkdiv: ctl('clkdiv')});
+          if (r.ok) { revealed = true; status.ok(`Right! ${pwmRightText(goal, st, c)}`); }
+          else { wrong = true; status.no(`Not yet: ${r.first.blind}${r.first.hint ? ` ${r.first.hint}` : r.first.general ? ` ${r.first.general}` : ''}`); }
+        }
+        answerBtn.hidden = !wrong || revealed;
+        redraw();
+      }
+      function showAnswer() {
+        if (decode) {
+          decodeInputs.wrap.value = String(st.wrap);
+          for (const [k, l] of Object.entries(st.levels)) decodeInputs[k].value = String(l);
+          revealed = true;
+          status.info('The answer is filled in, and the counter is now shown.');
+        } else {
+          let ans;
+          try { ans = pwmAnswer(c, st0, goal); } catch (e) { status.no(e.message); return; }   // the build reports this goal too
+          Object.assign(st, {wrap: ans.wrap, clkdiv: ans.clkdiv, levels: Object.assign({}, ans.levels)});
+          for (const [k, s] of Object.entries(sliders)) s.set(k === 'wrap' ? st.wrap : k === 'clkdiv' ? st.clkdiv : st.levels[k]);
+          revealed = true;
+          status.info(`One answer: ${pwmRightText(goal, st, c)}`);
+        }
+        answerBtn.hidden = true;
+        changed(true);
+      }
+      function liveStatus() {
+        if (!goal || blind) return;
+        const r = pwmGoalMet(goal, st, {clkdiv: ctl('clkdiv')});
+        if (r.ok) status.ok(`Right! ${pwmRightText(goal, st, c)}`);
+        else status.info(`Not yet: ${r.first.live}${r.first.hint ? ` ${r.first.hint}` : ''}`);
+      }
+
+      // ---- drawing ------------------------------------------------------------
+      const units = () => (secret() ? 'ticks' : 'time');
+      function slowText() {
+        const m = pwmModel(st), slowP = pwmSlowPeriod(st) * speed, f3 = Number((slowP / m.periodS).toPrecision(3));
+        const factor = f3 >= 1000 ? groupDigits(Math.round(f3)) : String(f3);
+        const tickReal = st.wrap <= 31 ? ` (${fmtTime(m.tickS)})` : '';
+        const per = st.wrap <= 31 ? `one tick${tickReal} takes ${fmtTime(slowP / m.periodTicks)} here` : `one period${secret() ? '' : ` (${fmtTime(m.periodS)})`} takes ${fmtTime(slowP)} here`;
+        return {badge: secret() ? ['SLOW MOTION · far slower than real time', 'SLOW MOTION'] : [`SLOW MOTION · ${factor} × slower than real time`, `SLOW MOTION · ${factor} × slower`],
+          note: `Slowed down so that you can follow it: ${per}. The LEDs at real speed show what your eye would see.`};
+      }
+      function showSlow() { slowNote.textContent = slowText().note; renderPlot(); }
+      function renderPlot() {
+        const width = view.clientWidth || 640;
+        const counter = shows('counter') && !settingsHidden();
+        plot = pwmPlot(sv, st, {width: width - 2, counter, outputs: shows('outputs'), values: !settingsHidden(), units: units(),
+          badge: slowText().badge, grab: ctl('levels')});
+        // what moves: the tick now (a band), a line, and a dot on each signal
+        dyn = {band: plot.stairs ? sv('rect', {class: 'cw-pwm-nowband', y: plot.top, height: plot.end + 4 - plot.top}) : null,
+          line: sv('line', {class: 'cw-pwm-nowline', y1: plot.top, y2: plot.end + 4}),
+          dot: plot.cy ? sv('circle', {class: 'cw-pwm-nowdot', r: 4}) : null,
+          lanes: plot.lanes.map(l => ({l, dot: sv('circle', {class: `cw-pwm-nowdot ${PWM_CLS[l.name]}`, r: 4})}))};
+        plot.svg.append(sv('g', {class: 'cw-pwm-dyn'}, dyn.band, dyn.line, dyn.dot, dyn.lanes.map(x => x.dot)));
+        view.replaceChildren(plot.svg);
+        drawNow();
+      }
+      function redraw() {
+        const m = pwmModel(st);
+        renderPlot();
+        slowNote.textContent = slowText().note;
+        const lines = pwmNumbers(st, {clkdiv: ctl('clkdiv')});
+        given.replaceChildren(h('div', {}, h('b', {text: `${lines[0][0]}: `}), lines[0][1]));
+        numbers.replaceChildren(...(revealed
+          ? (goal ? lines.slice(1) : lines).map(([k, t]) => h('div', {}, h('b', {text: `${k}: `}), t))
+          : [h('div', {text: decode ? 'The numbers appear when you have read the signal.' : 'The numbers appear when your answer is right.'})]));
+        code.textContent = pwmCode(st, ctl('clkdiv')).join('\n');
+        code.hidden = settingsHidden();
+        for (const ch of m.channels) {
+          leds[ch.name].looks.textContent = revealed ? `on ${fmtPercent(ch.duty)} of the time, looks ${looksText(lightness(ch.duty))} bright` : '';
+        }
+        const times = m.freq >= 1e4 ? `${groupDigits(Math.round(Number(m.freq.toPrecision(4))))} times` : `${groupDigits(Number(m.freq.toPrecision(4)))} times`;
+        ledNote.textContent = m.freq < PWM_FLICKER
+          ? `At real speed, ${revealed ? `the LED switches on ${times} per second. That is` : 'this is'} slow enough for your eye to see it flicker.`
+          : `At real speed, ${revealed ? `the LED switches on ${times} per second` : 'the LED switches on and off so often'}: too fast for your eye, so it looks steady.`;
+        stepBtn.textContent = st.wrap <= 31 ? 'Next tick' : 'Next change';
+        if (!blind) liveStatus();
+        wake();
+      }
+      function changed(keep) {
+        for (const ch of Object.keys(st.levels)) if (sliders[ch]) sliders[ch].setMax(Math.min(PWM_TOP, st.wrap + 1));
+        if (blind && !keep && status.el.classList.contains('ok')) status.info('You changed the settings: Check again.');
+        redraw();
+      }
+
+      // the moment shown: pos, in ticks from the start of the picture
+      function drawNow() {
+        if (!plot) return;
+        const m = pwmModel(st), P = m.periodTicks, total = plot.total;
+        const t = ((pos % total) + total) % total, tick = Math.floor(t), k = tick % P;
+        const x = plot.X(t);
+        if (dyn.band) { dyn.band.setAttribute('x', plot.X(tick)); dyn.band.setAttribute('width', plot.X(tick + 1) - plot.X(tick)); }
+        dyn.line.setAttribute('x1', x); dyn.line.setAttribute('x2', x);
+        if (dyn.dot) { dyn.dot.setAttribute('cx', x); dyn.dot.setAttribute('cy', plot.cy(k)); }
+        for (const {l, dot} of dyn.lanes) {
+          const ch = m.channels.find(z => z.name === l.name);
+          dot.setAttribute('cx', x); dot.setAttribute('cy', k < ch.highTicks ? l.hi : l.lo);
+        }
+        now.hidden = settingsHidden() || !shows('counter');
+        const key = `${k} ${m.channels.map(ch => ch.level).join(' ')}`;
+        if (key === nowKey) return;   // the readout and the slow LEDs change once per tick
+        nowKey = key;
+        now.replaceChildren(h('span', {}, 'counter ', h('b', {text: String(k)})),
+          ...m.channels.map(ch => h('span', {class: `cw-pwm-name ${PWM_CLS[ch.name]}`},
+            `${ch.name}: ${k} < ${ch.level}? ${k < ch.level ? 'yes, high' : 'no, low'}`)));
+        for (const ch of m.channels) leds[ch.name].slow.set(k < ch.highTicks, 1);
+      }
+      function realLeds(ts) {
+        const m = pwmModel(st);
+        for (const ch of m.channels) {
+          // above PWM_FLICKER, steady: the eye's average still ripples a little, and a screen at 60 frames per second would turn that into a slow shimmer
+          // below 20 Hz the screen shows the flicker as it is; between 20 Hz and PWM_FLICKER, a screen at 60 frames per
+          // second cannot (each frame would see a slowly drifting moment of the period), so each frame shows a random one
+          const t = m.freq <= 20 ? ts / 1000 : Math.random() * m.periodS;
+          const b = reduced || m.freq >= PWM_FLICKER ? ch.duty : eyeLevel(m.periodS, ch.highTicks * m.tickS, t);
+          leds[ch.name].real.set(b > 0.001, lightness(b));
+        }
+      }
+      // Next tick (a small wrap) or the next change of an output (a large one)
+      function step() {
+        const m = pwmModel(st), P = m.periodTicks, total = plot.total;
+        if (plot.stairs) pos = Math.floor(pos) + 1;
+        else {
+          const t = pos % total, p = Math.floor(t / P), cands = [];
+          for (let q = p; q <= p + 1; q++) { cands.push(q * P); for (const ch of m.channels) if (ch.highTicks > 0 && ch.highTicks < P) cands.push(q * P + ch.highTicks); }
+          pos = Math.min(...cands.filter(x => x > t + 1e-9));
+        }
+        pos %= total;
+        drawNow();
+      }
+      function frame(ts) {
+        raf = null;
+        if (!visible) { last = null; return; }
+        const dt = last === null ? 0 : Math.min(0.1, (ts - last) / 1000);
+        last = ts;
+        if (playing && plot) {
+          pos += dt * pwmModel(st).periodTicks / (pwmSlowPeriod(st) * speed);
+          drawNow();
+        }
+        realLeds(ts);
+        if (!playing && (reduced || pwmModel(st).freq >= PWM_FLICKER)) { last = null; return; }
+        raf = requestAnimationFrame(frame);
+      }
+      const wake = () => { if (raf === null && visible) raf = requestAnimationFrame(frame); };
+
+      // dragging a level line in the counter panel
+      if (ctl('levels')) {
+        let dragging = null;
+        const levelAt = e => {
+          const r = plot.svg.getBoundingClientRect(), yy = e.clientY - r.top;
+          const v = Math.round(((plot.bottom - yy) / plot.cheight) * (st.wrap + 1));
+          return Math.max(0, Math.min(v, st.wrap + 1, PWM_TOP));
+        };
+        view.addEventListener('pointerdown', e => {
+          const g = e.target.closest && e.target.closest('.cw-pwm-grab, .cw-pwm-handle');
+          if (!g || !plot.cy) return;
+          dragging = g.getAttribute('data-ch');
+          view.setPointerCapture(e.pointerId);
+          e.preventDefault();
+        });
+        view.addEventListener('pointermove', e => {
+          if (!dragging) return;
+          const v = levelAt(e);
+          if (v === st.levels[dragging]) return;
+          st.levels[dragging] = v; sliders[dragging].set(v); changed();
+        });
+        const stop = () => { dragging = null; };
+        view.addEventListener('pointerup', stop); view.addEventListener('pointercancel', stop);
+      }
+
+      playRow.querySelector('.cw-seg').setAttribute('aria-label', 'Speed of the slow motion');
+      add(root, top, goal ? given : null, shows('counter') || shows('outputs') ? [playRow, view, now] : null,
+        shows('led') ? [board, ledNote] : null, shows('numbers') ? numbers : null, shows('code') ? code : null,
+        blind ? checkBox : null, goal ? status.el : null);
+      redraw();
+      if (typeof ResizeObserver !== 'undefined') {
+        let w = 0;
+        new ResizeObserver(() => { if (Math.abs(view.clientWidth - w) > 2) { w = view.clientWidth; renderPlot(); } }).observe(view);
+      }
+      if (typeof IntersectionObserver !== 'undefined') {
+        new IntersectionObserver(es => { visible = es.some(e => e.isIntersecting); if (visible) wake(); }).observe(root);
+      }
+      wake();
+    },
+    exercise(c) {
+      const st = pwmSettings(c), goal = pwmGoal(c, st);
+      if (goal.decode) {
+        if (listOf(c.controls).length) throw new Error('a decode goal has no controls: students read the settings from the signal');
+        if (!pwmDecodeMet(st, st).ok) throw new Error('the answer does not meet the goal');
+        const m = pwmModel(st);
+        return {answer: [{text: `wrap = ${st.wrap}, ${m.channels.map(ch => `level ${ch.name} = ${ch.level}`).join(', ')}: one period is ${m.periodTicks} ticks (${fmtTime(m.periodS)}); ${m.channels.map(ch => `${ch.name} is high for ${ch.highTicks} of them`).join(', ')}.`}]};
+      }
+      const ans = pwmAnswer(c, st, goal);
+      if (!pwmGoalMet(goal, ans).ok) throw new Error('the answer does not meet the goal');
+      // how bright an LED looks is seen, not worked out on paper: the PDF has the picture and the link to the website
+      if (goal.brightness) return null;
+      return {answer: [{text: pwmRightText(goal, ans, c)}, {code: pwmCode(ans, has(c.controls, 'clkdiv')).join('\n'), lang: 'c'}]};
+    },
+    print(c, {blank}) {
+      const st = pwmSettings(c), goal = c.goal != null ? pwmGoal(c, st) : null, decode = !!(goal && goal.decode);
+      if (decode && listOf(c.controls).length) throw new Error('a decode goal has no controls: students read the settings from the signal');
+      const seen = !!(goal && goal.brightness);   // a picture only: see exercise
+      const shows = k => st.show.includes(k) || (k === 'outputs' && (decode || seen));
+      const blocks = [];
+      if (shows('counter') || shows('outputs')) {
+        const plot = pwmPlot(svgText, st, {width: 640, counter: shows('counter') && !decode, outputs: shows('outputs'), values: !decode, units: 'time'});
+        blocks.push(svgBlock(plot.svg), 8);
+      }
+      if (seen) return picture(blocks);
+      if (blank) {
+        const clkdiv = has(c.controls, 'clkdiv');
+        blocks.push(drawText([`One tick: ${clkdiv ? `Δt = clkdiv / ${fmtFreq(st.clock)}` : pwmNumbers(st)[0][1]}`], {size: 11.5}), 4);
+        const blanks = decode ? ['wrap', ...Object.keys(st.levels).map(ch => `level ${ch}`)]
+          : [has(c.controls, 'clkdiv') ? 'clkdiv' : null, has(c.controls, 'wrap') ? 'wrap' : null, ...(has(c.controls, 'levels') ? Object.keys(st.levels).map(ch => `level ${ch}`) : [])].filter(Boolean);
+        blocks.push(drawText([blanks.map(b => `${b} = __________`).join('    ')], {size: 13}));
+      } else {
+        const leds = shows('led') ? pwmModel(st).channels.map(ch => `LED ${ch.name}: on ${fmtPercent(ch.duty)} of the time, it looks ${looksText(lightness(ch.duty))} bright`) : [];
+        if (shows('numbers') || leds.length) blocks.push(drawText([...(shows('numbers') ? pwmNumbers(st, {clkdiv: has(c.controls, 'clkdiv')}).map(([k, t]) => `${k}: ${t}`) : []), ...leds], {size: 11.5}), 6);
+        if (shows('code')) blocks.push(drawText(pwmCode(st, has(c.controls, 'clkdiv')), {size: 11.5, color: INK.fg}));
+      }
+      return picture(blocks);
+    },
+  });
+
+  // ========================================================================
   // Start: build the widgets of the page (browser); the build uses `print`.
   // ========================================================================
   root.CourseWidgets = {
     Widget, Bits, Protocols, CLang, Wave, print: config => Widget.print(config),
     // for the tests (tests/widgets.js)
     internals: {unescapeText, escapeText, byteName, toBytes, widthsOf, cType, addSub, numberTarget, numberGoalMet, arithmeticGoal, arithmeticGoalMet, conventionOf, registerFields, registerTarget,
-      registerGoalMet, settable, checkCode, modelCode, codeGoal, packFields, packetFields, frameSettings, toSlots, fromSlots, shiftOnce, SHIFTS},
+      registerGoalMet, settable, checkCode, modelCode, codeGoal, packFields, packetFields, frameSettings, toSlots, fromSlots, shiftOnce, SHIFTS,
+      quantity, quantityTol, quantityValue, fmtQuantity, fmtPercent, fmtApart, fmtExact, lightness, luminance, eyeLevel,
+      pwmSettings, pwmModel, pwmGoal, pwmGoalMet, pwmAnswer, pwmDecodeMet, pwmRightText, pwmCode, pwmNumbers},
   };
   // editable: true: the widget's YAML under it, to change and apply (a playground, or a gallery for authors).
   // The YAML reader (js-yaml) is loaded from a CDN when it is first needed.

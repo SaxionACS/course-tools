@@ -92,6 +92,8 @@ local function typst(entry, id)
       or 'An interactive widget: see the website.'))))
     return blocks
   end
+  -- the title and the task stay on the page of the picture (practice.lua puts an exercise's number with them)
+  blocks:insert(pandoc.RawBlock('typst', '#block(breakable: false)['))
   if entry.title then blocks:insert(pandoc.Para(pandoc.Strong(pandoc.Inlines(entry.title)))) end
   if entry.task then blocks:insert(pandoc.Para(pandoc.Inlines(entry.task))) end
   blocks:insert(picture(entry))
@@ -102,6 +104,7 @@ local function typst(entry, id)
     after:insert(pandoc.Link(pandoc.Inlines(entry.exercise and 'Do it on the website.' or 'Try it on the website.'), page_url .. '#' .. id))
   end
   if #after > 0 then blocks:insert(pandoc.Para({pandoc.Emph(after)})) end
+  blocks:insert(pandoc.RawBlock('typst', ']'))
   if not entry.exercise then return blocks end
   local answer = pandoc.Blocks({})
   for _, part in ipairs(entry.exercise.answer or {}) do

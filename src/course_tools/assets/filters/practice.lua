@@ -333,10 +333,14 @@ end
 local function widget_exercise(div)
   count.exercise = count.exercise + 1
   local n = count.exercise
-  local body, answer = pandoc.Blocks({label('Exercise ' .. n)}), nil
+  local body, answer = pandoc.Blocks({}), nil
   for _, b in ipairs(div.content) do
     if b.t == 'Div' and b.classes:includes('answer') then answer = b.content else body:insert(b) end
   end
+  -- the number stays with what follows: inside the block that keeps it together, if there is one
+  local first = body[1]
+  local keeps = first and first.t == 'RawBlock' and first.text:find('breakable: false', 1, true)
+  body:insert(keeps and 2 or 1, label('Exercise ' .. n))
   add_answer('Exercise ' .. n, answer or {})
   return pandoc.Div(body, pandoc.Attr('exercise-' .. n, {'course-exercise'}))
 end

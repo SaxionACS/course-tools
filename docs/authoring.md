@@ -562,8 +562,8 @@ Notes:
 ## Widgets
 
 Widgets are small interactive tools for bits and bytes: number
-representations, binary arithmetic, shifts, registers, and data on a wire
-with timing diagrams. Students change values and see what happens. With a
+representations, binary arithmetic, shifts, registers, data on a wire with
+timing diagrams, and PWM. Students change values and see what happens. With a
 `goal`, a widget is a challenge that checks the student's answer.
 
 Every widget is a code block with the language `widget` and YAML inside. On
@@ -593,7 +593,7 @@ and see what every setting does. It is a [draft](#draft-pages): run
 
 | Setting | Meaning |
 |:--|:--|
-| `type` | `number`, `arithmetic`, `shift`, `register`, `frame` or `packet` (required) |
+| `type` | `number`, `arithmetic`, `shift`, `register`, `frame`, `packet` or `pwm` (required) |
 | `view` | a different form of the same type, for `number` and `register` |
 | `title` | a title above the widget |
 | `task` | what the student should do, shown in a box (plain text) |
@@ -775,6 +775,99 @@ and on the wire, optionally sent with UART or SPI.
 | `mode` | the SPI mode, 0 to 3 |
 | `controls` | `byte_order`, `bit_order`, `pack`, `send`, `mode`; default `[byte_order, bit_order]` |
 
+### PWM
+
+`type: pwm` shows one slice of the RP2040's PWM: a counter that counts 0 … wrap
+and starts again, the levels of channels A and B, and the outputs, which are
+high while the counter is less than their level.
+
+````markdown
+```widget
+type: pwm
+title: One slice, two channels
+wrap: 3
+levels: {A: 1, B: 3}
+controls: [wrap, levels]
+show: [counter, outputs, numbers, code, led]
+```
+````
+
+The picture has the settings (the counter, wrap and the levels) above the
+result (the outputs), and a label for every line. It runs in slow motion: a
+badge says by how much (*SLOW MOTION · 50 000 000 × slower than real time*), a
+playhead moves over the picture, and a line under it compares the counter with
+the levels. Students pause it, step with *Next tick* (or *Next change*, for a
+wrap above 31) and choose a speed. They change a level with its slider or by
+dragging it in the picture.
+
+With `led` in `show`, each channel has two LEDs. The one *in slow motion* blinks
+with the picture. The one *at real speed* shows what an eye sees: a steady light,
+as bright as that on-time looks (on 50 % of the time looks 76 % bright), which
+flickers below about 70 Hz.
+
+| Setting | Meaning | Default |
+|:--|:--|:--|
+| `wrap` | the counter counts 0 … wrap, 0 to 65535 | `65535` |
+| `levels` | the channel levels, `{A: 1, B: 3}`, each 0 to 65535; the channels listed are the ones shown | `{A: 0}` |
+| `level` | short for `levels: {A: …}` | |
+| `clkdiv` | the clock divider, 1 to 255.9375 in steps of 1/16 (`2.5`, `1.0625`) | `1` |
+| `clock` | the system clock, for example `125 MHz` | `125 MHz` |
+| `periods` | how many periods the picture shows, 1 to 8 | `3` |
+| `show` | the parts to show: `counter`, `outputs`, `numbers`, `code`, `led` | `[counter, outputs, numbers, code]` |
+| `controls` | what the student may change: `wrap`, `levels`, `clkdiv` | none |
+| `check` | for a challenge: `button` or `live` (below) | `button` |
+
+A challenge asks for settings that meet a `goal`. All parts given must hold:
+
+````markdown
+```widget
+type: pwm
+wrap: 65535
+levels: {A: 0}
+controls: [wrap, levels]
+task: Make a 10 kHz signal with a duty of 25 % on channel A.
+goal:
+  frequency: 10 kHz
+  duty: 25%
+```
+````
+
+| Goal | Meaning | Met when |
+|:--|:--|:--|
+| `frequency`, `period` | `10 kHz`, `100 us` (one of the two) | at the nearest whole number of ticks: for 10 kHz, only wrap 12499 |
+| `duty` | `25%` (channel A) or `{A: 25%, B: 75%}` | within 0.05 percentage points; 0 % and 100 % exactly |
+| `brightness` | how bright the LED looks, `50%` or `{A: 50%}`; the widget shows a goal LED | within 1 percentage point |
+| `wrap`, `levels` | exact values: `wrap: 12499`, `levels: {A: 3125}` | exactly |
+
+Any of these (except `wrap` and `levels`) can have a margin, written with `+/-`:
+`10 kHz +/- 100 Hz`, `10 kHz +/- 1%`, `100 us +/- 1 us`, `25% +/- 0.1%`.
+
+With `goal: decode`, the settings are hidden and there are no controls: students
+read the wrap and the levels from the outputs and type them. A level above wrap
+may be any level above wrap: it gives the same signal.
+
+A challenge always shows how long one tick lasts. It is checked in one of two
+ways:
+
+- `check: button`: students press *Check*. Until the answer is right, the time
+  axis counts ticks and the other numbers are hidden, so that they calculate
+  instead of trying. A wrong answer says what is not right and shows *Show the
+  answer*.
+- `check: live`: the status follows every change and names the current values,
+  and the numbers are shown.
+
+Both name typical mistakes: *Close: wrap = 12500 gives wrap + 1 = 12501 ticks per
+period, because the counter also counts 0.*
+
+In the PDF, a challenge with `brightness` is a picture with the link to the
+website and no exercise: how bright an LED looks cannot be worked out on paper.
+The build still reports a brightness that no setting can reach.
+
+**PWM gallery.** The course template has a page with every kind of PWM widget:
+[`references/pwm.md`](https://github.com/SaxionACS/course_template/blob/main/references/pwm.md),
+a [draft](#draft-pages): run `course preview` in the template and open
+*References → PWM gallery*.
+
 ### Widgets in the PDF
 
 A PDF cannot be interactive, so every widget becomes a picture of how it
@@ -798,7 +891,9 @@ widget's number, for example
 - values that do not fit, bit ranges other than `7` or `6..5`, fields that
   overlap;
 - goals that ask for something impossible (a read-only field, a value that
-  does not fit, flags no operands give).
+  does not fit, flags no operands give, a frequency no wrap and divider give,
+  for example `goal: no setting gives 1 kHz: the lowest frequency with clkdiv 1
+  is 1.907 kHz. Add clkdiv to controls, or choose a higher frequency`).
 
 On the website, a widget with a mistake shows the same message instead of the
 widget.

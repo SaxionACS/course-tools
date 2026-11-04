@@ -14,6 +14,42 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.10.0 (unreleased)
+
+A new widget, `type: pwm`: one slice of the RP2040's PWM. Students change the
+wrap, the channel levels and the clock divider, and see the counter, the
+levels and the outputs follow.
+
+- The picture runs in slow motion, and says by how much (*SLOW MOTION · 50 000
+  000 × slower than real time*): a playhead, the tick it is in, and a readout
+  (*A: 2 < 1? no, low*), with Pause, Next tick or Next change, and speeds. LEDs
+  at real speed look steady, as bright as an eye sees them (CIE L\*, as in
+  superloop), and flicker below about 70 Hz; LEDs in slow motion blink with the
+  picture. Levels can be dragged in the picture.
+- Challenges: `goal` with `frequency` or `period`, `duty`, `wrap`, `levels`;
+  `brightness` (how bright the LED looks); and `goal: decode` (the settings are
+  hidden, students read them from the signal). `check: button` (the default:
+  the numbers wait until the answer is right, Show the answer after a wrong
+  Check) or `check: live`. Without a margin, a frequency or period needs the
+  nearest whole number of ticks; `10 kHz +/- 100 Hz` allows a margin. Hints
+  name the typical mistakes, in numbers (*wrap = 50000 gives wrap + 1 = 50001
+  ticks per period, because the counter also counts 0*).
+- In the PDF: the picture with the numbers and the code. A challenge is an
+  exercise with blanks and its answer at the end, except `brightness`, which
+  cannot be worked out on paper: a picture and the link to the website.
+- In the PDF, the title, the task and the exercise number of every widget now
+  stay on the page of its picture.
+- For other widgets to use: `quantity()` for settings with units (`125 MHz`,
+  `25%`, `10 us`), `Kit.slider` and `Kit.led`.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes locally in WSL (181 checks, with
+  PDFs and gcc 13); the Check workflow has not run on this yet.
+- **macOS:** untested.
+- **Windows:** untested.
+
 ## 2.9.0 (2026-11-02)
 
 Number widgets name the C type of their readings, and authors choose the

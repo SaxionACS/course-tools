@@ -69,13 +69,15 @@ REQUIRED_MESSAGES = (
 # Widgets with mistakes (lessons/week_02/lesson3.md): each line must start with one of these.
 WIDGET_MESSAGES = (
     'warning: lessons/week_02/lesson3.md: widget 18 (dial): unknown type "dial" '
-    "(number, arithmetic, shift, register, frame, packet)",
+    "(number, arithmetic, shift, register, frame, packet, pwm)",
     'warning: lessons/week_02/lesson3.md: widget 19 (register): field MODE: bits "6,5" should look like 7 or 6..5',
     'warning: lessons/week_02/lesson3.md: widget 20 (number): unknown setting "widht"',
     "warning: lessons/week_02/lesson3.md: widget 20 (number): goal: unsigned: 300 does not fit in 8 bits",
     "warning: lessons/week_02/lesson3.md: widget 20 (number): widths are the choices of the width control: "
     "add width to controls",
     "warning: lessons/week_02/lesson3.md: widget 21: the YAML cannot be read: ",
+    "warning: lessons/week_02/lesson6.md: widget 12 (pwm): goal: no setting gives 1 kHz: the lowest frequency with clkdiv 1 is 1.907 kHz.",
+    "warning: lessons/week_02/lesson6.md: widget 13 (pwm): wrap is 0 … 65535, not 70000",
 )
 # State machines with mistakes (lessons/week_02/lesson4.md): each line must start with one of these.
 STATEMACHINE_MESSAGES = (
@@ -104,7 +106,7 @@ PAGES = [
     "lessons/week_01/index.html", "lessons/week_01/lesson1.html",
     "lessons/week_01/lesson2.html", "lessons/week_01/lesson10.html",
     "lessons/week_02/index.html", "lessons/week_02/lesson1.html", "lessons/week_02/lesson2.html",
-    "lessons/week_02/lesson3.html", "lessons/week_02/lesson4.html",
+    "lessons/week_02/lesson3.html", "lessons/week_02/lesson4.html", "lessons/week_02/lesson6.html",
     "assignments/week_01/index.html", "assignments/week_01/assignment1.html",
     "assignments/week_01/assignment2/index.html",
     "exams/index.html", "exams/exam1.html",
@@ -542,6 +544,38 @@ def check_widgets(c: Checks, read) -> None:
          and "course-widgets" not in read("lessons/week_02/lesson1.html"), "the widget script, only on pages with widgets")
 
 
+def check_pwm(c: Checks, read, dist: Path) -> None:
+    c.section("PWM widgets (lessons/week_02/lesson6)")
+    p = main_content(read("lessons/week_02/lesson6.html"))
+    divs = re.findall(r'<div class="course-widget" id="([\w-]+)"(?: data-config="([^"]*)")?>', p)
+    configs = [json.loads(htmllib.unescape(cfg)) if cfg else {} for _, cfg in divs]
+    c.ok(len(divs) == 13 and all(cfg.get("type") == "pwm" for cfg in configs), "a widget for every ```widget block", f"found {len(divs)}")
+    if len(divs) == 13:
+        c.ok(configs[10]["goal"]["frequency"] == "10 kHz +/- 100 Hz" and configs[2]["goal"]["duty"] == "25%" and configs[7]["goal"] == "decode",
+             "goals reach the browser as they are written", json.dumps(configs[10]["goal"]))
+    data = json.loads((dist.parent / ".build" / "_course" / "widgets.json").read_text(encoding="utf-8"))
+    entries = {json.dumps(json.loads(e["config"])): e for e in data["widgets"].values() if '"type":"pwm"' in e.get("config", "")}
+    drawn = [entries.get(json.dumps(cfg)) or {} for cfg in configs]
+    if len(drawn) == 13:
+        c.ok(all(f">{t}<" in drawn[0].get("svg", "") for t in ("wrap = 3", "level A = 1", "level B = 3", "output A", "output B", "SETTINGS: wrap and levels", "RESULT: the outputs")),
+             "the PDF picture: a label for every line, the settings apart from the result")
+        c.ok("One tick: Δt = 1 / 125 MHz = 8 ns" in drawn[2].get("svg", "") and "wrap = __________" in drawn[2].get("svg", ""),
+             "the PDF exercise: the length of a tick, and blanks to fill in")
+        c.ok(drawn[6].get("svg") and "exercise" not in drawn[6], "a brightness challenge is a picture only")
+        c.ok(drawn[11].get("svg") and "exercise" not in drawn[11], "a goal that cannot be reached is a picture only")
+    try:
+        chrome = str(tools.installed("chrome"))
+    except tools.ToolError as e:
+        c.skip("PWM widgets in a browser", str(e))
+        return
+    out = run([tools.quarto(), "run", str(REPO / "tests" / "pwm_browser.js"), chrome,
+               str(dist / "lessons" / "week_02" / "lesson6.html")])
+    lines = ANSI.sub("", out.stdout).strip().splitlines()
+    c.ok(out.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
+         "in a browser: challenges, dragging by mouse and touch, slow motion, LEDs, reduced motion (tests/pwm_browser.js)"
+         + (f" ({lines[-1]})" if lines else ""), "\n        ".join(lines[-15:]))
+
+
 def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     def read(rel: str) -> str:
         p = dist / rel
@@ -662,6 +696,7 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     check_widgets(c, read)
     check_statemachines(c, read, dist)
     check_superloops(c, read, dist)
+    check_pwm(c, read, dist)
     # the PDF pictures, drawn at build time (the stage, before `stage --preview` changes it)
     data = json.loads((dist.parent / ".build" / "_course" / "widgets.json").read_text(encoding="utf-8"))
     svgs = [e.get("svg", "") for e in data["widgets"].values() if '"bit_values":true' in e.get("config", "")]
@@ -738,6 +773,19 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("This widget cannot be shown: unknown type" in questions, "widget PDF: a widget with a mistake says so")
     c.ok("'\\r' 0x0D" in questions and "'\\n' 0x0A" in questions,
          "widget PDF: C escapes in text data (Hi\\r\\n), frames named by their escapes")
+    t = text("lessons/week_02/lesson6.pdf")
+    questions, _, key = t.partition(" Answers ")
+    c.ok("One slice, two channels" in questions and "Try it on the website." in questions and "Period: T = (wrap + 1) · Δt = (3 + 1) · 8 ns = 32 ns" in questions,
+         "PWM PDF: a picture with its title, its numbers and a link")
+    c.ok("Exercise 7." in questions and "Exercise 8." not in questions and "wrap = 12499" not in questions and "One tick: Δt = 1 / 125 MHz = 8 ns" in questions,
+         "PWM PDF: challenges are exercises that give the tick, without their answers; a brightness challenge is none")
+    c.ok(all(a in key for a in ("Exercise 1 wrap = 12499, level A = 3125: 10 kHz, a duty of 25 %.", "pwm_set_wrap(slice, 12499);",
+                                "wrap = 65534, level A = 65535: a duty of 100 %.", "clkdiv = 2, wrap = 62499, level A = 31250",
+                                "wrap = 4, level A = 3: one period is 5 ticks (40 ns)", "wrap = 12499: 10 kHz.")),
+         "PWM PDF: the answers at the end")
+    c.ok("Make LED A look half as bright" in questions and "looks 50" not in key, "PWM PDF: a brightness challenge has its task and no answer")
+    c.ok("PWM-UNREACHABLE-TASK" in questions and "This widget cannot be shown: wrap is 0 … 65535, not 70000" in questions,
+         "PWM PDF: a goal that cannot be reached is a picture; a widget with a mistake says so")
     t = text("lessons/week_02/lesson4.pdf")
     c.ok("SM-TITLE SM-TASK" in t and "State pressed OFF ON | LED on ON OFF | LED off" in t
          and "Try it on the website." in t, "state machine PDF: title, task, picture and transition table, and a link")
