@@ -14,7 +14,7 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.12.0 (unreleased)
+## 2.12.0 (2026-11-05)
 
 The course information and assessment pages get the organization of the course,
 its topics and the rules for resits.
@@ -37,9 +37,10 @@ Platform notes:
 
 - **Dependencies:** none.
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 203 checks,
-  with gcc 13. The Check workflow has not run yet.
-- **macOS:** untested. Nothing platform-specific: Python only.
-- **Windows:** untested. Nothing platform-specific: Python only.
+  with `CC=gcc-13`; the template's course information and assessment pages
+  looked at on the website and in the PDF. The Check workflow passes.
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
 
 ## 2.11.0 (2026-11-04)
 
