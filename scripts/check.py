@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import html as htmllib
+import io
 import json
 import os
 import re
@@ -44,7 +46,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
-from course_tools import tools  # noqa: E402  (standard library only, like this script)
+from course_tools import info, tools  # noqa: E402  (standard library only, like this script)
 
 COURSE = REPO / "tests" / "course"
 SITE_URL = "https://example.org/check/"
@@ -65,6 +67,7 @@ REQUIRED_MESSAGES = (
     "(`outcomes` in the front matter of a page)",
     "warning: templates/genAI/not-alowed.md replaces no template of course-tools, so it is not used "
     "(see `course template list`)",
+    "warning: general.yaml: `topics`, item 3: outcomes: LO9 is not a learning outcome in general.yaml",
 )
 # Widgets with mistakes (lessons/week_02/lesson3.md): each line must start with one of these.
 WIDGET_MESSAGES = (
@@ -171,6 +174,55 @@ def version_of_checkout() -> str | None:
     return m.group(1) if m else None
 
 
+def check_info_logic(c: Checks) -> None:
+    """The cases of the generated pages that one test course cannot have at once."""
+    c.section("Course information: required fields, fields with two names")
+
+    def general(fields: dict, has_map: bool = False) -> tuple[str, str]:
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            return info.general_page({"title": "T", **fields}, False, False, has_map), err.getvalue()
+
+    def assessment(fields: dict) -> tuple[str, str]:
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            return info.assessment_page(fields, {}), err.getvalue()
+
+    page, log = general({})
+    c.ok("warning: general.yaml: no `organization`" in log and "warning: general.yaml: no `topics`" in log
+         and "## Organization" not in page and "## Topics" not in page,
+         "no `organization` and no `topics`: a warning for each, and no section", log)
+    page, log = general({"organization": "O", "schedule": ["A"]})
+    c.ok(not log and "## Organization" in page and "## Schedule" in page and "| 1 | A |" in page,
+         "`schedule`: the same as `topics`, under its own heading, no warnings", log)
+    page, log = general({"organization": "O", "topics": ["A"], "schedule": ["B"]})
+    c.ok("both `topics` and `schedule`" in log and "## Topics" in page and "| 1 | A |" in page and "| 1 | B |" not in page,
+         "`topics` and `schedule`: a warning, and `topics` is used", log)
+    page, _ = general({"organization": "O", "topics": ["A", "B"]})
+    c.ok("| # | Topic |" in page and "Learning outcomes" not in page, "no topic names a learning outcome: two columns")
+    outcomes = {"learning_outcomes": [{"id": "LO1", "text": "x"}], "organization": "O"}
+    plain = {"topics": ["A", {"title": "B", "outcomes": ["LO1"]}]}
+    page, _ = general({**outcomes, **plain})
+    c.ok("| 1 | A |  |" in page and "| 2 | B | LO1 |" in page, "a course without an outcome map: the learning outcomes as plain ids")
+    page, _ = general({**outcomes, **plain}, has_map=True)
+    c.ok("| 2 | B | [LO1](outcomes.qmd#lo1) |" in page, "with an outcome map: links to it")
+    page, log = general({"organization": "O", "topics": [{"Digital I/O": "GPIO"}, "B"]})
+    c.ok("unknown key `Digital I/O`" in log and "no `title`" in log and "| 1 | B |" in page,
+         "a topic with a colon, not quoted, is reported and left out of the numbering", log)
+
+    component = {"name": "Exam", "weight": 100}
+    page, log = assessment({"components": [component]})
+    c.ok("## Resits" not in page and "resits" not in page and not log, "no rules for resits: no section, no warning", log)
+    page, log = assessment({"retake": "G", "components": [component]})
+    c.ok("## Resits\n\nG\n" in page and "the rules for resits" in page and not log,
+         "`retake` of the course is the same as `resit`, and the default introduction names it", log)
+    page, log = assessment({"resit": "G", "retake": "X", "components": [{**component, "retake": "A\n\nB", "resit": "C"}]})
+    c.ok("both `resit` and `retake`" in log and "assessment.yaml: Exam: both" in log and "X" not in page and "A" not in page.split("## Resits")[1],
+         "`resit` and `retake`: a warning, and `resit` is used", log)
+    page, _ = assessment({"components": [{**component, "resit": "A\n\nB"}]})
+    c.ok("- **Exam:** A\n\n  B\n" in page, "rules of a component with two paragraphs: one list item")
+    page, _ = assessment({"components": [{**component, "resit": "- A\n- B\n"}]})
+    c.ok("- **Exam:**\n\n  - A\n  - B\n" in page, "rules of a component that are a list: nested in the item")
+
+
 def check_tools(c: Checks, course_cmd: list[str]) -> bool:
     c.section("Tools")
     version = run(course_cmd + ["--version"])
@@ -209,6 +261,7 @@ def check_build(c: Checks, course_cmd: list[str], course: Path, html_only: bool)
     c.ok(REQUIRED_MESSAGES[3] in lines, "an unknown learning outcome in the front matter is reported")
     c.ok(REQUIRED_MESSAGES[4] in lines, "a learning outcome that no page covers is reported")
     c.ok(REQUIRED_MESSAGES[5] in lines, "a file in templates/ that replaces no template is reported")
+    c.ok(REQUIRED_MESSAGES[6] in lines, "an unknown learning outcome of a topic is reported")
     missing = [m for m in WIDGET_MESSAGES if not any(line.startswith(m) for line in lines)]
     c.ok(not missing, "widgets with mistakes are reported, with the page and the widget's number", "\n        ".join(missing))
     missing = [m for m in STATEMACHINE_MESSAGES if not any(line.startswith(m) for line in lines)]
@@ -687,6 +740,18 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     assessment = main_content(read("info/assessment.html"))
     c.ok(assessment.count('class="assessment-matrix"') == 2, "an assessment matrix per component")
     c.ok("RUBRIC-DESCRIPTION-TEXT" in assessment and "Bloom" in assessment, "rubric and Bloom legend")
+    c.ok(-1 < info.find("course-levels") < info.find("ORGANIZATION-TEXT") < info.find("TOPIC-PLAIN") < info.find("Kernighan"),
+         "course information: organization and topics, after the level and before the literature")
+    rows = [re.sub(r"<[^>]+>", "", row).split() for row in re.findall(r"<tr.*?</tr>", info, re.S)]
+    c.ok(["1", "TOPIC-PLAIN"] in rows and ["2", "TOPIC-LINKED", "LO1,", "LO2"] in rows and ["3", "TOPIC-UNKNOWN-OUTCOME"] in rows,
+         "topics: numbered from 1, with their learning outcomes; an unknown outcome is left out", f"rows: {rows}")
+    c.ok('outcomes.html#lo1">LO1</a>' in info, "topics: a learning outcome links to the outcome map")
+    c.ok(-1 < assessment.find("weighted average") < assessment.find("RESIT-GENERAL-TEXT")
+         < assessment.find("RESIT-EXAM-TEXT") < assessment.find("RETAKE-PRACTICAL-TEXT") < assessment.find('class="assessment-matrix"'),
+         "assessment: resits after the final grade, the general rules and then those of the components")
+    c.ok(re.search(r"<strong>Written exam:</strong>\s*RESIT-EXAM-TEXT", assessment)
+         and re.search(r"<strong>Practical:</strong>.*?<ul>\s*<li>RETAKE-PRACTICAL-TEXT", assessment, re.S),
+         "assessment: `resit` and `retake` of a component, with a Markdown list")
     c.ok("Generative AI and academic integrity" in read("info/genai.html"), "GenAI policy page")
     c.ok("House rules" in read("info/rules.html"), "extra page in info/")
 
@@ -759,6 +824,15 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok("Learning outcomes: Superloops (LO1), LO2 · about" in text("lessons/week_02/lesson1.pdf"),
          "lesson PDF: the learning outcomes and the reading time")
     c.ok("LO3: Debugging" in text("info/outcomes.pdf"), "outcome map PDF")
+    t = text("info/index.pdf")
+    # pdftotext reads the table column by column.
+    c.ok("ORGANIZATION-TEXT" in t and "# Topic 1 TOPIC-PLAIN 2 TOPIC-LINKED 3 TOPIC-UNKNOWN-OUTCOME Learning outcomes LO1, LO2" in t,
+         "course information PDF: organization and topics", t)
+    c.ok(f"{SITE_URL}info/outcomes.html#lo1".encode() in (dist / "info/index.pdf").read_bytes(),
+         "course information PDF: the learning outcome of a topic links to the website")
+    t = text("info/assessment.pdf")
+    c.ok("Resits RESIT-GENERAL-TEXT" in t and "Written exam: RESIT-EXAM-TEXT" in t and "RETAKE-PRACTICAL-TEXT" in t,
+         "assessment PDF: the rules for resits")
     t = text("lessons/week_02/lesson3.pdf")
     questions, _, key = t.partition(" Answers ")
     c.ok("WIDGET-TITLE" in questions and "binary 1101 0010 hexadecimal 0xD2 · uint8_t 210 · int8_t −46" in questions
@@ -838,6 +912,7 @@ def main() -> int:
     print(f"Test course: {course}")
 
     c = Checks()
+    check_info_logic(c)
     check_widget_logic(c)
     check_statemachine_logic(c)
     check_superloop_logic(c)

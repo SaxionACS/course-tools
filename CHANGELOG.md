@@ -14,6 +14,33 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.12.0 (unreleased)
+
+The course information and assessment pages get the organization of the course,
+its topics and the rules for resits.
+
+- `general.yaml`: `organization` (Markdown): the forms of the lessons and how
+  often they take place. Shown after the course level.
+- `general.yaml`: `topics` or `schedule`: a list of topics, shown after the
+  organization as a table numbered from 1, under the heading *Topics* or
+  *Schedule*. A topic can name its learning outcomes
+  (`{ title: PWM, outcomes: [LO1, LO2] }`): the table then has a third column,
+  whose ids link to the outcome map if the course has one.
+- New warnings, the build goes on: no `organization`; no topics; an unknown
+  learning outcome or key in a topic. **Courses without these fields get the
+  first two warnings until they add them.**
+- `assessment.yaml`: `resit` or `retake`, for the whole course and per
+  component. Shown in one section, *Resits*, after the final grade. A field with
+  both names gets a warning, and `resit` is used.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 203 checks,
+  with gcc 13. The Check workflow has not run yet.
+- **macOS:** untested. Nothing platform-specific: Python only.
+- **Windows:** untested. Nothing platform-specific: Python only.
+
 ## 2.11.0 (2026-11-04)
 
 State machines get what week 4 of the embedded course calls *extended state*:

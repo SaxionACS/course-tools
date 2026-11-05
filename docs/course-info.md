@@ -22,15 +22,18 @@ a complete example.
 | `prerequisites` | Required prior knowledge (Markdown). |
 | `learning_outcomes` | List of `{id, title, text}` (see below). The `id` (e.g. `LO1`) is used in the assessment matrices and in the front matter of pages. Optionally with an introduction (see below). |
 | `levels` | Level of the course in the Saxion level model (see below). |
+| `organization` | **Expected.** The forms of the lessons and how often they take place (Markdown). The build warns without it. |
+| `topics` or `schedule` | **Expected.** The topics of the course, shown as a numbered table, optionally linked to learning outcomes (see below). The build warns without them. |
 | `literature` | Mandatory and/or optional literature (Markdown), optionally with an introduction (see below). |
 | `compiler_explorer` | Compiler for the Compiler Explorer links on code blocks (see below). Not shown on the page. |
 | `links` | List of `{title, url}`, e.g. the module manual. Optionally with an introduction (see below). |
 
 ### Introductions
 
-`learning_outcomes`, `levels`, `literature` and `links` can have an
+`learning_outcomes`, `levels`, `topics`, `literature` and `links` can have an
 `introduction` (Markdown), shown before the list. Without one, a default text
-is shown (none for `links`). The lists are then written under `items`:
+is shown (none for `topics` and `links`). The lists are then written under
+`items`:
 
 ```yaml
 learning_outcomes:
@@ -54,7 +57,7 @@ levels:
 ```
 
 Without an introduction, a plain list (as in earlier versions) also works for
-`learning_outcomes`, `literature` and `links`.
+`learning_outcomes`, `topics`, `literature` and `links`.
 
 ### Learning outcomes
 
@@ -73,6 +76,45 @@ learning_outcomes:
   information, assessment and outcome-map pages show it next to the id.
 - `text`: the outcome itself, shown in full on those pages and when pointing
   at the outcome at the top of a page.
+
+### Organization
+
+How the course runs: the forms of the lessons and how often they take place.
+The course information page shows it under the heading *Organization*. The
+build warns if it is missing, but goes on.
+
+```yaml
+organization: |
+  Every week has a lecture of 2 hours and a lab of 4 hours. You work on the
+  assignments in pairs, during the labs and at home.
+```
+
+### Topics
+
+The topics of the course, under the name `topics` or `schedule`. The course
+information page shows them as a table with a number (from 1) and the topic,
+under the heading *Topics* or *Schedule*. The build warns if there are none,
+but goes on. With both names, it warns and uses `topics`.
+
+A topic is plain text (Markdown), or a mapping with a `title` and the learning
+outcomes that it works towards:
+
+```yaml
+topics:
+  - Introduction to embedded C
+  - title: Digital I/O
+    outcomes: [LO1]
+  - { title: PWM, outcomes: [LO1, LO2] }
+```
+
+Linking topics to learning outcomes is optional, per topic. If at least one
+topic names outcomes, the table has a third column, *Learning outcomes*. Its
+ids link to the [outcome map](authoring.md#learning-outcomes-of-a-page) if the
+course has one; otherwise they are plain text. The build warns about an id that is not in
+`learning_outcomes`.
+
+Quote a topic with a colon followed by a space, as YAML reads it as a mapping:
+`- "Digital I/O: GPIO"`. The build warns about one without quotes.
 
 ### Literature
 
@@ -158,6 +200,7 @@ compiler_explorer:
 | `introduction` | Text at the top of the page. Default: a sentence saying what the page contains. |
 | `components` | List of assessment components (see below), optionally with an introduction. |
 | `final_grade` | How the final grade is determined. |
+| `resit` or `retake` | Optional: the general rules for resits (see below). |
 | `bloom_verbs` | Optional: other example verbs for the Bloom legend (see below). |
 
 The table of components has a default introduction ("The course is assessed
@@ -186,6 +229,32 @@ Each component has:
 | `description` | Longer description (Markdown), shown above the matrix. |
 | `matrix` | The assessment matrix of this component (see below). |
 | `rubric` | Optional: rough grading criteria of this component (see below). |
+| `resit` or `retake` | Optional: the rules for resitting this component (see below). |
+
+### Resits
+
+The rules for resits can be general, per component, or both. `resit` and
+`retake` mean the same; with both, the build warns and uses `resit`. All of
+them are optional and may contain Markdown.
+
+```yaml
+resit: |                     # for the whole course
+  You can resit a failed component once per academic year.
+
+components:
+  - id: EXAM
+    name: Written exam
+    resit: The resit is a written exam in week 11.
+  - id: PORT
+    name: Portfolio
+    retake: |
+      You improve the assignments that were not sufficient and discuss them in
+      a new oral check.
+```
+
+The Assessment page shows them in one section, *Resits*, after the final
+grade: first the general rules, then a list with the rules of each component
+that has its own. Without any rules, there is no section.
 
 ### Assessment matrices
 

@@ -40,6 +40,16 @@ levels:
   complexity: middle
   interdisciplinarity: low
 
+organization: |
+  ORGANIZATION-TEXT: a lecture and a lab, every week.
+
+topics:
+  - TOPIC-PLAIN
+  - title: TOPIC-LINKED
+    outcomes: [LO1, LO2]
+  - title: TOPIC-UNKNOWN-OUTCOME
+    outcomes: [LO9]                      # reported
+
 literature:
   mandatory:
     - B. W. Kernighan and D. M. Ritchie, *The C Programming Language*, 2nd ed., 1988.

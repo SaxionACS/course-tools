@@ -6,9 +6,11 @@ See ``docs/course-info.md`` for the schema of both files.
 from __future__ import annotations
 
 import html
+import re
 import sys
 
 from .models import BLOOM, BLOOM_ALIASES, GRADED, LEVEL_ALIASES, LEVELS, PILLARS, level_model_problems
+from .outcomes import anchor, of_page
 
 
 def _cell(value) -> str:
@@ -83,6 +85,23 @@ def _list_section(value, name: str, list_keys=("items",), warn: bool = True, sou
     return intro, lists
 
 
+def _either(mapping: dict, names: tuple[str, str], where: str) -> tuple[str | None, object]:
+    """A field with two names: (the name used, its value), (None, None) without
+    a value. With both, the first name wins and the build warns."""
+    used = [name for name in names if mapping.get(name) not in (None, "", [], {})]
+    if len(used) == 2:
+        _warn(f"{where}: both `{names[0]}` and `{names[1]}` are set; using `{names[0]}`")
+    return (used[0], mapping[used[0]]) if used else (None, None)
+
+
+def _text(value, where: str) -> str:
+    """A text field (Markdown), trimmed; "" without one."""
+    if isinstance(value, (list, dict)):
+        _warn(f"{where} must be text")
+        return ""
+    return str(value).strip() if value is not None else ""
+
+
 def learning_outcomes(general: dict) -> list[dict]:
     """[{id, title, text}]; `title` is a short name of the outcome ("" if none)."""
     result = []
@@ -140,6 +159,8 @@ def general_page(general: dict, has_assessment: bool, has_genai: bool = False,
                     "learning outcome.", ""]
 
     out += _levels_section(general.get("levels"))
+    out += _organization_section(general)
+    out += _topics_section(general, los, has_outcome_map)
     out += _literature_section(general.get("literature"))
 
     links_intro, link_lists = _list_section(general.get("links"), "links")
@@ -155,6 +176,56 @@ def general_page(general: dict, has_assessment: bool, has_genai: bool = False,
         out += [f"- [{link['title']}]({link['url']})" for link in links]
         out.append("")
     return "\n".join(out)
+
+
+def _organization_section(general: dict) -> list[str]:
+    text = _text(general.get("organization"), "general.yaml: `organization`")
+    if not text:
+        _warn("general.yaml: no `organization`: describe the forms of the lessons and how often they take place")
+        return []
+    return ["## Organization", "", text, ""]
+
+
+def _topics_section(general: dict, los: list[dict], has_outcome_map: bool) -> list[str]:
+    """The topics of the course as a numbered table, with the learning outcomes
+    of the topics in a third column if any topic names them."""
+    key, value = _either(general, ("topics", "schedule"), "general.yaml")
+    intro, lists = _list_section(value, key or "topics")
+    rows = []
+    for position, item in enumerate(lists.get("items", []), start=1):
+        where = f"general.yaml: `{key}`, item {position}"
+        outcomes = []
+        if isinstance(item, dict):
+            for name in item:
+                if name not in ("title", "outcomes"):
+                    _warn(f"{where}: unknown key `{name}` (use title, outcomes; quote a topic with a colon in it)")
+            outcomes = of_page(item.get("outcomes"), los, where)
+            item = item.get("title")
+        title = _cell(item)
+        if title:
+            rows.append((title, outcomes))
+        else:
+            _warn(f"{where}: no `title`")
+    if not rows:
+        _warn("general.yaml: no `topics` (or `schedule`): list the topics of the course")
+        return []
+
+    def outcome(lo: dict) -> str:
+        name = _cell(lo["id"])
+        return f"[{name}](outcomes.qmd#{anchor(lo['id'])})" if has_outcome_map else name
+
+    out = [f"## {key.capitalize()}", ""]
+    if intro:
+        out += [intro, ""]
+    if any(outcomes for _, outcomes in rows):
+        out += ["| # | Topic | Learning outcomes |", _separator([("r", 6), ("l", 70), ("l", 24)])]
+        out += [f"| {number} | {title} | {', '.join(outcome(lo) for lo in outcomes)} |"
+                for number, (title, outcomes) in enumerate(rows, start=1)]
+    else:
+        out += ["| # | Topic |", _separator([("r", 6), ("l", 94)])]
+        out += [f"| {number} | {title} |" for number, (title, _) in enumerate(rows, start=1)]
+    out.append("")
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -280,13 +351,15 @@ def _component_title(c: dict) -> str:
     return str(c.get("name") or c.get("id") or "Component")
 
 
-def _default_assessment_intro(components: list[dict], assessment: dict) -> str:
+def _default_assessment_intro(components: list[dict], assessment: dict, has_resits: bool) -> str:
     """'This page describes how the course is assessed: ...', listing what the page contains."""
     parts = []
     if components:
         parts.append("the assessment components")
     if assessment.get("final_grade"):
         parts.append("how the final grade is determined")
+    if has_resits:
+        parts.append("the rules for resits")
     if any(c.get("matrix") for c in components):
         parts.append("which learning outcomes each component assesses")
     text = "This page describes how the course is assessed"
@@ -300,9 +373,10 @@ def assessment_page(assessment: dict, general: dict) -> str:
     components_intro, lists = _list_section(assessment.get("components"), "components", source="assessment.yaml")
     components = lists.get("items", [])
     los = learning_outcomes(general)
+    resits = _resits_section(assessment, components)
     out = ["---", "title: Assessment", "---", ""]
     out += [str(assessment.get("introduction") or "").strip()
-            or _default_assessment_intro(components, assessment), ""]
+            or _default_assessment_intro(components, assessment, bool(resits)), ""]
 
     has_matrices = any(c.get("matrix") for c in components)
     if los and (has_matrices or any(c.get("rubric") for c in components)):
@@ -335,6 +409,8 @@ def assessment_page(assessment: dict, general: dict) -> str:
     if assessment.get("final_grade"):
         out += ["## Final grade", "", str(assessment["final_grade"]).strip(), ""]
 
+    out += resits
+
     if has_matrices:
         out += [
             "## Assessment matrices", "",
@@ -361,6 +437,39 @@ def assessment_page(assessment: dict, general: dict) -> str:
                 _warn(f"assessment.yaml: learning outcome {lo['id']} is not assessed by any component")
         out += _bloom_legend(assessment.get("bloom_verbs") or {})
     return "\n".join(out)
+
+
+# Markdown that cannot follow a label on the same line: a list, table, heading,
+# quote, code block or fenced div.
+_BLOCK_START = re.compile(r"[-*+] |\d+[.)] |[|#>]|```|:::")
+
+
+def _labelled_item(label: str, text: str) -> list[str]:
+    """`- **label:** text` as one list item, whatever Markdown the text contains."""
+    first, *rest = text.splitlines()
+    if _BLOCK_START.match(first):
+        first, rest = "", ["", first, *rest]
+    return [f"- **{label}:** {first}".rstrip()] + [f"  {line}".rstrip() for line in rest]
+
+
+def _resits_section(assessment: dict, components: list[dict]) -> list[str]:
+    """The rules for resits: for the whole course, and of the components that have their own."""
+    _, value = _either(assessment, ("resit", "retake"), "assessment.yaml")
+    general_rules = _text(value, "assessment.yaml: `resit`")
+    items = []
+    for c in components:
+        name = _component_title(c)
+        _, value = _either(c, ("resit", "retake"), f"assessment.yaml: {name}")
+        if rules := _text(value, f"assessment.yaml: {name}: `resit`"):
+            items += _labelled_item(name, rules)
+    if not general_rules and not items:
+        return []
+    out = ["## Resits", ""]
+    if general_rules:
+        out += [general_rules, ""]
+    if items:
+        out += items + [""]
+    return out
 
 
 def _component_matrix(component: dict, los: list[dict]) -> list[str]:

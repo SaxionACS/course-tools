@@ -9,6 +9,7 @@ components:
       weight: 60
       when: Week 9
       graded: individual
+      resit: RESIT-EXAM-TEXT
       description: |
         The exam covers all lessons. See the [example exam](../exams/exam1.md).
       matrix:
@@ -21,6 +22,9 @@ components:
       weight: 40
       when: Week 8
       graded: group
+      retake: |
+        - RETAKE-PRACTICAL-TEXT
+        - A second line of the list.
       matrix:
         LO2: { applying: 60, evaluating: 40, graded: individual }
       rubric:
@@ -39,3 +43,6 @@ components:
 
 final_grade: |
   The final grade is the weighted average of the components.
+
+resit: |
+  RESIT-GENERAL-TEXT
