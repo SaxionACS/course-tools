@@ -14,7 +14,7 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.12.1 (unreleased)
+## 2.12.1 (2026-11-07)
 
 State machines: no more messages about a hold button or pin that nothing listens
 to.
@@ -35,7 +35,7 @@ Platform notes:
 
 - **Dependencies:** none.
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 203 checks,
-  with `CC=gcc-13`. The Check workflow has not run yet.
+  with `CC=gcc-13`. The Check workflow passes.
 - **macOS:** untested; nothing platform-specific.
 - **Windows:** untested; nothing platform-specific.
 
