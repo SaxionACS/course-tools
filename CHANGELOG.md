@@ -25,8 +25,11 @@ to.
   worked as it should. Now a change of a hold button or pin is reported as
   ignored, on the page and in the log, only if some state of some machine has an
   arrow for it (`KEY pressed`).
-- As before: an arrow with a false guard is reported, and a bouncing input is
-  silent.
+- Not either while a current state has a `for` arrow on that input (`KEY pressed
+  for 1 s`), because the change starts or cancels its count. Before, a state with
+  such an arrow could say that it had no arrow for the press.
+- As before: an arrow with a false guard is reported, also next to a `for` arrow,
+  and a bouncing input is silent.
 
 Platform notes:
 

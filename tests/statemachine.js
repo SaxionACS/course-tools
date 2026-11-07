@@ -360,6 +360,31 @@ const watch = config => {
 { const {sim, log, ignored} = watch({inputs: {KEY: 'hold button'}, variables: {f: false}, states: {A: {on: {'KEY pressed [f]': 'B'}}, B: {}}});
   sim.press('KEY', true);
   ok(ignored.join() === 'KEY pressed' && log.at(-1).guards.join() === 'f', 'a level change with a false guard is reported, with the guard', JSON.stringify(log.at(-1))); }
+// A "for" arrow of a current state watches the input: a change starts or cancels its
+// count, so it is no lost event, whatever arrows other states have.
+{ const {sim, st, log, ignored} = watch({inputs: {KEY: 'hold button', go: 'button'},
+    states: {A: {on: {'KEY pressed': 'A', 'KEY released': 'A', go: 'B'}}, B: {on: {'KEY pressed for 1 s': 'C'}}, C: {}}});
+  sim.dispatch('go'); sim.press('KEY', true);
+  ok(st() === 'B' && !ignored.length && !log.some(e => e.ignored), 'a "for" arrow in the current state: the press that starts its count is not reported', ignored.join());
+  sim.advance(sim.t + 500); sim.press('KEY', false);
+  ok(st() === 'B' && !ignored.length && !log.some(e => e.ignored), 'a "for" arrow in the current state: the release that cancels its count is not reported', ignored.join());
+  sim.press('KEY', true); sim.advance(sim.t + 1100);
+  ok(st() === 'C', 'a "for" arrow in the current state: it still fires after the whole time');
+  sim.press('KEY', false);
+  ok(ignored.join() === 'KEY released' && log.at(-1).cause === 'KEY released', 'in a state without the "for" arrow, the level change is reported again', ignored.join()); }
+{ const {sim, st, ignored} = watch({inputs: {KEY: 'hold button', go: 'button'}, machines: {
+    a: {states: {A: {on: {'KEY pressed for 1 s': 'A2'}}, A2: {}}},
+    b: {states: {B: {on: {go: 'B2'}}, B2: {on: {'KEY pressed': 'B'}}}}}});
+  sim.press('KEY', true);
+  ok(st(0) === 'A' && !ignored.length, 'two machines: a "for" arrow of the other machine watches the input', ignored.join());
+  sim.advance(sim.t + 1100); sim.press('KEY', false); sim.press('KEY', true);
+  ok(st(0) === 'A2' && ignored.join() === 'KEY pressed', 'two machines: once no current state has a "for" arrow, the level change is reported', ignored.join()); }
+{ const {sim, log, ignored} = watch({inputs: {KEY: 'hold button'}, variables: {f: false}, states: {A: {on: {'KEY pressed [f]': 'B', 'KEY pressed for 1 s': 'C'}}, B: {}, C: {}}});
+  sim.press('KEY', true);
+  ok(ignored.join() === 'KEY pressed' && log.at(-1).guards.join() === 'f', 'next to a "for" arrow, a false guard is still reported', JSON.stringify(log.at(-1))); }
+{ const {sim, st, ignored} = watch({inputs: {KEY: 'hold button', go: 'button'}, variables: {f: false}, states: {A: {on: {'KEY pressed': 'A', go: 'B'}}, B: {on: {'KEY pressed for 1 s [f]': 'C'}}, C: {}}});
+  sim.dispatch('go'); sim.press('KEY', true);
+  ok(st() === 'B' && !ignored.length, 'a "for" arrow with a false guard still watches the input', ignored.join()); }
 { const {sim, st, log} = run('side');
   sim.advance(3000);
   const n = id => log.filter(e => e.machine === id && e.to && !e.start).length;

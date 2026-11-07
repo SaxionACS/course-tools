@@ -988,11 +988,16 @@
             this.say({machine: s.m.name, cause, waiting: true, guards: arrows.map(x => x.trigger.guardSrc)});
           } else guards.push(...arrows.map(x => x.trigger.guardSrc));
         }
-        if (!handled && !e.quiet) {
+        if (!handled && !e.quiet && (guards.length || !this.watched(e.input))) {
           this.say({cause, ignored: true, source: e.source, states: this.ms.map(s => [s.m.name, s.state]), guards});
           this.hooks.ignored?.(e, this.ms, guards);
         }
       }
+    }
+    // Does a current state have a `for` arrow on this input? Then a change of the
+    // input starts or cancels its count, so it is no lost event.
+    watched(input) {
+      return this.ms.some(s => s.m.states[s.state].on.some(x => x.trigger.kind === 'held' && x.trigger.input === input));
     }
     // a hold button or pin goes down/high (true) or up/low (false); a bouncy one
     // flips a few times in the first 12 ms
@@ -1016,7 +1021,7 @@
       // A signal may change with nobody listening (only `pin high for 50 ms` watches
       // it): that is no lost event. Nor are bounces worth a message each.
       const event = `${name} ${h.input.words[level ? 0 : 1]}`;
-      this.queue.push({name: event, source: 'edge', quiet: h.bouncy || !this.heard.has(event)});
+      this.queue.push({name: event, source: 'edge', input: name, quiet: h.bouncy || !this.heard.has(event)});
       this.drain();
     }
     // The next thing that is due: bounces, held conditions, after timeouts, named
