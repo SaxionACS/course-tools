@@ -105,6 +105,11 @@ const EX = {
     machines: {
       a: {variables: {n: 0}, states: {A: {on: {go: '/ n++, total++, send add(n * 10)'}}}},
       b: {variables: {n: 100}, states: {B: {on: {'add(x) [x < 30]': '/ n += x, total += 1', 'add(x)': 'C / n = x'}}, C: {}}}}},
+  door: {title: 'The burglar alarm, with a door', direction: 'TB', log: 'hidden', inputs: {btn_pressed: 'button', door: 'pin [open, closed]'}, outputs: {LED: 'red led'},
+    states: {DISARMED: {entry: 'LED off', on: {btn_pressed: 'ARMING'}},
+      ARMING: {entry: 'LED on, start exit_delay 10 s', do: 'blink LED 500 ms', on: {btn_pressed: 'DISARMED', 'exit_delay [door closed]': 'ARMED', 'exit_delay [door open]': 'RINGING'}},
+      ARMED: {entry: 'LED on', on: {'door open': 'RINGING', btn_pressed: 'DISARMED'}},
+      RINGING: {entry: 'LED on', do: 'blink LED 100 ms', on: {btn_pressed: 'DISARMED'}}}},
 };
 const run = (id, config = EX[id]) => {
   const log = [];
@@ -135,7 +140,7 @@ for (const [id, config] of Object.entries(EX)) {
   const auto = Object.fromEntries(Object.keys(EX).map(id => [id, read(EX[id]).speeds.map(I.speedLabel).join(' ')]));
   const want = {switch: '1×', staircase: '1× 2× 5× 10×', staircase2: '1× 2× 5× 10×', alarm: '1× 2× 5× 10×', button: '1/100× 1/10× 1×',
     side: '1×', stopwatch: '1×', long: '1×', kitchen: '1× 2× 5×', traffic: '1× 2× 5×', blinker: '1×', adjustable: '1×', numbers: '1×', rounds: '1× 2×',
-    crossing: '1× 2× 5×', lock: '1× 2×', pair: '1×'};
+    crossing: '1× 2× 5×', lock: '1× 2×', pair: '1×', door: '1× 2× 5× 10×'};
   ok(JSON.stringify(auto) === JSON.stringify(want), 'speed buttons: slower for short times and bounces, faster for long times', JSON.stringify(auto));
   ok(I.autoSpeeds([50]).join() === '0.1,1' && I.autoSpeeds([60000]).join() === '1,10,20,50' && I.autoSpeeds([1500, 2500]).join() === '1,2',
     'speed buttons: 1/10 under 100 ms, up to three speed-ups', [I.autoSpeeds([50]), I.autoSpeeds([60000]), I.autoSpeeds([1500, 2500])].join(' / '));
@@ -251,6 +256,29 @@ bad({inputs: {b: 'button [1, 1]'}, states: {A: {on: {'b(x)': 'A'}}}}, /a value a
 bad({inputs: {b: 'button [one]'}, states: {A: {on: {'b(x)': 'A'}}}}, /"one" is not a value/, 'a value that is a word');
 bad({inputs: {b: 'button []'}, states: {A: {on: {b: 'A'}}}}, /the list of values is empty/, 'an empty list of values');
 bad({inputs: {b: 'hold button [1]'}, states: {A: {}}}, /only a button can send a value/, 'values on a hold button');
+// the level of an input, and a pin's own words
+const lv = (guard, door = 'pin') => ({inputs: {b: 'button', door}, states: {A: {on: {[`b [${guard}]`]: 'A'}}}});
+bad(lv('door'), /door has a level: write door high or door low/, 'a guard with the name of a pin and no level');
+bad(lv('door up'), /door has a level: write door high or door low/, 'a guard with a word the pin does not have');
+bad(lv('door high', 'pin [open, closed]'), /door has a level: write door open or door closed/, 'own words replace high and low in a guard');
+bad(lv('door'), /state A, on b \[door\]/, 'a mistake in a level says where it is');
+bad(lv('door', 'hold button'), /door has a level: write door pressed or door released/, 'a guard with the name of a hold button and no level');
+bad(lv('b'), /b is a click button: it has no level, only an event. For a level, make it a hold button or a pin/, 'a click button has no level');
+bad(lv('b pressed'), /b is a click button: it has no level/, 'a click button has no level, whatever the word');
+bad(lv('door high > 0'), /> works on numbers, and door high is true or false/, 'a level is true or false, not a number');
+bad(lv('door high + 1'), /\+ works on numbers/, 'a level is no number in a sum');
+bad(lv('door high for 1 s'), /the guard \[door high for 1 s\] cannot be read after "door high"/, 'a guard reads a level, not a held condition');
+bad({inputs: {b: 'button', door: 'pin [open, closed]'}, states: {A: {on: {'door high': 'A', b: 'A'}}}}, /door is a pin: write door open or door closed/, 'own words replace high and low in an event');
+bad({inputs: {b: 'button', door: 'pin [open, closed]'}, states: {A: {on: {'door low for 1 s': 'A', b: 'A'}}}}, /door is a pin: write door open or door closed/, 'own words replace high and low in a held condition');
+bad({inputs: {b: 'button', door: 'pin'}, variables: {n: 0}, states: {A: {on: {b: 'A / n = door high'}}}}, /n is a number, and door high is true or false/, 'a level does not fit in a number');
+bad({inputs: {b: 'button', door: 'pin'}, states: {A: {on: {b: 'A / start T door high ms', T: 'A'}}}}, /a time is a number, and door high is true or false/, 'a level is no time');
+bad({inputs: {b: 'button', door: 'pin'}, states: {A: {entry: 'print "{door high:s}"', on: {b: 'A'}}}}, /only a number can be a time/, 'a level printed as a time');
+for (const [words, what] of [['[a]', 'one word'], ['[a, a]', 'the same word twice'], ['[a, b, c]', 'three words'], ['[1, 2]', 'numbers'], ['[a, for]', 'the word for'], ['[]', 'no words']]) {
+  bad({inputs: {p: `pin ${words}`}, states: {A: {on: {'p high': 'A'}}}}, /a pin can have two words of its own, for high and for low/, `a pin with ${what}`);
+}
+bad({inputs: {p: 'bouncy pin [a]'}, states: {A: {}}}, /a pin can have two words of its own/, 'a bouncy pin with one word');
+bad({inputs: {b: 'bouncy button [a, b]'}, states: {A: {}}}, /only a button can send a value/, 'no own words on a bouncy button');
+bad({inputs: {b: 'hold button [a, b]'}, states: {A: {}}}, /only a button can send a value/, 'no own words on a hold button');
 {
   const w = read({inputs: {b: 'button [1, 2]', c: 'button'}, outputs: {L: 'led'}, variables: {unused: 0, used: 0},
     states: {A: {on: {b: 'A', 'after 1 s': '/ L toggle', c: 'A', 'c [used > 0]': 'A'}}}}).warnings.join('\n');
@@ -343,15 +371,89 @@ const watch = config => {
 { const {sim, st, log, ignored} = watch({inputs: {KEY: 'hold button'}, states: {A: {on: {'KEY pressed for 1 s': 'B'}}, B: {on: {'KEY released for 1 s': 'A'}}}});
   sim.press('KEY', true); sim.advance(sim.t + 1100); sim.press('KEY', false); sim.advance(sim.t + 1100); sim.press('KEY', true);
   ok(st() === 'A' && !ignored.length && !log.some(e => e.ignored), 'a hold button with only "for" conditions: nothing is reported', ignored.join()); }
-{ const {sim, st, log, ignored} = watch({inputs: {KEY: 'hold button', back: 'button'}, states: {A: {on: {'KEY pressed': 'B'}}, B: {on: {back: 'A'}}}});
+{ const {sim, st, log, ignored} = watch({inputs: {KEY: 'bouncy button', back: 'button'}, states: {A: {on: {'KEY pressed': 'B'}}, B: {on: {back: 'A'}}}});
+  sim.holds.KEY.bouncy = false;     // the checkbox unticked
   sim.press('KEY', true); sim.press('KEY', false);
   ok(st() === 'B' && !ignored.length, 'KEY released, which no state has an arrow for, is not reported', ignored.join());
   sim.press('KEY', true);
   ok(ignored.join() === 'KEY pressed' && log.at(-1).ignored && log.at(-1).cause === 'KEY pressed', 'KEY pressed, in a state without an arrow for it, is reported and logged', ignored.join());
   sim.press('KEY', false); ignored.length = 0;
-  sim.holds.KEY.bouncy = true;      // the same input, bouncing
+  sim.holds.KEY.bouncy = true;      // the checkbox ticked again
   sim.press('KEY', true); sim.advance(sim.t + 20);
   ok(!ignored.length, 'a bouncing input stays silent, also for a level change that some state has an arrow for', ignored.join()); }
+// the level of an input in a guard: what counts is the level when the time is up
+for (const [what, steps, want] of [
+  ['the door stays closed', [[0, 'b']], 'ARMED'],
+  ['the door is open when the time is up', [[0, 'b'], [3000, 'open']], 'RINGING'],
+  ['the door was opened and closed again', [[0, 'b'], [3000, 'open'], [5000, 'closed']], 'ARMED'],
+  ['the door was open before arming', [[0, 'open'], [1000, 'b']], 'RINGING'],
+]) {
+  const {sim, st} = run('door');
+  for (const [t, what2] of steps) { sim.advance(t); if (what2 === 'b') sim.dispatch('btn_pressed'); else sim.press('door', what2 === 'open'); }
+  sim.advance(12000);
+  ok(st() === want && !sim.ms[0].late.size, `door: ${what}: ${want}, and nothing waits`, st());
+}
+{ const {sim, st} = run('door');
+  sim.dispatch('btn_pressed'); sim.advance(10000); ok(st() === 'ARMED', 'door: ARMED when the time is up with the door closed', st());
+  sim.press('door', true); ok(st() === 'RINGING', 'door: the event door open works next to guards that read the same input', st());
+  sim.reset(); ok(st() === 'DISARMED' && sim.holds.door.level === false, 'door: reset brings the pin back to its second word'); }
+{ const {sim, st, log} = run('door', Object.assign(copy(EX.door), {states: {...copy(EX.door).states,
+    ARMING: {entry: 'start exit_delay 10 s', on: {'exit_delay [door closed]': 'ARMED'}}}}));
+  sim.press('door', true); sim.dispatch('btn_pressed'); sim.advance(sim.t + 60000);
+  ok(st() === 'ARMING' && log.some(e => e.waiting), 'one guard on a timer: it waits, while the door is open', st());
+  sim.press('door', false); sim.advance(sim.t + 1);
+  ok(st() === 'ARMED', 'one guard on a timer: it fires when the door closes', st()); }
+{ const c = {inputs: {KEY: 'hold button', p: 'pin', go: 'button'}, states: {A: {on: {'after 1 s [KEY released]': 'B', 'go [p low && KEY pressed]': 'C'}}, B: {}, C: {}}};
+  const {sim, st} = run(null, c);
+  sim.press('KEY', true); sim.advance(2000); ok(st() === 'A', 'a timeout waits for the level of a hold button', st());
+  sim.dispatch('go'); ok(st() === 'C', 'levels with && in a guard: pin low and KEY pressed', st());
+  const r = run(null, c); r.sim.press('KEY', true); r.sim.advance(2000); r.sim.press('KEY', false); r.sim.advance(2001); ok(r.st() === 'B', 'after waits until the hold button is released', r.st()); }
+{ const {sim, st} = run(null, {inputs: {KEY: 'hold button', p: 'pin [on, off]'}, states: {A: {on: {'p on for 50 ms [!(KEY pressed)]': 'B'}}, B: {}}});
+  sim.press('KEY', true); sim.press('p', true); sim.advance(100); ok(st() === 'A', 'a held condition waits for a level in its guard', st());
+  sim.press('KEY', false); sim.advance(sim.t + 1); ok(st() === 'B', 'a held condition fires when the level in its guard turns true; on and off can be a pin\'s words', st()); }
+// a level is a value like any other, in every expression
+{ const c = {text: 'terminal', inputs: {p: 'pin [open, closed]', go: 'button'}, outputs: {L: 'led'}, variables: {was: false, same: false},
+    states: {A: {entry: 'was = p open', on: {go: 'A / same = p open == was, print "open: {p open}, closed: {!(p open)}" L on'}}}};
+  const sim = new Sim(read(c), {}, rnd);
+  ok(sim.shared.was === false, 'a level in an entry action, at the very start');
+  sim.press('p', true); sim.dispatch('go');
+  ok(sim.lines.at(-1) === 'open: true, closed: false' && sim.shared.was === true && sim.shared.same === false && sim.out.L === true,
+    'a level in an assignment, a comparison and a print; the next action follows without a comma', `${sim.lines.at(-1)} ${JSON.stringify(sim.shared)}`); }
+ok(!read({inputs: {p: 'pin', b: 'button'}, states: {A: {on: {'b [p high]': 'A'}}}}).warnings.length, 'an input that only a guard reads is used');
+ok(!read({inputs: {p: 'pin', b: 'button'}, variables: {v: false}, states: {A: {on: {b: 'A / v = p high'}}}}).warnings.some(w => /input p/.test(w)), 'an input that only an action reads is used');
+// a pin or a hold button never bounces; a bouncy one does, and a guard sees it
+{ const m = read({inputs: {a: 'pin', b: 'pin [x, y]', c: 'bouncy pin', d: 'bouncy pin [x, y]', e: 'hold button', f: 'bouncy button'}, states: {A: {on: {'a high': 'A', 'b x': 'A', 'c high': 'A', 'd x': 'A', 'e pressed': 'A', 'f pressed': 'A'}}}});
+  ok(Object.values(m.inputs).map(i => `${i.kind} ${i.bouncy} ${i.words}`).join('|') === 'pin false high,low|pin false x,y|pin true high,low|pin true x,y|button false pressed,released|button true pressed,released',
+    'the kinds of inputs: bouncy or not, with their words', Object.values(m.inputs).map(i => `${i.kind} ${i.bouncy} ${i.words}`).join('|')); }
+{ const c = kind => ({clock: true, inputs: {p: kind, go: 'button'}, variables: {n: 0}, states: {A: {on: {'go [p high]': '/ n++'}}}});
+  const plain = new Sim(read(c('pin')), {}, rnd);
+  plain.press('p', true);
+  ok(plain.next(false) === null && plain.holds.p.trace.length === 2, 'a pin does not bounce: one change, nothing to skip to');
+  const raw = new Sim(read(c('bouncy pin')), {}, rnd);
+  raw.press('p', true);
+  ok(raw.next(false)?.kind === 'bounce', 'a bouncy pin bounces');
+  let lows = 0;
+  for (let k = 0; k < 20 && raw.holds.p.flips.length; k++) { raw.advance(raw.holds.p.flips[0].t); if (!raw.holds.p.level) { lows++; raw.dispatch('go'); } }
+  ok(lows > 0 && raw.shared.n === 0, 'a guard reads a bouncy pin as it is at that moment, bounces included, as gpio_get() does', `${lows} low, n = ${raw.shared.n}`);
+  raw.dispatch('go');
+  ok(raw.shared.n === 1, 'and high again after the bounces', `n = ${raw.shared.n}`);
+  ok(read({inputs: {p: 'pin', b: 'button'}, states: {A: {on: {b: 'A', 'p high': 'A'}}}}).clock === false, 'a pin does not make a machine use time; a bouncy pin does');
+  ok(read({inputs: {p: 'bouncy pin', b: 'button'}, states: {A: {on: {b: 'A', 'p high': 'A'}}}}).clock === true, 'a bouncy pin makes a machine use time'); }
+// is a change reported as ignored? Only if some state has an arrow for it, and no current state reads the level
+{ const {sim, st, ignored} = watch(EX.door);
+  sim.press('door', true);
+  ok(ignored.join() === 'door open', 'door open in DISARMED is reported: ARMED has an arrow for it, and nothing here reads the door', ignored.join());
+  sim.press('door', false); ok(ignored.join() === 'door open', 'door closed is not reported: no state has an arrow for it', ignored.join());
+  ignored.length = 0;
+  sim.dispatch('btn_pressed'); ok(st() === 'ARMING');
+  sim.press('door', true); sim.press('door', false);
+  ok(!ignored.length, 'door open in ARMING is not reported: a guard there reads the door', ignored.join()); }
+{ const {sim, ignored} = watch({inputs: {p: 'pin', go: 'button'}, machines: {a: {states: {A: {on: {'p high': 'B'}}, B: {on: {go: 'A'}}}}, b: {states: {C: {on: {'go [!(p high)]': 'C'}}}}}});
+  sim.press('p', true); sim.press('p', false); sim.press('p', true);
+  ok(!ignored.length, 'a guard in a current state of another machine reads the level too', ignored.join()); }
+{ const {sim, ignored, log} = watch({inputs: {p: 'pin', go: 'button'}, variables: {f: false}, states: {A: {on: {'p high [f]': 'A', 'go [p high]': 'A'}}}});
+  sim.press('p', true);
+  ok(ignored.join() === 'p high' && log.at(-1).guards.join() === 'f', 'a false guard on the event itself is still reported, next to a guard that reads the level', ignored.join()); }
 { const {sim, st, ignored} = watch({inputs: {KEY: 'hold button'}, machines: {a: {states: {A: {on: {'KEY pressed': 'B'}}, B: {}}}, b: {states: {C: {}}}}});
   sim.press('KEY', true); sim.press('KEY', false);
   ok(st(0) === 'B' && !ignored.length, 'two machines: the arrow of one machine moves it, nothing is reported', ignored.join());
@@ -670,6 +772,9 @@ for (const [id, config] of Object.entries(EX)) {
     && a.machines[0].table.head.includes('led_set_blinking(period)'), 'print: an event with a value', JSON.stringify(a.notes));
   ok(print(EX.pair).machines.map(m => m.note).join('|') === 'Variables: n = 0.|Variables: n = 100.' && print(EX.pair).notes.join() === 'Variables: total = 0.', 'print: each machine\'s own variables, and the shared ones');
   ok(print(EX.crossing).machines[0].svg.includes('after 8 s [request]'), 'print: a guard on an arrow');
+  const dp = print(EX.door).machines[0];
+  ok(dp.table.head.join('|') === 'State|btn_pressed|exit_delay|door open' && dp.table.rows[1].join('|') === 'ARMING|DISARMED|[door closed] ARMED; [door open] RINGING|–'
+    && dp.svg.includes('exit_delay [door closed]') && dp.svg.includes('exit_delay [door open]'), 'print: a pin\'s own words and a level in a guard', JSON.stringify(dp.table));
   const long = read({inputs: {set_interval: 'button [1, 2]'}, variables: {current_value: 0}, states: {A: {on: {'set_interval(x) [x > current_value]': 'A / current_value = x'}}}}).machines[0].states.A.on[0];
   ok(I.edgeLines(long).join('|') === 'set_interval(x)|[x > current_value]|| current_value = x', 'a long guard has a line of its own', I.edgeLines(long).join('|'));
 }

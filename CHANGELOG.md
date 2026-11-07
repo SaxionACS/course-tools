@@ -14,6 +14,39 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.13.0 (unreleased)
+
+State machines: guards and actions can read the level of an input, a pin can
+have its own words for its levels, and a pin no longer looks like a bouncy pin.
+
+- **The level of an input.** A hold button or pin can be read in every
+  expression, with the words of its events: `exit_delay [door closed]: ARMED`,
+  `was_open = door open`, `print "open: {door open}"`. Before, a machine had to
+  keep the level in a variable, with a second machine to update it. Like any
+  guard on a timer, a guard with a level waits if it is false when the time is
+  up, so give every outcome an arrow to decide at that moment.
+- **Own words for a pin.** `door: pin [open, closed]`: the first word is high, the
+  second low, where the pin starts. They replace `high` and `low` in events,
+  `for` conditions, guards and on the page. Also for `bouncy pin`.
+- **A pin and a bouncy pin are different inputs.** Only a `bouncy pin` or `bouncy
+  button` has the *bounces* checkbox and the trace now. A `pin` shows its level
+  on its button, and a `hold button` is just a button. **A machine that uses a
+  plain `pin` or `hold button` loses its checkbox and trace on the page**: write
+  `bouncy pin` or `bouncy button` to keep them. It then starts with bouncing on.
+- Plain hold buttons and pins stand in one row with the click buttons, in the
+  order of `inputs:`. Bouncy inputs follow, each in a row of its own. Before,
+  all click buttons came first.
+- A change of an input is not reported as ignored while a current state has a
+  guard that reads its level, because the guard will see the change.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 204 checks,
+  with `CC=gcc-13`. The Check workflow has not run yet.
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
+
 ## 2.12.1 (2026-11-07)
 
 State machines: no more messages about a hold button or pin that nothing listens

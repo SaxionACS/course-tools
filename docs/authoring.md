@@ -941,6 +941,10 @@ states:
   them, and guards read them: `after 2 s [attempt < 5]: READY`. An event can
   have a value: `set_blinking: button [100, 500]`, with the arrow
   `set_blinking(period): BLINKING / interval = period`.
+- A `pin` or `hold button` has a level, which guards and actions can read, and
+  a pin can have its own words for it: `door: pin [open, closed]`, with the arrow
+  `exit_delay [door closed]: ARMED`. A `pin` does not bounce; a `bouncy pin` does,
+  and has a checkbox and a trace on the website.
 
 Everything a state machine can do, and how it behaves, is in
 [State machines](statemachines.md). The course template has a gallery of

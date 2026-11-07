@@ -257,14 +257,24 @@
       }
       if ((m = /^[A-Za-z_]\w*/.exec(rest))) {
         const word = m[0];
-        if (RESERVED.includes(word) || word === 'ms' || word === 's') fail(`${where}: "${word}" is not a value. A value is a number, a variable, true, false or now`);
+        if (RESERVED.includes(word) || word === 'ms' || word === 's') fail(`${where}: "${word}" is not a value. A value is a number, a variable, the level of an input, true, false or now`);
         p += word.length;
         if (word === 'true' || word === 'false') return span({k: 'bool', v: word === 'true'}, from);
         if (word === 'now') { ctx.usesNow = true; return span({k: 'now'}, from); }
         if (ctx.param?.name === word) return span({k: 'param', name: word, event: ctx.param.event}, from);
+        // the level of an input: door closed, KEY pressed
+        if (Object.hasOwn(ctx.inputs, word)) {
+          const input = ctx.inputs[word], next = /^\s+([A-Za-z_]\w*)/.exec(text.slice(p));
+          if (!input.hold) fail(`${where}: ${word} is a click button: it has no level, only an event. For a level, make it a hold button or a pin`);
+          const i = next ? input.words.indexOf(next[1]) : -1;
+          if (i < 0) fail(`${where}: ${word} has a level: write ${word} ${input.words[0]} or ${word} ${input.words[1]}`);
+          p += next[0].length;
+          ctx.usedInputs.add(word);
+          return span({k: 'level', input: word, level: i === 0}, from);
+        }
         return useVariable(word, ctx, where);
       }
-      fail(`${where}: "${clean(rest)}" is not a value. A value is a number, a variable, true, false or now`);
+      fail(`${where}: "${clean(rest)}" is not a value. A value is a number, a variable, the level of an input, true, false or now`);
     }
     function unary() {
       space();
@@ -297,7 +307,7 @@
     };
     switch (e.k) {
       case 'num': case 'now': return 'int';
-      case 'bool': return 'bool';
+      case 'bool': case 'level': return 'bool';
       case 'var': return e.type;
       case 'param': return eventType(e.event, ctx);
       case 'not': need(e.a, 'bool', '!'); return 'bool';
@@ -323,6 +333,7 @@
     return ctx.eventTypes[event];
   }
   const usesNow = e => e.k === 'now' || (e.a && usesNow(e.a)) || (e.b && usesNow(e.b));
+  const readsLevel = (e, input) => !!e && ((e.k === 'level' && e.input === input) || readsLevel(e.a, input) || readsLevel(e.b, input));
   // the value of a time at the start, for the speed buttons; null if not known then
   function startValue(e, ctx) {
     if (e.k === 'num') return e.v;
@@ -395,6 +406,15 @@
     return {values, type};
   }
 
+  // pin [open, closed]: its own words for high and for low
+  function pinWords(text, name) {
+    const words = text.split(',').map(clean);
+    if (words.length !== 2 || words[0] === words[1] || !words.every(w => NAME.test(w) && w !== 'for')) {
+      fail(`inputs, ${name}: "[${clean(text)}]": a pin can have two words of its own, for high and for low: ${name}: pin [open, closed]`);
+    }
+    return words;
+  }
+
   function readInputs(spec, ctx) {
     if (spec == null) return;
     if (!isMap(spec)) fail('inputs: write one input per line, e.g. pressed: button');
@@ -402,11 +422,11 @@
       nameOf(name, 'inputs');
       const k = clean(kind ?? '');
       const m = /^(bouncy )?(button|hold button|pin)(?: ?\[(.*)\])?$/.exec(k);
-      if (!m) fail(`inputs, ${name}: "${k}" is not an input. Inputs are: button (a click), button [100, 500] (a click with a value), hold button, pin, bouncy button, bouncy pin`);
-      if (m[3] != null && (m[1] || m[2] !== 'button')) fail(`inputs, ${name}: only a button can send a value: ${name}: button [100, 500, 1000]`);
+      if (!m) fail(`inputs, ${name}: "${k}" is not an input. Inputs are: button (a click), button [100, 500] (a click with a value), hold button, pin, pin [open, closed] (own words for high and low), bouncy button, bouncy pin`);
       const pin = m[2] === 'pin';
+      if (m[3] != null && !pin && (m[1] || m[2] !== 'button')) fail(`inputs, ${name}: only a button can send a value: ${name}: button [100, 500, 1000]`);
       ctx.inputs[name] = m[2] === 'button' && !m[1] ? {name, hold: false, ...(m[3] != null ? inputValues(m[3], name) : {})}
-        : {name, hold: true, kind: pin ? 'pin' : 'button', bouncy: !!m[1], words: WORDS[pin ? 'pin' : 'button']};
+        : {name, hold: true, kind: pin ? 'pin' : 'button', bouncy: !!m[1], words: pin && m[3] != null ? pinWords(m[3], name) : WORDS[pin ? 'pin' : 'button']};
     }
   }
 
@@ -878,6 +898,7 @@
         case 'now': return Math.floor(this.t);
         case 'var': return (e.shared ? this.shared : s.vars)[e.name];
         case 'param': return arg;
+        case 'level': return this.holds[e.input].level === e.level;
         case 'not': return !this.value(e.a, s, arg);
         case 'neg': return 0 - this.value(e.a, s, arg);
         default:
@@ -994,10 +1015,11 @@
         }
       }
     }
-    // Does a current state have a `for` arrow on this input? Then a change of the
-    // input starts or cancels its count, so it is no lost event.
+    // Does a current state have a `for` arrow on this input, or a guard that reads
+    // its level? Then a change of the input starts or cancels the count, or changes
+    // what the guard will say, so it is no lost event.
     watched(input) {
-      return this.ms.some(s => s.m.states[s.state].on.some(x => x.trigger.kind === 'held' && x.trigger.input === input));
+      return this.ms.some(s => s.m.states[s.state].on.some(x => (x.trigger.kind === 'held' && x.trigger.input === input) || readsLevel(x.trigger.guard, input)));
     }
     // a hold button or pin goes down/high (true) or up/low (false); a bouncy one
     // flips a few times in the first 12 ms
@@ -1403,11 +1425,13 @@
     const groups = [];
     const inputs = Object.values(model.inputs);
     const holdViews = inputs.filter(i => i.hold).map(holdView);
-    const clicks = inputs.filter(i => !i.hold);
+    const bounceViews = holdViews.filter(v => v.input.bouncy);
+    // the buttons in the order of inputs:, then each bouncy input in a row of its own
+    const buttons = inputs.filter(i => !i.bouncy).map(i => (i.hold ? holdViews.find(v => v.input === i).el : clickView(i)));
     if (inputs.length) {
       groups.push(h('div', {class: 'sm-group'}, h('div', {class: 'sm-cap', text: 'Inputs'}),
-        clicks.length ? h('div', {class: 'sm-buttons'}, clicks.map(clickView)) : null,
-        holdViews.map(v => v.el)));
+        buttons.length ? h('div', {class: 'sm-buttons'}, buttons) : null,
+        bounceViews.map(v => v.el)));
     }
     const outEls = {};
     const outs = Object.values(model.outputs);
@@ -1458,7 +1482,7 @@
     const resetBtn = h('button', {class: 'sm-btn', type: 'button', onClick: () => reset(true)}, 'Reset');
     top.append(h('div', {class: 'sm-ctl'}, model.clock ? [resetBtn, pauseBtn,
       speeds.length > 1 ? [h('span', {class: 'sm-lbl', text: 'Speed'}), h('div', {class: 'sm-seg', role: 'group', 'aria-label': 'Speed'}, speedBtns)] : null,
-      timed || holdViews.some(v => v.input.bouncy) ? skipBtn : null, clock] : resetBtn));
+      timed || bounceViews.length ? skipBtn : null, clock] : resetBtn));
     // without a log under it, an empty status line takes no space (saxion.scss)
     const statusEl = h('div', {class: model.log === 'hidden' ? 'sm-status sm-last' : 'sm-status', 'aria-live': 'polite'});
     top.append(statusEl);
@@ -1474,17 +1498,22 @@
         h('button', {class: 'sm-ev', type: 'button', onClick: () => sim.dispatch(i.name, 'input', i.values[list.selectedIndex])}, i.name), list);
     }
     // A hold button is down while it is held (mouse, touch, Space or Enter); a pin
-    // is a switch: a click sets it high or low.
+    // is a switch: a click sets it high or low. Only a bouncy input has a checkbox
+    // for its bounces and a trace of its level. Any other pin shows its level on
+    // the button.
     function holdView(i) {
       let down = false;
-      bouncy[i.name] = i.bouncy;
-      const pin = i.kind === 'pin';
-      const btn = h('button', {class: pin ? 'sm-pin' : 'sm-hold', type: 'button', 'aria-pressed': 'false'},
-        h('span', {text: i.name}), h('small', {text: pin ? 'click: high or low' : 'hold down'}));
-      const set = level => {
-        if (down === level) return;
+      const pin = i.kind === 'pin', word = level => i.words[level ? 0 : 1];
+      const hint = h('small', {text: !pin ? 'hold down' : i.bouncy ? `click: ${word(true)} or ${word(false)}` : word(false)});
+      const btn = h('button', {class: pin ? 'sm-pin' : 'sm-hold', type: 'button', 'aria-pressed': 'false'}, h('span', {text: i.name}), hint);
+      const show = level => {
         down = level;
         btn.setAttribute('aria-pressed', String(level));
+        if (pin && !i.bouncy) hint.textContent = word(level);
+      };
+      const set = level => {
+        if (down === level) return;
+        show(level);
         sim.press(i.name, level);
       };
       if (pin) btn.addEventListener('click', () => set(!down));
@@ -1498,15 +1527,18 @@
         btn.addEventListener('blur', () => set(false));
         btn.addEventListener('contextmenu', e => e.preventDefault());
       }
+      const release = () => show(false);
+      if (!i.bouncy) return {input: i, el: btn, release};
+      bouncy[i.name] = true;
       const check = h('input', {type: 'checkbox', id: `sm${n}-bounce-${i.name}`});
-      check.checked = i.bouncy;
+      check.checked = true;
       check.addEventListener('change', () => { bouncy[i.name] = check.checked; sim.holds[i.name].bouncy = check.checked; });
       const path = sv('path', {});
       const trace = sv('svg', {class: 'sm-trace', viewBox: '0 0 240 34', preserveAspectRatio: 'none', 'aria-hidden': 'true'}, path);
       const level = h('span'), span = h('span');
       return {input: i, path, level, span,
         el: h('div', {class: 'sm-holdrow'}, h('div', {class: 'sm-row2'}, btn, h('label', {class: 'sm-check', for: check.id}, check, 'bounces')), trace, h('div', {class: 'sm-tracecap'}, level, span)),
-        release: () => { down = false; btn.setAttribute('aria-pressed', 'false'); }};
+        release};
     }
 
     let statusTimer = 0;
@@ -1692,7 +1724,7 @@
         else textEl.textContent = shown.display;
       }
       if (timersEl) paintTimers();
-      holdViews.forEach(paintTrace);
+      bounceViews.forEach(paintTrace);
       clock.textContent = `t = ${(sim.t / 1000).toFixed(3)} s`;
     }
     // back to the start; after a click on Reset, the entry actions of the first states light up

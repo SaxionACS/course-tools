@@ -168,3 +168,42 @@ states:
   DONE:
     entry: print "done at {count}"
 ```
+
+## Levels: a pin with its own words, read by a guard
+
+A pin and a hold button that do not bounce: buttons in one row, in the order of
+`inputs:`, without a checkbox or a trace.
+
+```statemachine
+title: SM-DOOR
+direction: TB
+inputs:
+  btn_pressed: button
+  door: pin [open, closed]
+  KEY: hold button
+outputs:
+  LED: red led
+states:
+  DISARMED:
+    entry: LED off
+    on:
+      btn_pressed: ARMING
+  ARMING:
+    entry: LED on, start exit_delay 10 s
+    do: blink LED 500 ms
+    on:
+      btn_pressed: DISARMED
+      exit_delay [door closed]: ARMED
+      exit_delay [door open]: RINGING
+  ARMED:
+    entry: LED on
+    on:
+      door open: RINGING
+      btn_pressed: DISARMED
+      KEY pressed for 1 s: DISARMED
+  RINGING:
+    entry: LED on
+    do: blink LED 100 ms
+    on:
+      btn_pressed: DISARMED
+```

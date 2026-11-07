@@ -89,9 +89,9 @@ try {
     status: n => T.block(n).querySelector('.sm-status')?.textContent,
   }, true)`);
 
-  ok(await js(`document.querySelectorAll('.course-statemachine').length`) === 7, 'a block for every ```statemachine on the page');
-  ok(await js(`document.querySelectorAll('.course-statemachine .sm-svg').length`) === 6,
-    'every machine is drawn: one, two side by side, one, the one with warnings, and the one with variables');
+  ok(await js(`document.querySelectorAll('.course-statemachine').length`) === 8, 'a block for every ```statemachine on the page');
+  ok(await js(`document.querySelectorAll('.course-statemachine .sm-svg').length`) === 7,
+    'every machine is drawn: one, two side by side, one, the one with warnings, the one with variables, and the one with a door');
   ok(await js(`T.block(3).querySelector('.sm-error')?.textContent`) === 'This state machine cannot be shown: state A, on presed: presed is not an input, a timer or an event that a machine sends. A button? Add it under inputs:, e.g. inputs: {presed: button}',
     'a machine with a mistake shows the mistake');
   ok(await js(`T.block(5).querySelector('.sm-error')?.textContent.startsWith('This state machine cannot be shown: the YAML cannot be read')`),
@@ -133,6 +133,8 @@ try {
     'side by side: transition: 0 has no dot; states change at once');
   ok(kinds.filter(s => /^A bounce: pin (low|high)\.$/.test(s)).length >= 4 && kinds.at(-1) === 'Skipped to [pin high for 50 ms].',
     'side by side: skip ahead stops at every bounce, then at the press', kinds.join(' | '));
+  ok(await js(`T.block(1).querySelectorAll('.sm-check input, .sm-trace').length`) === 2 && await js(`T.block(1).querySelector('.sm-pin small').textContent`) === 'click: high or low',
+    'a bouncy pin has a checkbox, a trace and its row, and says what a click does');
   // bounces unticked: no state has an arrow for pin low, only a "for" condition watches the pin
   await js(`(T.block(1).querySelector('.sm-check input').click(), true)`);
   await js(`T.click(1, 'pin')`);
@@ -205,6 +207,41 @@ try {
   await js(`T.click(6, 'Reset')`);
   ok(await vars() === 'interval=500,count=0' && await js(`T.state(6)`) === 'OFF', 'Reset brings back the first values', await vars());
   ok(await js(`T.block(6).querySelector('.sm-val').selectedIndex`) === 1, 'Reset keeps the choice in the list, as it keeps the bounce checkbox');
+
+  // a pin and a hold button that do not bounce, and a guard that reads the level
+  await js(`(T.block(7).scrollIntoView(), true)`);
+  await sleep(200);
+  const door = () => js(`(b => b.querySelector('small').textContent + ' ' + b.getAttribute('aria-pressed'))(T.block(7).querySelector('.sm-pin'))`);
+  ok(await js(`T.block(7).querySelectorAll('.sm-check, .sm-trace, .sm-tracecap, .sm-holdrow').length`) === 0, 'no checkbox and no trace on an input that does not bounce');
+  ok(await js(`[...T.block(7).querySelectorAll('.sm-buttons > button')].map(b => b.textContent).join()`) === 'btn_pressed,doorclosed,KEYhold down',
+    'buttons in one row, in the order of inputs:', await js(`[...T.block(7).querySelectorAll('.sm-buttons > button')].map(b => b.textContent).join()`));
+  ok(await door() === 'closed false', 'a pin shows its level on the button, and starts at its second word', await door());
+  await js(`T.click(7, 'door')`);
+  ok(await door() === 'open true', 'a click: the first word', await door());
+  ok(/^door open is ignored/.test(await js(`T.status(7)`)) && await js(`T.state(7)`) === 'DISARMED', 'door open in DISARMED is reported: ARMED has an arrow for it', await js(`T.status(7)`));
+  await js(`T.click(7, 'door')`);
+  ok(await door() === 'closed false', 'a second click: the second word', await door());
+  await js(`T.click(7, 'btn_pressed')`);
+  await sleep(600);
+  ok(await js(`T.state(7)`) === 'ARMING', 'door: arming', await js(`T.state(7)`));
+  await js(`(T.block(7).querySelector('.sm-status').textContent = '', true)`);        // the message above stays for a few seconds
+  const logged = (await js(`T.log(7)`)).split('ignored').length;
+  await js(`T.click(7, 'door')`);
+  ok(!/ignored/.test(await js(`T.status(7)`)) && (await js(`T.log(7)`)).split('ignored').length === logged, 'door open in ARMING is not reported: a guard there reads the door', await js(`T.status(7)`));
+  await js(`T.click(7, 'Skip ahead')`);
+  await sleep(600);
+  ok(await js(`T.state(7)`) === 'RINGING', 'door open when the time is up: RINGING', await js(`T.state(7)`));
+  await js(`T.click(7, 'Reset')`);
+  ok(await door() === 'closed false' && await js(`T.state(7)`) === 'DISARMED', 'Reset: the pin is back at its second word, on the button too', await door());
+  await js(`T.click(7, 'btn_pressed')`);
+  await sleep(600);
+  await js(`T.click(7, 'Skip ahead')`);
+  await sleep(600);
+  ok(await js(`T.state(7)`) === 'ARMED', 'door closed when the time is up: ARMED', await js(`T.state(7)`));
+  ok((await js(`T.block(7).querySelector('.sm-svg').textContent`)).includes('exit_delay [door closed]'), 'the guard on the arrow, in the pin\'s own words');
+  await js(`T.click(7, 'door')`);
+  await sleep(600);
+  ok(await js(`T.state(7)`) === 'RINGING', 'the event door open, in ARMED: RINGING', await js(`T.state(7)`));
   await sleep(300);
   ok(!session.errors.length, 'no script errors in the page', session.errors.join('\n'));
 } catch (e) {

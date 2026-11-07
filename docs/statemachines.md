@@ -114,22 +114,34 @@ a button that does nothing.
 | `button` | a button; every click is one event | `NAME` |
 | `button [100, 500, 1000]` | a button with a list of values next to it; every click is one event with the value chosen in the list ([Events with a value](#events-with-a-value)) | `NAME`, or `NAME(value)` to use the value |
 | `hold button` | a button that is down while the student holds it (mouse, touch, or Space/Enter on the keyboard) | `NAME pressed`, `NAME released`, and `NAME pressed for 1 s` |
-| `pin` | a switch: a click sets the pin high, the next click low | `NAME high`, `NAME low`, and `NAME high for 50 ms` |
-| `bouncy button` | a hold button that bounces | as `hold button` |
-| `bouncy pin` | a pin that bounces | as `pin` |
+| `pin` | a switch: a click sets the pin high, the next click low. The button shows the level | `NAME high`, `NAME low`, and `NAME high for 50 ms` |
+| `pin [open, closed]` | a pin with its own words for high and low | `NAME open`, `NAME closed`, and `NAME open for 50 ms` |
+| `bouncy button` | a hold button that bounces, with a checkbox and a trace | as `hold button` |
+| `bouncy pin`, `bouncy pin [open, closed]` | a pin that bounces, with a checkbox and a trace | as `pin` |
 
 A `button` is a press that the software has already cleaned up: one click is
 one event, as `btn_just_pressed()` returns `true` once per press. Use it in
-most machines. A `hold button` or a `pin` is the signal itself, for machines
-that work with levels and times, such as a debouncer or a long press.
+most machines. A `hold button` or a `pin` is a signal with a level. It has
+events when it changes, and guards and actions can read its level at any moment
+([Guards](#guards)). Use one when a machine asks how an input *is*, or for how
+long it has been that way, not only when it changes: a door that must be closed,
+or a long press.
 
-A *bouncy* input bounces at every change, as a real contact does: it flips
-two to four times back and forth within the first 12 ms. The student can
-switch the bouncing off and on with a checkbox next to the input. Under a hold
-button or pin, a trace shows its level over the last 8 seconds of real time
-(at 1/100 speed: the last 80 ms).
+**A pin and a bouncy pin are different inputs.** A `pin` or a `hold button`
+changes cleanly, once per click or press, and has only its button. A *bouncy*
+input is the raw signal of a contact, for a debouncer: at every change it flips
+two to four times back and forth within the first 12 ms. It has a row of its
+own, with a checkbox to switch the bouncing off and on, and a trace of its level
+over the last 8 seconds of real time (at 1/100 speed: the last 80 ms).
 
-Inputs appear on the website in the order of `inputs:`.
+**Own words for a pin.** `door: pin [open, closed]` names the levels. The first
+word is high, what a click gives; the second is low, where the pin starts. The
+words replace `high` and `low` everywhere: `door open: ALARM`, `door closed for
+1 s: ARMED`, `exit_delay [door closed]: ARMED`, and on the button. A hold button
+always has `pressed` and `released`.
+
+Inputs appear on the website in the order of `inputs:`, the bouncy ones after
+the others.
 
 ## Outputs
 
@@ -179,6 +191,7 @@ arrow out of the state.
 | `pressed` | a click on the `button` named `pressed` |
 | `KEY pressed`, `KEY released` | a `hold button` named KEY goes down or up |
 | `pin high`, `pin low` | a `pin` named pin goes high or low |
+| `door open`, `door closed` | the same, for `door: pin [open, closed]` |
 | `KEY pressed for 1 s`, `pin high for 50 ms` | the input has been in that level for that long without a break. Drawn as `[pin high for 50 ms]` |
 | `after 10 s` | 10 s after the machine entered the state. A random time: `after 2..5 s` |
 | `exit_delay` | the named timer `exit_delay` runs out (started with `start exit_delay 10 s`) |
@@ -336,6 +349,12 @@ answer is known.
 `now` is the time since the start, in ms. There are no fractions (write `1500`
 for 1.5 s), no arrays and no text.
 
+The level of a hold button or a pin is a value too: `door closed` or `KEY
+pressed` is true or false at this moment. It works in every expression:
+`[door closed && count < 3]`, `was_open = door open`, `print "open: {door open}"`.
+`door` alone is a mistake, because it does not say which level, and so is the
+name of a click button, which has no level.
+
 Numbers and booleans do not mix, unlike in C: `[count]` is a mistake (write
 `[count > 0]`), and so is `count = true`. Dividing by zero gives 0 and a message
 in the log.
@@ -384,7 +403,36 @@ state, as `RESULT` above does: one of its guards is always true, so nothing
 waits.
 
 A guard on a timeout, a named timer or a held condition cannot use `now`: it
-could turn true at any moment. Use a timer.
+could turn true at any moment. Use a timer. It can read the level of an input,
+because the machine sees every change of an input.
+
+**The level of an input.** A guard can read a hold button or a pin, with the
+words of its events ([Inputs](#inputs)):
+
+```yaml
+inputs:
+  door: pin [open, closed]
+states:
+  ARMING:
+    on:
+      exit_delay [door closed]: ARMED
+      exit_delay [door open]: ALARM
+  ARMED:
+    on:
+      door open: ALARM
+```
+
+In front of the brackets, `door open` is an event: the moment the door opens.
+Inside them, it is a level: whether the door is open now, whatever happened
+before. A door that was opened and closed again during the delay does not count.
+In C, with the door's contact pulling the pin high when it opens:
+
+```c
+if (time_reached(exit_delay) && !gpio_get(DOOR_PIN)) { ... }   // exit_delay [door closed]
+```
+
+A bouncy input is read as it is at that moment, bounces included, as `gpio_get()`
+does.
 
 ## Events with a value
 
@@ -492,8 +540,9 @@ The rules follow UML state machines, as far as the course uses them.
    only if some state has an arrow for it (`KEY pressed`), so never in a
    machine that only has `KEY pressed for 1 s`. It does not count either while
    a current state has such a `for` arrow on that input, because the change
-   starts or cancels its count, unless an arrow with a false guard explains why
-   the event was lost. Bounces are not reported.
+   starts or cancels its count, or a guard that reads its level, because the
+   guard will see the change. An arrow with a false guard still explains why the
+   event was lost, and is reported. Bounces are not reported.
 5. **Blinking** toggles the output every period, starting one period after
    entry. Leaving the state stops the blinking and leaves the output as it
    is: switch it off on the arrow or in the next state's entry if it must be
@@ -507,7 +556,8 @@ The rules follow UML state machines, as far as the course uses them.
 9. **Guards.** The first arrow for an event whose guard is true fires. If all
    guards are false, a click or a sent event is ignored, and a timeout waits
    for its guard ([Guards](#guards)). With several machines, an action of one
-   can change a shared variable that the guard of the next one reads.
+   can change a shared variable that the guard of the next one reads. A guard
+   reads the level of an input as it is at that moment.
 
 Time on the website is simulated, so speed changes only the pace: at 1/100,
 the 50 ms of a debouncer take 5 s, and the result is exactly the same as at
@@ -538,9 +588,11 @@ From top to bottom:
   speed): the dot always arrives before the next timeout. A click before it
   arrives finishes it at once. A folded machine, and a browser set to reduce
   motion, show no dot.
-- **Inputs**: a button per input, in the order of `inputs:`, with a list of
-  values next to a button that has them. Buttons always work, also when the
-  current state ignores them: that is something to see.
+- **Inputs**: a row of buttons, in the order of `inputs:`, with a list of values
+  next to a button that has them, and on a pin's button its level. Then every
+  bouncy input in a row of its own, with its *bounces* checkbox and its trace.
+  Buttons always work, also when the current state ignores them: that is
+  something to see.
 - **Outputs**: the LEDs and buzzers.
 - **Display** or **Terminal**, if a machine prints.
 - **Variables**, if there are any, with their values. With several machines,
@@ -613,6 +665,11 @@ the block shows the message instead. For example:
 - `blink` under `entry:` or other actions under `do:`;
 - `KEY` for a hold button (write `KEY pressed` or `KEY released`), or
   `pressed released` for a click button;
+- in an expression, an input without its level (`[door]`), a word the input does
+  not have (`[door high]` for `door: pin [open, closed]`), or a click button,
+  which has no level;
+- own words for a pin that are not two different names (`pin [open]`), or own
+  words for a hold button;
 - a variable that is not declared or belongs to another machine, numbers and
   true/false mixed (`[count]`, `count = true`), a fraction in an expression;
 - a guard without an event, or a guard with `now` on a timeout;
@@ -807,6 +864,46 @@ states:
 Disarm during ARMING: `exit_delay` keeps running and runs out in DISARMED,
 where nothing reacts to it (the log says so). With `after 10 s: ARMED`
 instead, the time would stop with ARMING.
+
+### An alarm that looks at the door
+
+```yaml
+direction: TB
+inputs:
+  arm_pressed: button
+  door: pin [open, closed]
+outputs:
+  LED: red led
+states:
+  DISARMED:
+    entry: LED off
+    on:
+      arm_pressed: ARMING
+  ARMING:
+    entry: start exit_delay 10 s
+    do: blink LED 500 ms
+    on:
+      arm_pressed: DISARMED
+      exit_delay [door closed]: ARMED
+      exit_delay [door open]: ALARM
+  ARMED:
+    entry: LED on
+    on:
+      door open: ALARM
+      arm_pressed: DISARMED
+  ALARM:
+    do: blink LED 100 ms
+    on:
+      arm_pressed: DISARMED
+```
+
+The machine decides when `exit_delay` runs out, from the level of the door at
+that moment. One of the two guards is always true, so nothing waits. With only
+`exit_delay [door closed]: ARMED`, ARMING would wait for the door to close.
+
+Opening the door in DISARMED says that `door open` is ignored, because ARMED has
+an arrow for it and DISARMED has not. In ARMING it says nothing, because the
+guards there read the door.
 
 ## What is not possible (yet)
 
