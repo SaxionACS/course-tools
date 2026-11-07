@@ -133,6 +133,12 @@ try {
     'side by side: transition: 0 has no dot; states change at once');
   ok(kinds.filter(s => /^A bounce: pin (low|high)\.$/.test(s)).length >= 4 && kinds.at(-1) === 'Skipped to [pin high for 50 ms].',
     'side by side: skip ahead stops at every bounce, then at the press', kinds.join(' | '));
+  // bounces unticked: no state has an arrow for pin low, only a "for" condition watches the pin
+  await js(`(T.block(1).querySelector('.sm-check input').click(), true)`);
+  await js(`T.click(1, 'pin')`);
+  ok(await js(`T.block(1).querySelector('.sm-tracecap').textContent.startsWith('pin low')`)
+    && !/ignored/.test(await js(`T.status(1)`)) && !await js(`!!T.block(1).querySelector('.ignored')`),
+    'side by side: bounces unticked: the pin goes low, with no message and no flash', await js(`T.status(1)`));
 
   // the stopwatch: terminal, internal action, ignored event
   ok(await js(`T.text(2)`) === 'reset' && await js(`T.state(2)`) === 'RESET', 'stopwatch: prints reset on entry');

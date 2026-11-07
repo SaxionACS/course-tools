@@ -14,6 +14,28 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.12.1 (unreleased)
+
+State machines: no more messages about a hold button or pin that nothing listens
+to.
+
+- A debouncer only has arrows such as `button pressed for 50 ms`. With *bounces*
+  unticked, every press and release said `button released is ignored: … none of
+  them has an arrow for it` and flashed the current states, while the machine
+  worked as it should. Now a change of a hold button or pin is reported as
+  ignored, on the page and in the log, only if some state of some machine has an
+  arrow for it (`KEY pressed`).
+- As before: an arrow with a false guard is reported, and a bouncing input is
+  silent.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 203 checks,
+  with `CC=gcc-13`. The Check workflow has not run yet.
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
+
 ## 2.12.0 (2026-11-05)
 
 The course information and assessment pages get the organization of the course,

@@ -487,7 +487,10 @@ The rules follow UML state machines, as far as the course uses them.
 4. **Ignored events** change nothing. On the website, a student's click that
    no state reacts to flashes the current state and says so (`LAP is ignored:
    RESET has no arrow for it.`); the log shows every ignored event, also
-   timers that run out where nothing reacts.
+   timers that run out where nothing reacts. A hold button or a pin is a
+   signal, which may change with nobody listening: a change counts as ignored
+   only if some state has an arrow for it (`KEY pressed`), so never in a
+   machine that only has `KEY pressed for 1 s`. Bounces are not reported.
 5. **Blinking** toggles the output every period, starting one period after
    entry. Leaving the state stops the blinking and leaves the output as it
    is: switch it off on the arrow or in the next state's entry if it must be
@@ -570,7 +573,8 @@ From top to bottom:
 - **Log**: every event with its time and value, the transition it caused or
   that it was ignored, and why if a guard was false. With several machines, each
   line names the machine. Mistakes that only show while running (a division by
-  zero) are here too.
+  zero) are here too. Bounces, and changes of a hold button or pin that no state
+  has an arrow for, are left out.
 
 A block that is not on the screen pauses, and the layout is the same in every
 browser: text is measured with the widths of Lato, the font of the course.

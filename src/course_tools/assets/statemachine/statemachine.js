@@ -837,7 +837,12 @@
   // the speed changes nothing but the pace. random() is Math.random unless a test
   // passes its own.
   class Sim {
-    constructor(model, hooks, random) { this.model = model; this.hooks = hooks || {}; this.random = random || Math.random; this.reset(); }
+    constructor(model, hooks, random) {
+      this.model = model; this.hooks = hooks || {}; this.random = random || Math.random;
+      // the level changes of hold buttons and pins that some state has an arrow for
+      this.heard = new Set(model.machines.flatMap(m => Object.values(m.states).flatMap(st => st.on.filter(tr => tr.trigger.edge).map(tr => tr.trigger.event))));
+      this.reset();
+    }
     reset() {
       const M = this.model;
       this.t = 0;
@@ -983,7 +988,7 @@
             this.say({machine: s.m.name, cause, waiting: true, guards: arrows.map(x => x.trigger.guardSrc)});
           } else guards.push(...arrows.map(x => x.trigger.guardSrc));
         }
-        if (!handled && !(e.source === 'edge' && e.bouncy)) {
+        if (!handled && !e.quiet) {
           this.say({cause, ignored: true, source: e.source, states: this.ms.map(s => [s.m.name, s.state]), guards});
           this.hooks.ignored?.(e, this.ms, guards);
         }
@@ -1008,7 +1013,10 @@
       h.level = level; h.since = this.t;
       h.trace.push({t: this.t, level});
       while (h.trace.length > 2 && h.trace[1].t < this.t - 120000) h.trace.shift();
-      this.queue.push({name: `${name} ${h.input.words[level ? 0 : 1]}`, source: 'edge', bouncy: h.bouncy});
+      // A signal may change with nobody listening (only `pin high for 50 ms` watches
+      // it): that is no lost event. Nor are bounces worth a message each.
+      const event = `${name} ${h.input.words[level ? 0 : 1]}`;
+      this.queue.push({name: event, source: 'edge', quiet: h.bouncy || !this.heard.has(event)});
       this.drain();
     }
     // The next thing that is due: bounces, held conditions, after timeouts, named

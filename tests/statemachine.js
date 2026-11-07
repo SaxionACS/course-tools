@@ -325,6 +325,41 @@ for (const id of ['staircase', 'staircase2']) {
   const flips = kinds.filter(k => k.kind === 'bounce');
   ok(flips.length >= 4 && flips.length % 2 === 0 && flips.every((f, i) => f.what === (i % 2 ? 'pin high' : 'pin low'))
     && kinds.at(-1).what === '[pin high for 50 ms]' && st(0) === 'PRESSED', 'button: skip ahead stops at every bounce, then at the press', JSON.stringify(kinds)); }
+// A signal may change with nobody listening: a level change is reported as ignored
+// only if some state, of any machine, has an arrow for it. `ignored` is what the page
+// turns into the status line and the flash.
+const watch = config => {
+  const log = [], ignored = [];
+  const sim = new Sim(read(config), {log: e => log.push(e), ignored: e => ignored.push(e.name)}, rnd);
+  return {sim, log, ignored, st: (k = 0) => sim.ms[k].state};
+};
+{ const {sim, st, log, ignored} = watch(EX.button);
+  sim.holds.pin.bouncy = false;     // the checkbox unticked
+  sim.press('pin', true); sim.advance(sim.t + 60);
+  ok(st(0) === 'PRESSED' && st(1) === 'LIGHT_ON', 'bouncing off: the debouncer still reacts, 50 ms after the press');
+  sim.press('pin', false); sim.advance(sim.t + 60);
+  ok(st(0) === 'RELEASED', 'bouncing off: the debouncer still reacts, 50 ms after the release');
+  ok(!ignored.length && !log.some(e => e.ignored), 'bouncing off: a level change that only a "for" condition watches is not reported', ignored.join()); }
+{ const {sim, st, log, ignored} = watch({inputs: {KEY: 'hold button'}, states: {A: {on: {'KEY pressed for 1 s': 'B'}}, B: {on: {'KEY released for 1 s': 'A'}}}});
+  sim.press('KEY', true); sim.advance(sim.t + 1100); sim.press('KEY', false); sim.advance(sim.t + 1100); sim.press('KEY', true);
+  ok(st() === 'A' && !ignored.length && !log.some(e => e.ignored), 'a hold button with only "for" conditions: nothing is reported', ignored.join()); }
+{ const {sim, st, log, ignored} = watch({inputs: {KEY: 'hold button', back: 'button'}, states: {A: {on: {'KEY pressed': 'B'}}, B: {on: {back: 'A'}}}});
+  sim.press('KEY', true); sim.press('KEY', false);
+  ok(st() === 'B' && !ignored.length, 'KEY released, which no state has an arrow for, is not reported', ignored.join());
+  sim.press('KEY', true);
+  ok(ignored.join() === 'KEY pressed' && log.at(-1).ignored && log.at(-1).cause === 'KEY pressed', 'KEY pressed, in a state without an arrow for it, is reported and logged', ignored.join());
+  sim.press('KEY', false); ignored.length = 0;
+  sim.holds.KEY.bouncy = true;      // the same input, bouncing
+  sim.press('KEY', true); sim.advance(sim.t + 20);
+  ok(!ignored.length, 'a bouncing input stays silent, also for a level change that some state has an arrow for', ignored.join()); }
+{ const {sim, st, ignored} = watch({inputs: {KEY: 'hold button'}, machines: {a: {states: {A: {on: {'KEY pressed': 'B'}}, B: {}}}, b: {states: {C: {}}}}});
+  sim.press('KEY', true); sim.press('KEY', false);
+  ok(st(0) === 'B' && !ignored.length, 'two machines: the arrow of one machine moves it, nothing is reported', ignored.join());
+  sim.press('KEY', true);
+  ok(ignored.join() === 'KEY pressed', 'two machines: an arrow in any machine makes the level change count', ignored.join()); }
+{ const {sim, log, ignored} = watch({inputs: {KEY: 'hold button'}, variables: {f: false}, states: {A: {on: {'KEY pressed [f]': 'B'}}, B: {}}});
+  sim.press('KEY', true);
+  ok(ignored.join() === 'KEY pressed' && log.at(-1).guards.join() === 'f', 'a level change with a false guard is reported, with the guard', JSON.stringify(log.at(-1))); }
 { const {sim, st, log} = run('side');
   sim.advance(3000);
   const n = id => log.filter(e => e.machine === id && e.to && !e.start).length;
