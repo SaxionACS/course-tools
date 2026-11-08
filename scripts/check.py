@@ -865,8 +865,8 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
          and "Try it on the website." in t, "state machine PDF: title, task, picture and transition table, and a link")
     c.ok("Variables: interval = 500, count = 0." in t and "Values of set_blinking: 200, 1000." in t and "[count >= 2] DONE" in t,
          "state machine PDF: the first values of the variables, the values of a button, a guard in the table")
-    c.ok("SM-DOOR" in t and "[door closed] ARMED; [door open] RINGING" in t and "door open" in t,
-         "state machine PDF: a pin's own words, and its level in a guard")
+    c.ok("SM-DOOR" in t and "[door closed] ARMED; [door open] RINGING" in t and "door_opening" in t,
+         "state machine PDF: a pin's own words for its levels, read by a guard, and an own name for its event")
     c.ok("btn_just_pressed()" in t and "PRESSED | send pressed – PRESSED – RELEASED" in t and 'RUNNING STOPPED | print "lap"' in t,
          "state machine PDF: machines side by side, a dash for an ignored event, an internal action")
     c.ok("This state machine cannot be shown: state A, on presed" in t, "state machine PDF: a machine with a mistake says so")

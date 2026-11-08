@@ -110,6 +110,12 @@ const EX = {
       ARMING: {entry: 'LED on, start exit_delay 10 s', do: 'blink LED 500 ms', on: {btn_pressed: 'DISARMED', 'exit_delay [door closed]': 'ARMED', 'exit_delay [door open]': 'RINGING'}},
       ARMED: {entry: 'LED on', on: {'door open': 'RINGING', btn_pressed: 'DISARMED'}},
       RINGING: {entry: 'LED on', do: 'blink LED 100 ms', on: {btn_pressed: 'DISARMED'}}}},
+  // the same door, whose levels and events have names of their own
+  door_names: {title: 'The door, with names of its own', direction: 'TB', log: 'hidden', inputs: {btn_pressed: 'button', door: 'pin [&_is_open, &_is_closed, &_opening, &_closing]'}, outputs: {LED: 'red led'},
+    states: {DISARMED: {entry: 'LED off', on: {btn_pressed: 'ARMING'}},
+      ARMING: {entry: 'LED on, start exit_delay 10 s', do: 'blink LED 500 ms', on: {btn_pressed: 'DISARMED', 'exit_delay [door_is_closed]': 'ARMED', 'exit_delay [door_is_open]': 'RINGING'}},
+      ARMED: {entry: 'LED on', on: {door_opening: 'RINGING', btn_pressed: 'DISARMED'}},
+      RINGING: {entry: 'LED on', do: 'blink LED 100 ms', on: {btn_pressed: 'DISARMED', 'door_is_closed for 5 s': 'ARMED'}}}},
 };
 const run = (id, config = EX[id]) => {
   const log = [];
@@ -140,7 +146,7 @@ for (const [id, config] of Object.entries(EX)) {
   const auto = Object.fromEntries(Object.keys(EX).map(id => [id, read(EX[id]).speeds.map(I.speedLabel).join(' ')]));
   const want = {switch: '1×', staircase: '1× 2× 5× 10×', staircase2: '1× 2× 5× 10×', alarm: '1× 2× 5× 10×', button: '1/100× 1/10× 1×',
     side: '1×', stopwatch: '1×', long: '1×', kitchen: '1× 2× 5×', traffic: '1× 2× 5×', blinker: '1×', adjustable: '1×', numbers: '1×', rounds: '1× 2×',
-    crossing: '1× 2× 5×', lock: '1× 2×', pair: '1×', door: '1× 2× 5× 10×'};
+    crossing: '1× 2× 5×', lock: '1× 2×', pair: '1×', door: '1× 2× 5× 10×', door_names: '1× 2× 5× 10×'};
   ok(JSON.stringify(auto) === JSON.stringify(want), 'speed buttons: slower for short times and bounces, faster for long times', JSON.stringify(auto));
   ok(I.autoSpeeds([50]).join() === '0.1,1' && I.autoSpeeds([60000]).join() === '1,10,20,50' && I.autoSpeeds([1500, 2500]).join() === '1,2',
     'speed buttons: 1/10 under 100 ms, up to three speed-ups', [I.autoSpeeds([50]), I.autoSpeeds([60000]), I.autoSpeeds([1500, 2500])].join(' / '));
@@ -273,9 +279,50 @@ bad({inputs: {b: 'button', door: 'pin [open, closed]'}, states: {A: {on: {'door 
 bad({inputs: {b: 'button', door: 'pin'}, variables: {n: 0}, states: {A: {on: {b: 'A / n = door high'}}}}, /n is a number, and door high is true or false/, 'a level does not fit in a number');
 bad({inputs: {b: 'button', door: 'pin'}, states: {A: {on: {b: 'A / start T door high ms', T: 'A'}}}}, /a time is a number, and door high is true or false/, 'a level is no time');
 bad({inputs: {b: 'button', door: 'pin'}, states: {A: {entry: 'print "{door high:s}"', on: {b: 'A'}}}}, /only a number can be a time/, 'a level printed as a time');
-for (const [words, what] of [['[a]', 'one word'], ['[a, a]', 'the same word twice'], ['[a, b, c]', 'three words'], ['[1, 2]', 'numbers'], ['[a, for]', 'the word for'], ['[]', 'no words']]) {
-  bad({inputs: {p: `pin ${words}`}, states: {A: {on: {'p high': 'A'}}}}, /a pin can have two words of its own, for high and for low/, `a pin with ${what}`);
+for (const [words, what] of [['[a]', 'one word'], ['[a, b, c]', 'three words'], ['[a, b, c, d, e]', 'five words'], ['[]', 'no words']]) {
+  bad({inputs: {p: `pin ${words}`}, states: {A: {on: {'p high': 'A'}}}}, /a pin can have two words of its own, for high and for low \(p: pin \[open, closed\]\), or four: the levels, then the events/, `a pin with ${what}`);
 }
+for (const [words, error, what] of [['[a, a]', /the two words are the same: p: pin \[open, closed\]/, 'the same word twice'],
+  ['[a, b, a, c]', /each of the four words must be another name/, 'a level and an event with the same word'],
+  ['[a, &_b, c, &_b]', /each of the four words must be another name/, 'a level and an event with the same name'],
+  ['[1, 2]', /"1" cannot be a word of a pin/, 'numbers'], ['[a, for]', /"for" cannot be a word of a pin/, 'the word for'],
+  ['[open, closed, "is opening", closing]', /"is opening" cannot be a word of a pin. A word is one name \(letters, digits and _, no spaces, not for\); with &, the pin's name: &_is_open gives p_is_open/, 'a word with a space'],
+  ['[&-x, y]', /"&-x" gives p-x, which is not a name/, 'a name with & that is no name'],
+  ['[& x, y]', /"& x" gives p x, which is not a name/, 'a name with & and a space']]) {
+  bad({inputs: {p: `pin ${words}`}, states: {A: {on: {'p high': 'A'}}}}, error, `a pin with ${what}`);
+}
+bad({inputs: {t: 'pin [&rue, x]'}, states: {A: {}}}, /"&rue" gives true, a word of the state machine language/, 'a name with & that is a word of the language');
+// four words: the levels, then the events; & is the pin's name
+const pin4 = (door, on, extra = {}) => ({inputs: {b: 'button', door}, states: {A: {on: {b: 'A', ...on}}}, ...extra});
+{ const m = read(pin4('pin [open, &_is_closed, "&_opening", \'&closing\']', {door_opening: 'A', doorclosing: 'A'})).inputs.door;
+  ok(`${m.words}|${m.levels}|${m.events}` === 'open,door_is_closed|door open,door_is_closed|door_opening,doorclosing',
+    'own words with and without &, quoted or not: the words on the button, the levels and the events', `${m.words}|${m.levels}|${m.events}`); }
+{ const m = read(pin4('pin [&_open, &_shut]', {door_open: 'A'})).inputs.door;
+  ok(`${m.levels}|${m.events}` === 'door_open,door_shut|door_open,door_shut', 'two words with &: the same names for the levels and the events', `${m.levels}|${m.events}`); }
+const W4 = 'pin [open, closed, opens, closes]', A4 = 'pin [&_is_open, &_is_closed, &_opening, &_closing]';
+bad(pin4(W4, {'door open': 'A'}), /state A, on door open: door open is a level of door, not an event: its events are door opens and door closes, and its levels door open and door closed, for a level that lasts \(door open for 1 s\) or in a guard \(\[door open\]\)/, 'a level is no event, with four words');
+bad(pin4(A4, {door_is_open: 'A'}), /door_is_open is a level of door, not an event: its events are door_opening and door_closing/, 'a level is no event, with & names');
+bad(pin4(W4, {'door opens for 1 s': 'A'}), /door opens is an event of door, the moment it changes. for goes with a level: door open for 1 s/, 'for goes with a level, not an event');
+bad(pin4(A4, {'door_closing for 50 ms': 'A'}), /door_closing is an event of door, the moment it changes. for goes with a level: door_is_closed for 50 ms/, 'for goes with a level, with & names');
+bad(pin4(W4, {'door high': 'A'}), /door is a pin: its events are door opens and door closes, and its levels door open and door closed/, 'high is not a word of a pin with words of its own');
+bad(pin4(W4, {door: 'A'}), /door is a pin: its events are door opens and door closes/, 'a pin with four words and no word');
+bad(pin4(A4, {'door opening': 'A'}), /door is a pin: its events are door_opening and door_closing/, 'an & name written as two words');
+bad(pin4(W4, {'b [door opens]': 'A'}), /door opens is an event of door, the moment it changes. A guard or an action reads a level: door open or door closed/, 'a guard reads a level, not an event');
+bad(pin4(A4, {'b [door_opening]': 'A'}), /door_opening is an event of door, the moment it changes. A guard or an action reads a level: door_is_open or door_is_closed/, 'a guard reads a level, not an event, with & names');
+bad(pin4(A4, {'b [door]': 'A'}), /door has a level: write door_is_open or door_is_closed/, 'a pin\'s name alone, with & names');
+bad(pin4(A4, {'b [door is_open]': 'A'}), /door has a level: write door_is_open or door_is_closed/, 'an & name written as two words in a guard');
+bad(pin4(A4, {'b': 'A / v = door_opening'}, {variables: {v: false}}), /door_opening is an event of door, the moment it changes. A guard or an action reads a level/, 'an action reads a level, not an event');
+bad(pin4(A4, {'door_opening(x)': 'A'}), /door_opening is an event of door: only a button can have a value/, 'a pin\'s event has no value');
+// a name of its own is no other name
+bad({inputs: {door: 'pin [&_x, y]', door_x: 'button'}, states: {A: {}}}, /inputs, door: door_x is an input too: give them different names/, 'an & name that is the name of an input');
+bad({inputs: {door: 'pin [&, y]'}, states: {A: {}}}, /inputs, door: door is an input too/, 'an & name that is the pin\'s own name');
+bad({inputs: {a: 'pin [b_&, y]', b: 'pin [&_a, z]'}, states: {A: {}}}, /inputs: b_a is a name of a and of b: give them different words/, 'two pins with the same & name');
+bad(pin4(A4, {}, {outputs: {door_opening: 'led'}}), /door_opening is an event of door and an output: give them different names/, 'an & name that is an output');
+bad(pin4(A4, {}, {variables: {door_is_open: false}}), /door_is_open is a level of door and a variable \(variables\): give them different names/, 'an & name that is a variable');
+bad({inputs: {b: 'button', door: A4}, machines: {m: {variables: {door_is_open: 0}, states: {A: {on: {b: 'A'}}}}}}, /door_is_open is a level of door and a variable \(machine m, variables\)/, 'an & name that is a variable of a machine');
+bad(pin4(A4, {b: 'A / start door_closing 1 s'}), /door_closing is an event of door and a timer: give them different names/, 'an & name that is a timer');
+bad(pin4(A4, {b: 'A / send door_opening'}), /door_opening is an event of door and an event that a machine sends/, 'an & name that a machine sends');
+bad({inputs: {b: 'button [1, 2]', door: A4}, states: {A: {on: {'b(door_is_open)': 'A'}}}}, /door_is_open is a level of door and the parameter of b/, 'an & name that is a parameter');
 bad({inputs: {p: 'bouncy pin [a]'}, states: {A: {}}}, /a pin can have two words of its own/, 'a bouncy pin with one word');
 bad({inputs: {b: 'bouncy button [a, b]'}, states: {A: {}}}, /only a button can send a value/, 'no own words on a bouncy button');
 bad({inputs: {b: 'hold button [a, b]'}, states: {A: {}}}, /only a button can send a value/, 'no own words on a hold button');
@@ -411,6 +458,21 @@ for (const [what, steps, want] of [
 { const {sim, st} = run(null, {inputs: {KEY: 'hold button', p: 'pin [on, off]'}, states: {A: {on: {'p on for 50 ms [!(KEY pressed)]': 'B'}}, B: {}}});
   sim.press('KEY', true); sim.press('p', true); sim.advance(100); ok(st() === 'A', 'a held condition waits for a level in its guard', st());
   sim.press('KEY', false); sim.advance(sim.t + 1); ok(st() === 'B', 'a held condition fires when the level in its guard turns true; on and off can be a pin\'s words', st()); }
+// a pin's own names for its levels and events, running
+{ const {sim, st, log} = run('door_names');
+  sim.press('door', true); sim.press('door', false);
+  ok(log.some(e => e.ignored && e.cause === 'door_opening') && !log.some(e => e.cause === 'door_closing'), 'door_opening is ignored in DISARMED, door_closing has no arrow at all', JSON.stringify(log.filter(e => e.ignored)));
+  sim.dispatch('btn_pressed'); sim.advance(10000); ok(st() === 'ARMED', 'a guard reads door_is_closed', st());
+  sim.press('door', true); ok(st() === 'RINGING', 'door_opening: the pin goes high', st());
+  sim.press('door', false); sim.advance(sim.t + 4999); ok(st() === 'RINGING', 'door_is_closed for 5 s: not yet', st());
+  sim.advance(sim.t + 1); ok(st() === 'ARMED', 'door_is_closed for 5 s', st()); }
+{ const {sim, st} = run(null, {inputs: {b: 'button', door: 'pin [open, closed, opens, closes]'}, variables: {n: 0},
+    states: {A: {on: {'door opens': 'B', 'b [door closed]': '/ n++'}}, B: {on: {'door closed for 1 s': 'A', 'b [door open]': '/ n += 10'}}}});
+  sim.dispatch('b'); sim.press('door', true); sim.dispatch('b'); ok(st() === 'B' && sim.shared.n === 11, 'four words: door opens is the event, door open and door closed the levels', `${st()} ${sim.shared.n}`);
+  sim.press('door', false); sim.advance(sim.t + 1000); ok(st() === 'A', 'four words: door closed for 1 s', st()); }
+{ const sim = new Sim(read({clock: true, inputs: {door: 'bouncy pin [&_is_open, &_is_closed, &_opening, &_closing]'}, states: {A: {on: {door_opening: 'B'}}, B: {on: {door_closing: 'A'}}}}), {}, rnd);
+  sim.press('door', true); const s = sim.skip();
+  ok(s?.kind === 'bounce' && s.what === 'door_closing', 'a bounce is named by the pin\'s own event', JSON.stringify(s)); }
 // a level is a value like any other, in every expression
 { const c = {text: 'terminal', inputs: {p: 'pin [open, closed]', go: 'button'}, outputs: {L: 'led'}, variables: {was: false, same: false},
     states: {A: {entry: 'was = p open', on: {go: 'A / same = p open == was, print "open: {p open}, closed: {!(p open)}" L on'}}}};

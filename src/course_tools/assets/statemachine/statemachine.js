@@ -207,6 +207,7 @@
     for (const [name, value] of Object.entries(spec)) {
       valueName(name, where);
       if (ctx.inputs[name] || ctx.outputs[name]) fail(`${where}: ${name} is ${ctx.inputs[name] ? 'an input' : 'an output'} too: give them different names`);
+      signalClash(name, ctx, `a variable (${where})`);
       if (!Number.isSafeInteger(value) && typeof value !== 'boolean') fail(`${where}, ${name}: "${value}" is not a value. A variable starts as a whole number or as true or false (times are numbers of ms)`);
     }
     return spec;
@@ -262,15 +263,21 @@
         if (word === 'true' || word === 'false') return span({k: 'bool', v: word === 'true'}, from);
         if (word === 'now') { ctx.usesNow = true; return span({k: 'now'}, from); }
         if (ctx.param?.name === word) return span({k: 'param', name: word, event: ctx.param.event}, from);
-        // the level of an input: door closed, KEY pressed
-        if (Object.hasOwn(ctx.inputs, word)) {
+        // the level of an input: door closed, KEY pressed, or a pin's own name for it:
+        // door_is_closed
+        let level = Object.hasOwn(ctx.signals, word) && word;
+        if (!level && Object.hasOwn(ctx.inputs, word)) {
           const input = ctx.inputs[word], next = /^\s+([A-Za-z_]\w*)/.exec(text.slice(p));
           if (!input.hold) fail(`${where}: ${word} is a click button: it has no level, only an event. For a level, make it a hold button or a pin`);
-          const i = next ? input.words.indexOf(next[1]) : -1;
-          if (i < 0) fail(`${where}: ${word} has a level: write ${word} ${input.words[0]} or ${word} ${input.words[1]}`);
+          level = next && Object.hasOwn(ctx.signals, `${word} ${next[1]}`) && `${word} ${next[1]}`;
+          if (!level) fail(`${where}: ${word} has a level: write ${input.levels.join(' or ')}`);
           p += next[0].length;
-          ctx.usedInputs.add(word);
-          return span({k: 'level', input: word, level: i === 0}, from);
+        }
+        if (level) {
+          const s = ctx.signals[level];
+          if (!s.level) fail(`${where}: ${level} is an event of ${s.input}, the moment it changes. A guard or an action reads a level: ${ctx.inputs[s.input].levels.join(' or ')}`);
+          ctx.usedInputs.add(s.input);
+          return span({k: 'level', input: s.input, level: s.high}, from);
         }
         return useVariable(word, ctx, where);
       }
@@ -406,13 +413,35 @@
     return {values, type};
   }
 
-  // pin [open, closed]: its own words for high and for low
+  // The names of a hold input's levels and events: KEY pressed, door high. A pin can
+  // have words of its own: pin [open, closed] for its levels and its events, or
+  // pin [open, closed, opens, closes]: the levels high and low, then the events,
+  // the change to high and the change to low. A word with & in it is a whole name,
+  // & being the pin's: &_is_open -> door_is_open. `words` is what the button shows.
+  function holdNames(name, words) {
+    const full = words.map(w => (w.includes('&') ? w.replaceAll('&', name) : `${name} ${w}`));
+    return {words: words.slice(0, 2).map((w, i) => (w.includes('&') ? full[i] : w)), levels: full.slice(0, 2), events: full.slice(words.length - 2)};
+  }
   function pinWords(text, name) {
-    const words = text.split(',').map(clean);
-    if (words.length !== 2 || words[0] === words[1] || !words.every(w => NAME.test(w) && w !== 'for')) {
-      fail(`inputs, ${name}: "[${clean(text)}]": a pin can have two words of its own, for high and for low: ${name}: pin [open, closed]`);
+    const where = `inputs, ${name}`;
+    const words = text.split(',').map(w => clean(w).replace(/^(["'])(.*)\1$/, '$2'));
+    if (words.length !== 2 && words.length !== 4) {
+      fail(`${where}: "[${clean(text)}]": a pin can have two words of its own, for high and for low (${name}: pin [open, closed]), or four: the levels, then the events (${name}: pin [open, closed, opens, closes])`);
     }
-    return words;
+    for (const w of words) {
+      if (w.includes('&')) {
+        const n = w.replaceAll('&', name);
+        if (!NAME.test(n)) fail(`${where}: "${w}" gives ${n}, which is not a name (letters, digits and _, no spaces)`);
+        if (RESERVED.includes(n) || VALUE_WORDS.includes(n)) fail(`${where}: "${w}" gives ${n}, a word of the state machine language: choose another word`);
+      } else if (!NAME.test(w) || w === 'for') {
+        fail(`${where}: "${w}" cannot be a word of a pin. A word is one name (letters, digits and _, no spaces, not for); with &, the pin's name: &_is_open gives ${name}_is_open`);
+      }
+    }
+    const names = holdNames(name, words);
+    if (new Set([...names.levels, ...names.events]).size < words.length) {
+      fail(`${where}: "[${clean(text)}]": ${words.length === 2 ? `the two words are the same: ${name}: pin [open, closed]` : `each of the four words must be another name: ${name}: pin [open, closed, opens, closes]`}`);
+    }
+    return names;
   }
 
   function readInputs(spec, ctx) {
@@ -426,8 +455,22 @@
       const pin = m[2] === 'pin';
       if (m[3] != null && !pin && (m[1] || m[2] !== 'button')) fail(`inputs, ${name}: only a button can send a value: ${name}: button [100, 500, 1000]`);
       ctx.inputs[name] = m[2] === 'button' && !m[1] ? {name, hold: false, ...(m[3] != null ? inputValues(m[3], name) : {})}
-        : {name, hold: true, kind: pin ? 'pin' : 'button', bouncy: !!m[1], words: pin && m[3] != null ? pinWords(m[3], name) : WORDS[pin ? 'pin' : 'button']};
+        : {name, hold: true, kind: pin ? 'pin' : 'button', bouncy: !!m[1], ...(pin && m[3] != null ? pinWords(m[3], name) : holdNames(name, WORDS[pin ? 'pin' : 'button']))};
     }
+    // every level and event of a hold input, by its name: door open, door_is_open
+    for (const i of Object.values(ctx.inputs)) if (i.hold) {
+      for (const [list, role] of [[i.levels, 'level'], [i.events, 'event']]) list.forEach((n, k) => {
+        const s = ctx.signals[n] ??= {input: i.name, high: k === 0};
+        if (s.input !== i.name) fail(`inputs: ${n} is a name of ${s.input} and of ${i.name}: give them different words`);
+        s[role] = true;
+      });
+    }
+    for (const n of Object.keys(ctx.signals)) if (ctx.inputs[n]) fail(`inputs, ${ctx.signals[n].input}: ${n} is an input too: give them different names`);
+  }
+  // a pin's own name for a level or an event (door_is_open) is no other name
+  function signalClash(name, ctx, what) {
+    const s = ctx.signals[name];
+    if (s) fail(`${name} is ${s.level ? 'a level' : 'an event'} of ${s.input} and ${what}: give them different names`);
   }
 
   function readOutputs(spec, ctx) {
@@ -436,6 +479,7 @@
     for (const [name, kind] of Object.entries(spec)) {
       nameOf(name, 'outputs');
       if (ctx.inputs[name]) fail(`outputs: ${name} is an input too: give them different names`);
+      signalClash(name, ctx, 'an output');
       const k = clean(kind ?? '');
       const m = /^(?:(\w+) )?led$/.exec(k);
       if (k === 'buzzer') ctx.outputs[name] = {name, kind: 'buzzer'};
@@ -623,6 +667,12 @@
     }
     return t;
   }
+  // what to write for a hold input on the left side of on:
+  function holdHint(input) {
+    const [a, b] = input.levels;
+    if (input.events[0] === a) return `write ${a} or ${b}`;
+    return `its events are ${input.events.join(' and ')}, and its levels ${a} and ${b}, for a level that lasts (${a} for 1 s) or in a guard ([${a}])`;
+  }
   function readEvent(k, ctx, where) {
     let m;
     if ((m = /^after (.+)$/.exec(k))) {
@@ -634,26 +684,35 @@
     if ((m = /^([A-Za-z_]\w*) ?\( ?([A-Za-z_]\w*) ?\)$/.exec(k))) {
       valueName(m[2], where);
       if (Object.hasOwn(ctx.own, m[2]) || Object.hasOwn(ctx.shared, m[2])) fail(`${where}: the parameter ${m[2]} has the name of a variable: give them different names`);
+      signalClash(m[2], ctx, `the parameter of ${m[1]}`);
+      if (ctx.signals[m[1]]) fail(`${where}: ${m[1]} is an event of ${ctx.signals[m[1]].input}: only a button can have a value`);
       if (ctx.inputs[m[1]]?.hold) fail(`${where}: ${m[1]} is a ${ctx.inputs[m[1]].kind === 'pin' ? 'pin' : 'hold button'}: only a button can have a value`);
       ctx.handled.add(m[1]);
       ctx.named.push({event: m[1], param: m[2], where});
       return {kind: 'event', event: m[1], param: m[2], label: `${m[1]}(${m[2]})`};
     }
+    // a change of a hold input (door open, door_opening), or a level that lasts
+    // (door open for 1 s)
+    const held = /^(.+?) for (.+)$/.exec(k), name = held ? held[1] : k;
+    if (Object.hasOwn(ctx.signals, name)) {
+      const s = ctx.signals[name], input = ctx.inputs[s.input];
+      ctx.usedInputs.add(s.input);
+      if (held) {
+        if (!s.level) fail(`${where}: ${name} is an event of ${s.input}, the moment it changes. for goes with a level: ${input.levels[s.high ? 0 : 1]} for ${held[2]}`);
+        const t = time(held[2], where, false);
+        ctx.times.push(t.min);
+        return {kind: 'held', input: s.input, level: s.high, time: t, label: `[${name} for ${t.text}]`};
+      }
+      if (!s.event) fail(`${where}: ${name} is a level of ${s.input}, not an event: ${holdHint(input)}`);
+      return {kind: 'event', event: name, edge: true, label: k};
+    }
     if ((m = /^([A-Za-z_]\w*) (\w+)(?: for (.+))?$/.exec(k)) && ctx.inputs[m[1]]) {
       const input = ctx.inputs[m[1]];
       if (!input.hold) fail(`${where}: ${m[1]} is a click button: its event is just ${m[1]}. For pressed and released, make it a hold button`);
-      const i = input.words.indexOf(m[2]);
-      if (i < 0) fail(`${where}: ${m[1]} is a ${input.kind === 'pin' ? 'pin' : 'hold button'}: write ${m[1]} ${input.words[0]} or ${m[1]} ${input.words[1]}`);
-      ctx.usedInputs.add(m[1]);
-      if (m[3] != null) {
-        const t = time(m[3], where, false);
-        ctx.times.push(t.min);
-        return {kind: 'held', input: m[1], level: i === 0, time: t, label: `[${m[1]} ${m[2]} for ${t.text}]`};
-      }
-      return {kind: 'event', event: `${m[1]} ${m[2]}`, edge: true, label: k};
+      fail(`${where}: ${m[1]} is a ${input.kind === 'pin' ? 'pin' : 'hold button'}: ${holdHint(input)}`);
     }
     if (NAME.test(k)) {
-      if (ctx.inputs[k]?.hold) fail(`${where}: ${k} is a ${ctx.inputs[k].kind === 'pin' ? 'pin' : 'hold button'}: write ${k} ${ctx.inputs[k].words[0]} or ${k} ${ctx.inputs[k].words[1]}`);
+      if (ctx.inputs[k]?.hold) fail(`${where}: ${k} is a ${ctx.inputs[k].kind === 'pin' ? 'pin' : 'hold button'}: ${holdHint(ctx.inputs[k])}`);
       ctx.handled.add(k);
       return {kind: 'event', event: k, label: k};
     }
@@ -745,7 +804,7 @@
   function read(config) {
     if (!isMap(config)) fail('the YAML must be a mapping: title:, inputs:, outputs:, states: …');
     keysOf(config, TOP_KEYS, 'statemachine');
-    const ctx = {inputs: {}, outputs: {}, timers: new Set(), stops: new Set(), sent: new Set(), handled: new Set(),
+    const ctx = {inputs: {}, signals: {}, outputs: {}, timers: new Set(), stops: new Set(), sent: new Set(), handled: new Set(),
       usedOutputs: new Set(), usedInputs: new Set(), prints: false, times: [],
       shared: {}, own: {}, privates: {}, machine: null, param: null, usedVars: new Set(), usesNow: false,
       sends: [], named: [], eventTypes: {}, later: []};
@@ -789,6 +848,8 @@
       }
     }
     for (const t of ctx.timers) if (ctx.outputs[t]) fail(`${t} is a timer and an output: give them different names`);
+    for (const t of ctx.timers) signalClash(t, ctx, 'a timer');
+    for (const e of ctx.sent) signalClash(e, ctx, 'an event that a machine sends');
     for (const t of ctx.timers) if (Object.hasOwn(ctx.shared, t) || Object.values(ctx.privates).some(vars => Object.hasOwn(vars, t))) fail(`${t} is a timer and a variable: give them different names`);
     checkValues(ctx);
     const warnings = [];
@@ -1042,7 +1103,7 @@
       while (h.trace.length > 2 && h.trace[1].t < this.t - 120000) h.trace.shift();
       // A signal may change with nobody listening (only `pin high for 50 ms` watches
       // it): that is no lost event. Nor are bounces worth a message each.
-      const event = `${name} ${h.input.words[level ? 0 : 1]}`;
+      const event = h.input.events[level ? 0 : 1];
       this.queue.push({name: event, source: 'edge', input: name, quiet: h.bouncy || !this.heard.has(event)});
       this.drain();
     }
@@ -1056,7 +1117,7 @@
         if (!best || t < best.t || (t === best.t && prio < best.prio)) best = {t, prio, kind, what, run};
       };
       for (const [name, h] of Object.entries(this.holds)) {
-        if (h.flips.length) consider(h.flips[0].t, 0, 'bounce', `${name} ${h.input.words[h.flips[0].level ? 0 : 1]}`, () => { const f = h.flips.shift(); this.flip(name, f.level); });
+        if (h.flips.length) consider(h.flips[0].t, 0, 'bounce', h.input.events[h.flips[0].level ? 0 : 1], () => { const f = h.flips.shift(); this.flip(name, f.level); });
       }
       for (const s of this.ms) {
         for (const tr of s.m.states[s.state].on) if (tr.trigger.kind === 'held') {
@@ -1694,7 +1755,7 @@
       let d = `M0,${y(lvl)}`;
       for (const p of hs.trace) if (p.t > t0) d += `H${((p.t - t0) / W * 240).toFixed(1)}V${y(p.level)}`;
       hv.path.setAttribute('d', d + 'H240');
-      hv.level.textContent = `${hv.input.name} ${hs.input.words[hs.level ? 0 : 1]}`;
+      hv.level.textContent = hs.input.levels[hs.level ? 0 : 1];
       hv.span.textContent = `last ${fmt(W)}`;
     }
     function paint() {

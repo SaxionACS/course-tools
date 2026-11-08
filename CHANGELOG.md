@@ -14,6 +14,35 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.14.0 (unreleased)
+
+State machines: the events of a pin can have words of their own, apart from its
+levels.
+
+- **Four words for a pin.** `door: pin [open, closed, opens, closes]`: the levels
+  high and low, then the events, the change to high and the change to low. The
+  arrows say `door opens: ALARM`, a guard `[door closed]`, a level that lasts
+  `door closed for 1 s`. With two words, as before, the same words name the
+  levels and the events, so `[door open]` and `door open:` looked alike in the
+  diagram.
+- **Names with `&`.** A word with `&` in it is a whole name, `&` being the pin's
+  name: `door: pin [&_is_open, &_is_closed, &_opening, &_closing]` gives
+  `door_opening: ALARM` and `[door_is_closed]`, as names of C functions would
+  be. Words with and without `&` can be mixed, also with two words. Such a name
+  cannot also be an input, an output, a variable, a timer, a sent event or a
+  parameter.
+- A level where an event belongs (`door open:` with four words), an event in an
+  expression (`[door opens]`) and `for` after an event are mistakes, with a
+  message that gives the right words.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 204 checks,
+  with `CC=gcc-13`. The Check workflow has not run yet.
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
+
 ## 2.13.0 (2026-11-07)
 
 State machines: guards and actions can read the level of an input, a pin can

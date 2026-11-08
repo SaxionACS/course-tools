@@ -172,14 +172,16 @@ states:
 ## Levels: a pin with its own words, read by a guard
 
 A pin and a hold button that do not bounce: buttons in one row, in the order of
-`inputs:`, without a checkbox or a trace.
+`inputs:`, without a checkbox or a trace. The pin's levels are `door open` and
+`door closed`; its events have names of their own, `door_opening` and
+`door_closing`.
 
 ```statemachine
 title: SM-DOOR
 direction: TB
 inputs:
   btn_pressed: button
-  door: pin [open, closed]
+  door: pin [open, closed, &_opening, &_closing]
   KEY: hold button
 outputs:
   LED: red led
@@ -198,7 +200,7 @@ states:
   ARMED:
     entry: LED on
     on:
-      door open: RINGING
+      door_opening: RINGING
       btn_pressed: DISARMED
       KEY pressed for 1 s: DISARMED
   RINGING:

@@ -218,7 +218,7 @@ try {
   ok(await door() === 'closed false', 'a pin shows its level on the button, and starts at its second word', await door());
   await js(`T.click(7, 'door')`);
   ok(await door() === 'open true', 'a click: the first word', await door());
-  ok(/^door open is ignored/.test(await js(`T.status(7)`)) && await js(`T.state(7)`) === 'DISARMED', 'door open in DISARMED is reported: ARMED has an arrow for it', await js(`T.status(7)`));
+  ok(/^door_opening is ignored/.test(await js(`T.status(7)`)) && await js(`T.state(7)`) === 'DISARMED', 'door_opening in DISARMED is reported, by the event\'s own name: ARMED has an arrow for it', await js(`T.status(7)`));
   await js(`T.click(7, 'door')`);
   ok(await door() === 'closed false', 'a second click: the second word', await door());
   await js(`T.click(7, 'btn_pressed')`);
@@ -227,7 +227,7 @@ try {
   await js(`(T.block(7).querySelector('.sm-status').textContent = '', true)`);        // the message above stays for a few seconds
   const logged = (await js(`T.log(7)`)).split('ignored').length;
   await js(`T.click(7, 'door')`);
-  ok(!/ignored/.test(await js(`T.status(7)`)) && (await js(`T.log(7)`)).split('ignored').length === logged, 'door open in ARMING is not reported: a guard there reads the door', await js(`T.status(7)`));
+  ok(!/ignored/.test(await js(`T.status(7)`)) && (await js(`T.log(7)`)).split('ignored').length === logged, 'door_opening in ARMING is not reported: a guard there reads the door', await js(`T.status(7)`));
   await js(`T.click(7, 'Skip ahead')`);
   await sleep(600);
   ok(await js(`T.state(7)`) === 'RINGING', 'door open when the time is up: RINGING', await js(`T.state(7)`));
@@ -239,9 +239,10 @@ try {
   await sleep(600);
   ok(await js(`T.state(7)`) === 'ARMED', 'door closed when the time is up: ARMED', await js(`T.state(7)`));
   ok((await js(`T.block(7).querySelector('.sm-svg').textContent`)).includes('exit_delay [door closed]'), 'the guard on the arrow, in the pin\'s own words');
+  ok((await js(`T.block(7).querySelector('.sm-svg').textContent`)).includes('door_opening'), 'the event on the arrow, by its own name');
   await js(`T.click(7, 'door')`);
   await sleep(600);
-  ok(await js(`T.state(7)`) === 'RINGING', 'the event door open, in ARMED: RINGING', await js(`T.state(7)`));
+  ok(await js(`T.state(7)`) === 'RINGING', 'the event door_opening, in ARMED: RINGING', await js(`T.state(7)`));
   await sleep(300);
   ok(!session.errors.length, 'no script errors in the page', session.errors.join('\n'));
 } catch (e) {

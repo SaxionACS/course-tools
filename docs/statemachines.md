@@ -116,8 +116,9 @@ a button that does nothing.
 | `hold button` | a button that is down while the student holds it (mouse, touch, or Space/Enter on the keyboard) | `NAME pressed`, `NAME released`, and `NAME pressed for 1 s` |
 | `pin` | a switch: a click sets the pin high, the next click low. The button shows the level | `NAME high`, `NAME low`, and `NAME high for 50 ms` |
 | `pin [open, closed]` | a pin with its own words for high and low | `NAME open`, `NAME closed`, and `NAME open for 50 ms` |
+| `pin [open, closed, opens, closes]` | a pin with its own words for its levels and others for its events | `NAME opens`, `NAME closes`, and `NAME open for 50 ms` |
 | `bouncy button` | a hold button that bounces, with a checkbox and a trace | as `hold button` |
-| `bouncy pin`, `bouncy pin [open, closed]` | a pin that bounces, with a checkbox and a trace | as `pin` |
+| `bouncy pin`, `bouncy pin [open, closed]`, … | a pin that bounces, with a checkbox and a trace | as `pin` |
 
 A `button` is a press that the software has already cleaned up: one click is
 one event, as `btn_just_pressed()` returns `true` once per press. Use it in
@@ -139,6 +140,23 @@ word is high, what a click gives; the second is low, where the pin starts. The
 words replace `high` and `low` everywhere: `door open: ALARM`, `door closed for
 1 s: ARMED`, `exit_delay [door closed]: ARMED`, and on the button. A hold button
 always has `pressed` and `released`.
+
+The same words then name a level and an event: `[door open]` is how the door
+is, `door open:` the moment it opens. When the diagram should tell them apart,
+give four words: the levels high and low, then the events, the change to high
+and the change to low. With `door: pin [open, closed, opens, closes]`, the
+arrows say `door opens: ALARM` and `door closed for 1 s: ARMED` (a level that
+lasts), and a guard `[door closed]`. `door open:` is then a mistake, and so is
+`[door opens]`.
+
+A word with `&` in it is a whole name, with `&` for the name of the pin:
+`door: pin [&_is_open, &_is_closed, &_opening, &_closing]` gives the levels
+`door_is_open` and `door_is_closed` and the events `door_opening` and
+`door_closing`, written like that everywhere, as names of C functions would be:
+`door_opening: ALARM`, `exit_delay [door_is_closed]: ARMED`. Words with and
+without `&` can be mixed: `pin [open, closed, &_opening, &_closing]`. A word is
+one name, without spaces; quotes around it are allowed but not needed. The button
+shows the level: its word, or its whole name for a word with `&`.
 
 Inputs appear on the website in the order of `inputs:`, the bouncy ones after
 the others.
@@ -192,6 +210,7 @@ arrow out of the state.
 | `KEY pressed`, `KEY released` | a `hold button` named KEY goes down or up |
 | `pin high`, `pin low` | a `pin` named pin goes high or low |
 | `door open`, `door closed` | the same, for `door: pin [open, closed]` |
+| `door opens`, `door_opening` | the same, for `door: pin [open, closed, opens, closes]` or `door: pin [&_is_open, &_is_closed, &_opening, &_closing]` |
 | `KEY pressed for 1 s`, `pin high for 50 ms` | the input has been in that level for that long without a break. Drawn as `[pin high for 50 ms]` |
 | `after 10 s` | 10 s after the machine entered the state. A random time: `after 2..5 s` |
 | `exit_delay` | the named timer `exit_delay` runs out (started with `start exit_delay 10 s`) |
@@ -424,7 +443,9 @@ states:
 
 In front of the brackets, `door open` is an event: the moment the door opens.
 Inside them, it is a level: whether the door is open now, whatever happened
-before. A door that was opened and closed again during the delay does not count.
+before. To make the difference visible in the diagram, give the events words of
+their own: `door: pin [open, closed, opens, closes]` and `door opens: ALARM`
+([Inputs](#inputs)). A door that was opened and closed again during the delay does not count.
 In C, with the door's contact pulling the pin high when it opens:
 
 ```c
@@ -666,10 +687,15 @@ the block shows the message instead. For example:
 - `KEY` for a hold button (write `KEY pressed` or `KEY released`), or
   `pressed released` for a click button;
 - in an expression, an input without its level (`[door]`), a word the input does
-  not have (`[door high]` for `door: pin [open, closed]`), or a click button,
-  which has no level;
-- own words for a pin that are not two different names (`pin [open]`), or own
-  words for a hold button;
+  not have (`[door high]` for `door: pin [open, closed]`), an event instead of a
+  level (`[door opens]` for `door: pin [open, closed, opens, closes]`), or a click
+  button, which has no level;
+- a level instead of an event (`door open: ALARM` for `door: pin [open, closed,
+  opens, closes]`), or `for` after an event (`door opens for 1 s`);
+- own words for a pin that are not two or four different names (`pin [open]`,
+  `pin [open, closed, "is opening", closing]`), a name with `&` that is also the
+  name of an input, an output, a variable, a timer or a sent event, or own words
+  for a hold button;
 - a variable that is not declared or belongs to another machine, numbers and
   true/false mixed (`[count]`, `count = true`), a fraction in an expression;
 - a guard without an event, or a guard with `now` on a timeout;
