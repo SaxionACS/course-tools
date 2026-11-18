@@ -1,5 +1,5 @@
-"""Command-line interface: ``course build``, ``course preview``, ``course setup``, ``course doctor``,
-``course template``, ``course clean``."""
+"""Command-line interface: ``course build``, ``course preview``, ``course standalone``, ``course setup``,
+``course doctor``, ``course template``, ``course clean``."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import __version__, templates, tools
+from . import __version__, menu, standalone, templates, tools
 from .course import CourseError, is_ignored, scan
 from .stage import Options, desired_files, sync
 from .statemachine import CACHE as STATEMACHINE_CACHE
@@ -94,7 +94,7 @@ def _snapshot(source: Path) -> dict:
     snap = {}
     for dirpath, dirnames, filenames in os.walk(source):
         dirnames[:] = [d for d in dirnames
-                       if not d.startswith(".") and d not in ("private", OUTPUT_DIR)]
+                       if not d.startswith(".") and d not in ("private", OUTPUT_DIR, standalone.OUTPUT_DIR)]
         for name in filenames:
             p = Path(dirpath) / name
             if name.startswith(".") or is_ignored(p, source):
@@ -181,6 +181,66 @@ def cmd_stage(args) -> int:
     return 0
 
 
+def _page_name(name: str, source: Path) -> str:
+    """A page named on the command line: relative to the course, or a file relative to the current directory."""
+    path = Path(name)
+    if path.exists():
+        try:
+            return path.resolve().relative_to(source).as_posix()
+        except ValueError:
+            pass
+    return name
+
+
+def cmd_standalone(args) -> int:
+    source = Path(args.source).resolve()
+    course = scan(source)
+    items = standalone.entries(course)
+    if args.page:
+        entry = standalone.find(items, course, _page_name(args.page, source))
+        if entry is None:
+            print(f"error: {args.page} is not a page of the course; run `course standalone` without a page "
+                  "to choose one from a menu", file=sys.stderr)
+            return 2
+    else:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            print("error: the menu needs a terminal; name the page instead, e.g. "
+                  "`course standalone lessons/week_01/lecture1.md`", file=sys.stderr)
+            return 2
+        try:
+            entry = menu.run(menu.Menu(f"{course.title}: export a page for Brightspace", items))
+        except KeyboardInterrupt:
+            return 130
+        if entry is None:
+            return 0
+    if entry.reason is not None:
+        print(f"error: {entry.text} ({entry.rel}) can't be exported: {entry.reason}", file=sys.stderr)
+        return 1
+
+    # Chrome Headless Shell draws the Mermaid diagrams (SVG), as for the PDFs.
+    quarto, env = _tool(tools.quarto), _tool(lambda: tools.environment(pdf=True))
+    print(f"Exporting {entry.text} ({entry.rel[:-len('.qmd')]}) ...")
+    try:
+        result = standalone.export(course, entry, Options(plantuml=_tool(tools.plantuml)), quarto, env)
+    except standalone.ExportError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    size = result.path.stat().st_size / 1e6
+    print(f"Written to {result.path.relative_to(source).as_posix()} ({size:.1f} MB): upload it to Brightspace as a file.")
+    if result.todos:
+        print(f"{len(result.todos)} link{'s' if len(result.todos) > 1 else ''} to other pages or files "
+              "can't work on a page on its own; each is marked [TODO] on the page:")
+        counts: dict[tuple[str, str], int] = {}
+        for todo in result.todos:
+            counts[todo] = counts.get(todo, 0) + 1
+        for (text, target), n in counts.items():
+            print(f"  {text or '(no text)'} -> {standalone.describe_target(items, target)}"
+                  + (f" ({n} times)" if n > 1 else ""))
+    for link in result.loose:
+        print(f"warning: the page still links to {link}, which is not in the file", file=sys.stderr)
+    return 0
+
+
 def cmd_template(args) -> int:
     if args.action == "list":
         for name in templates.names():
@@ -196,7 +256,7 @@ def cmd_template(args) -> int:
 
 def cmd_clean(args) -> int:
     source = Path(args.source).resolve()
-    for name in (STAGE_DIR, OUTPUT_DIR):
+    for name in (STAGE_DIR, OUTPUT_DIR, standalone.STAGE_DIR):   # not standalone/: pages may be edited there
         p = source / name
         if p.exists():
             shutil.rmtree(p)
@@ -283,6 +343,11 @@ def main(argv=None) -> int:
     p.add_argument("--no-browser", action="store_true")
     p.add_argument("--pdf", action="store_true", help="also render the PDFs, with PDF buttons on the pages (slower)")
 
+    p = add("standalone", cmd_standalone, "Export one page as a single HTML file, for Brightspace, into "
+                                          "standalone/: choose it from a menu, or name it.")
+    p.add_argument("page", nargs="?", help="the page: its Markdown file (lessons/week_01/lecture1.md) or its path "
+                                           "on the website (info/assessment); without it, a menu")
+
     p = add("stage", cmd_stage, "Only generate the Quarto project in .build/ (for debugging).")
     p.add_argument("--site-url", default=os.environ.get("COURSE_SITE_URL"))
     p.add_argument("--html-only", action="store_true")
@@ -297,7 +362,7 @@ def main(argv=None) -> int:
     c.add_argument("--force", action="store_true", help="replace the course's copy if it has one")
     c.add_argument("--source", default=argparse.SUPPRESS, help="course repository (default: current directory)")
 
-    add("clean", cmd_clean, "Remove .build/ and dist/.")
+    add("clean", cmd_clean, "Remove .build/, dist/ and .build-standalone/ (not the pages in standalone/).")
     add("doctor", cmd_doctor, "Check that the required tools are installed.")
 
     p = sub.add_parser("setup", help="Download Quarto, PlantUML and Chrome Headless Shell (pinned versions).",

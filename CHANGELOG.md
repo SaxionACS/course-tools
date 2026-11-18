@@ -14,6 +14,43 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.16.0 (unreleased)
+
+Pages on their own, for courses that keep their content in Brightspace itself
+instead of embedding the website.
+
+- **`course standalone`.** A menu of the course, like the website's sidebar
+  (arrow keys, Enter, q), or a page named on the command line. The page is
+  written to `standalone/<its path on the website>.html` as a single file with
+  everything it uses inside: scripts, styles and pictures. Only Lato comes from
+  Brightspace, as on Brightspace's own pages. Self-checks, widgets, state
+  machines and superloop blocks work as on the website, also offline.
+- **What it leaves out.** The sidebar, table of contents, search, PDF button,
+  footer, the boxes with slides, starter files and logbooks, the definitions of
+  key terms on hover, and the links to the outcome map.
+- **Links to other pages and files** become their text, marked, with a red
+  [TODO] after it; the command lists them, with the file each target page
+  becomes.
+- **The look** is the website's, with Brightspace's body text: 19px (16px on a
+  phone) and its text colour. Maths is MathML and Mermaid diagrams are SVG, both
+  made at export; the diagrams are shown at their own size, as on the website.
+- **Not exported, with the reason:** files (such as a PDF in `references/`) and
+  the review deck of the key terms.
+- Git ignores `standalone/` and `.build-standalone/` without a change to the
+  course. `course clean` removes `.build-standalone/`, not the exported pages.
+
+Platform notes:
+
+- **Dependencies:** none (the menu uses termios, or msvcrt on Windows).
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 246 checks,
+  with `CC=gcc-13`; it exports seven pages of the test course and runs the
+  browser tests of the state machines, superloop blocks and PWM widgets on
+  them. The menu was also tried in a terminal. The Check workflow has not run
+  yet.
+- **macOS:** untested; the menu uses termios, as on Linux.
+- **Windows:** untested; the menu reads the keys with msvcrt and switches on
+  the console's escape sequences (Windows 10 and later).
+
 ## 2.15.0 (2026-11-18)
 
 Course information: more than one coordinator, and learning outcomes in the

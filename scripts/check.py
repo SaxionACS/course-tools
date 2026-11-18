@@ -41,12 +41,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import zipfile
+from html.parser import HTMLParser
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
-from course_tools import info, tools  # noqa: E402  (standard library only, like this script)
+from course_tools import info, menu, tools  # noqa: E402  (standard library only, like this script)
 
 COURSE = REPO / "tests" / "course"
 SITE_URL = "https://example.org/check/"
@@ -358,6 +360,175 @@ def check_preview_stage(c: Checks, course_cmd: list[str], course: Path) -> None:
     yaml = [e["yaml"] for e in data["blocks"].values() if "yaml" in e]
     c.ok(len(yaml) == 1 and yaml[0].startswith("title: SL-TITLE\ntask: SL-TASK\neditable: true"),
          "editable superloop blocks have their YAML in the preview", f"found {len(yaml)}")
+
+
+# `course standalone`: the pages exported (as named on the command line), and the file each becomes.
+STANDALONE = {
+    "lessons/week_01/lesson1.md": "lessons-week_01-lesson1.html",     # slides, outcomes, links, Mermaid, maths
+    "assignments/week_01/assignment1.md": "assignments-week_01-assignment1.html",   # logbook, GenAI box
+    "assignments/week_01/assignment2/index.md": "assignments-week_01-assignment2.html",   # starter files
+    "lessons/week_02/lesson4.md": "lessons-week_02-lesson4.html",     # state machines
+    "lessons/week_02/lesson5.md": "lessons-week_02-lesson5.html",     # superloop blocks
+    "lessons/week_02/lesson6.md": "lessons-week_02-lesson6.html",     # PWM widgets
+    "info/assessment": "info-assessment.html",                        # a generated page, by its path on the site
+}
+BRIGHTSPACE_FONTS = "https://s.brightspace.com/lib/fonts/0.6.1/fonts.css"
+
+
+class Links(HTMLParser):
+    """The href and src of every element (not the text of scripts), and the placeholders' targets."""
+    def __init__(self, html: str):
+        super().__init__(convert_charrefs=True)
+        self.links: list[tuple[str, str]] = []     # (tag, value)
+        self.todos: list[str] = []
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        self.links += [(tag, a[k]) for k in ("href", "src") if a.get(k)]
+        if "course-todo-link" in (a.get("class") or "").split():
+            self.todos.append(a.get("data-target") or "")
+
+
+def embedded_css(html: str) -> str:
+    """The style sheets that the page embeds as data: URLs."""
+    out = []
+    for m in re.finditer(r'data:text/css(;charset=[\w-]+)?(;base64)?,([^"\')]+)', html):
+        out.append(base64.b64decode(m.group(3)).decode("utf-8", "replace") if m.group(2) else urllib.parse.unquote(m.group(3)))
+    return "\n".join(out)
+
+
+def check_standalone(c: Checks, course_cmd: list[str], course: Path) -> None:
+    """`course standalone`: pages on their own, for Brightspace (after the build: it adds standalone/)."""
+    c.section("Pages on their own, for Brightspace (course standalone)")
+    logs, failed = {}, []
+    for name in STANDALONE:
+        result = run(course_cmd + ["standalone", name, "--source", str(course)], cwd=course)
+        logs[name] = ANSI.sub("", result.stdout)
+        if result.returncode != 0:
+            failed.append(f"{name}: {logs[name].strip()[-800:]}")
+    out = course / "standalone"
+    c.ok(not failed and all((out / f).is_file() for f in STANDALONE.values()),
+         "pages export, each to standalone/<its path on the website>.html", "\n        ".join(failed))
+
+    def read(name: str) -> str:
+        p = out / STANDALONE[name]
+        return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+    pages = {name: read(name) for name in STANDALONE}
+
+    outside, website = [], []
+    for name, html in pages.items():
+        for tag, value in Links(html).links:
+            if value.startswith(("data:", "#", "mailto:")):
+                continue
+            if value.startswith(("http:", "https:")):
+                if tag in ("script", "link", "img", "iframe", "source") and value != BRIGHTSPACE_FONTS:
+                    outside.append(f"{name}: <{tag}> {value}")
+            else:
+                outside.append(f"{name}: <{tag}> {value}")
+        website += [f"{name}: {m}" for m in ('id="quarto-sidebar"', 'id="TOC"', 'class="course-pdf"',
+                                             'class="course-history"', "page-navigation", "quarto-search")
+                    if m in html]
+    c.ok(pages["lessons/week_01/lesson1.md"] and not outside,
+         "everything a page uses is in the file; only Brightspace's Lato comes from outside", "\n        ".join(outside))
+    c.ok(not website, "no sidebar, table of contents, search, PDF button, page navigation or footer",
+         "\n        ".join(website))
+    c.ok(not any(SECRET in html for html in pages.values()), "no private content")
+
+    lesson = pages["lessons/week_01/lesson1.md"]
+    css = embedded_css(lesson)
+    c.ok(f'<link rel="stylesheet" href="{BRIGHTSPACE_FONTS}"' in lesson and "fonts.googleapis" not in css
+         and "--bs-root-font-size: 19px" in css and "--bs-body-color: rgb(32, 33, 34)" in css,
+         "Brightspace's body text: its Lato (linked, not Google's), 19px, its text colour")
+    c.ok("<math" in lesson and "mathjax" not in lesson.lower() and 'id="mermaid-figure-1"' in lesson
+         and "__esbuild_esm_mermaid" not in lesson,
+         "maths as MathML and Mermaid as SVG, made at build time (no MathJax, no Mermaid script)")
+    c.ok("Open the slides" not in lesson and '<span class="course-outcome"' in lesson
+         and '<a class="course-outcome"' not in lesson and "course-term-ref" not in lesson
+         and 'class="course-terms"' in lesson,
+         "no slides box, outcome badges without a link to the outcome map, key terms without definitions on hover")
+    todos = Links(lesson).todos
+    c.ok(sorted(set(todos)) == ["info/assessment.qmd", "lessons/week_01/index.qmd", "lessons/week_01/lesson2.qmd",
+                                "slides/week_01/lesson1.pdf"] and lesson.count('<span class="course-todo">[TODO]</span>') == len(todos) == 5
+         and 'title="Link to lessons/week_01/lesson2"' in lesson,
+         "links to other pages and files: their text, marked, with a red [TODO]", str(todos))
+    log = logs["lessons/week_01/lesson1.md"]
+    c.ok("lesson 2 -> Lesson two (lessons-week_01-lesson2.html) (2 times)" in log
+         and "assessment -> Assessment (info-assessment.html)" in log
+         and "week overview -> Week 1: Basics (lessons-week_01.html)" in log
+         and "slides -> slides/week_01/lesson1.pdf (a file)" in log,
+         "the placeholders are listed after the export, with the file each target page becomes", log)
+    assignment = pages["assignments/week_01/assignment1.md"]
+    c.ok("logbook1" not in assignment and "Generative AI" in assignment
+         and Links(assignment).todos == ["info/genai.qmd"],
+         "an assignment: no logbook box; the GenAI box, its link to the policy a placeholder")
+    c.ok(".zip" not in pages["assignments/week_01/assignment2/index.md"]
+         and "Starter files" not in pages["assignments/week_01/assignment2/index.md"], "no box with the starter files")
+    c.ok('class="course-todo-link" data-target="exams/exam1.qmd"' in pages["info/assessment"],
+         "a generated page, named by its path on the website")
+
+    refused = run(course_cmd + ["standalone", "references/datasheet.pdf", "--source", str(course)], cwd=course)
+    c.ok(refused.returncode == 1 and "it is a file, not a page" in refused.stdout,
+         "a file is not exported, and the reason is given", refused.stdout.strip())
+    refused = run(course_cmd + ["standalone", "glossary/review", "--source", str(course)], cwd=course)
+    c.ok(refused.returncode == 1 and "the review deck reads the glossary" in refused.stdout,
+         "the review deck is not exported, and the reason is given", refused.stdout.strip())
+    refused = run(course_cmd + ["standalone", "lessons/week_01/nothing.md", "--source", str(course)], cwd=course)
+    c.ok(refused.returncode == 2 and "is not a page of the course" in refused.stdout,
+         "a page that is not there is reported", refused.stdout.strip())
+    refused = run(course_cmd + ["standalone", "--source", str(course)], cwd=course)
+    c.ok(refused.returncode == 2 and "the menu needs a terminal" in refused.stdout,
+         "without a terminal, the menu asks for the page to be named", refused.stdout.strip())
+    status = run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=course).stdout
+    c.ok(not re.search(r"(standalone|\.build-standalone)/", status),
+         "git ignores standalone/ and .build-standalone/ without a change to the course", status)
+
+    try:
+        chrome = str(tools.installed("chrome"))
+    except tools.ToolError as e:
+        c.skip("pages on their own in a browser", str(e))
+        return
+    # Offline, as a check that nothing is missing: the console stays empty, the diagrams get their size.
+    shot = run([chrome, "--no-sandbox", "--host-resolver-rules=MAP * ~NOTFOUND", "--enable-logging=stderr", "--v=0",
+                "--virtual-time-budget=8000", "--dump-dom", (out / STANDALONE["lessons/week_01/lesson1.md"]).as_uri()])
+    console = [line for line in shot.stdout.splitlines() if "CONSOLE" in line]
+    c.ok(shot.returncode == 0 and not console and re.search(r'id="mermaid-figure-1"[^>]*max-width', shot.stdout),
+         "offline in Chrome: no errors on the console, the Mermaid diagram at its own size", "\n        ".join(console))
+    for script, name in (("statemachine_browser.js", "lessons/week_02/lesson4.md"),
+                         ("superloop_browser.js", "lessons/week_02/lesson5.md"),
+                         ("pwm_browser.js", "lessons/week_02/lesson6.md")):
+        result = run([tools.quarto(), "run", str(REPO / "tests" / script), chrome, str(out / STANDALONE[name])])
+        lines = ANSI.sub("", result.stdout).strip().splitlines()
+        c.ok(result.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
+             f"tests/{script} passes on the page on its own", "\n        ".join(lines[-12:]))
+
+
+def check_menu_logic(c: Checks) -> None:
+    """The menu of `course standalone`, driven by key names (menu.py needs no terminal for this)."""
+    c.section("The menu of course standalone")
+    E = menu.Entry
+    lesson = E("Lesson", "lessons/week_01/lesson1.qmd")
+    m = menu.Menu("T", [E("Home", "index.qmd"),
+                        E("Week 1", children=[E("Week 1", "lessons/week_01/index.qmd"), lesson]),
+                        E("datasheet", "references/datasheet.pdf", reason="a file")])
+    results = [m.press(k) for k in (menu.UP, menu.DOWN, menu.DOWN, menu.DOWN)]
+    c.ok(results == [None] * 4 and m.cursor == 2, "Up and Down move, and stop at the ends")
+    c.ok(m.press(menu.ENTER) is None and m.message == "datasheet can't be exported: a file." and m.cursor == 2,
+         "Enter on an entry that can't be exported says why, and the menu stays", m.message)
+    c.ok(m.press(menu.UP) is None and m.message == "" and m.press(menu.RIGHT) is None and m.cursor == 0
+         and m.entries[1] is lesson, "Right opens a section; its own page comes first")
+    c.ok(m.press(menu.LEFT) is None and m.cursor == 1 and m.press(menu.ENTER) is None and m.press(menu.DOWN) is None
+         and m.press(menu.ENTER) is lesson, "Left goes back to where it was, Enter opens a section and exports a page")
+    m.press(menu.ESC)
+    c.ok(m.press(menu.ESC) == menu.QUIT and menu.Menu("T", [lesson]).press(menu.QUIT) == menu.QUIT,
+         "Esc goes back, and leaves the menu at the top; q leaves it")
+    many = menu.Menu("A course with a very long title", [E(f"Page {i:02} with a long name", f"p{i}.qmd") for i in range(30)])
+    for _ in range(25):
+        many.press(menu.DOWN)
+    screen = [re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", line) for line in many.lines(24, 12)]
+    c.ok(any("Page 25" in line for line in screen) and "Page 00" not in " ".join(screen)
+         and "  (more below)" in screen and all(len(line) <= 24 for line in screen),
+         "a long menu scrolls to the cursor, and long lines are cut to the terminal's width", "\n        ".join(screen))
 
 
 def check_template_command(c: Checks, course_cmd: list[str], course: Path) -> None:
@@ -991,11 +1162,13 @@ def main() -> int:
     check_widget_logic(c)
     check_statemachine_logic(c)
     check_superloop_logic(c)
+    check_menu_logic(c)
     if check_tools(c, course_cmd) and check_build(c, course_cmd, course, args.html_only):
         check_superloop_gcc(c, course)   # the blocks as the build read them (before `stage --preview`)
         check_site(c, course / "dist", args.html_only)
         check_preview_stage(c, course_cmd, course)
         check_template_command(c, course_cmd, course)
+        check_standalone(c, course_cmd, course)
 
     print(f"\n{c.passed} passed, {len(c.failed)} failed" + (f", {len(c.skipped)} skipped" if c.skipped else ""))
     if c.failed or args.keep:

@@ -1,0 +1,24 @@
+<!-- course standalone: Lato as on Brightspace's own pages. Not embedded (data-external): Brightspace serves it. -->
+<link rel="stylesheet" href="https://s.brightspace.com/lib/fonts/0.6.1/fonts.css" data-external="1">
+<script>
+  // Mermaid diagrams are SVG made at build time (`mermaid-format: svg`), 672 px
+  // wide and with a fixed height whatever their size. Show them as the website
+  // does: at their own size, but no wider than the page.
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('svg[id^="mermaid-figure"]').forEach(function (svg) {
+      // Quarto's script for these SVGs (mermaid-postprocess-shim.js, Quarto 1.10)
+      // reads the id of every SVG's <desc> and fails on one without: an empty
+      // <desc> makes it pass over the diagram, as it does for those with a <desc>
+      // that Mermaid did not make.
+      if (!svg.querySelector('desc')) {
+        svg.insertBefore(document.createElementNS('http://www.w3.org/2000/svg', 'desc'), svg.firstChild);
+      }
+      var box = svg.viewBox && svg.viewBox.baseVal;
+      if (!box || !box.width) return;
+      svg.removeAttribute('height');
+      svg.style.width = '100%';
+      svg.style.maxWidth = box.width + 'px';
+      svg.style.height = 'auto';
+    });
+  });
+</script>

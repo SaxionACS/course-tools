@@ -1055,3 +1055,58 @@ draft: true
 
 Lectures, assignments, exams, references and pages in `info/` can be drafts;
 `README.md` pages (the home page and the overviews) cannot.
+
+## Pages on their own, for Brightspace
+
+A course that keeps its content in Brightspace itself, instead of embedding the
+website, can export its pages one at a time, each as a single HTML file:
+
+```bash
+course standalone                              # choose the page from a menu
+course standalone lessons/week_01/lecture1.md  # or name it
+```
+
+The menu shows the course as the website's sidebar does. Up and Down move;
+Enter opens a section, or exports the page; Left or Esc goes back; q quits. In
+a section, its own page (such as the week's overview) comes first. Without the
+menu, name a page by its Markdown file or by its path on the website
+(`info/assessment`).
+
+The page goes to `standalone/` in the course, named after its path on the
+website: `standalone/lessons-week_01-lecture1.html`. Upload that file to the
+Brightspace course. Git ignores `standalone/`, and `.build-standalone/`, where
+the pages are made. `course clean` removes `.build-standalone/`, but not the
+pages in `standalone/`.
+
+The file contains everything the page uses: scripts, styles and pictures.
+Self-checks, widgets, state machines and superloop blocks work as on the
+website, also offline. Only the font, Lato, comes from Brightspace, as on
+Brightspace's own pages. The page looks like the website, with the text of
+Brightspace's pages: 19px and Brightspace's text colour (on a phone, the
+website's 16px). Maths and Mermaid diagrams are drawn when the page is
+exported, so the file needs no script for them.
+
+The page leaves out:
+
+- the website around it: the sidebar, the table of contents, search, the PDF
+  button and the footer with the dates;
+- the boxes with files: slides, starter files and logbooks;
+- the definitions of key terms on hover, and the links from the learning
+  outcomes to the outcome map. The key-terms box and the outcomes stay.
+
+A link to another page of the course, or to a file, has nowhere to go. Its text
+stays, marked, with a red **[TODO]** after it. After the export,
+`course standalone` lists these links, each with the file that its target
+becomes:
+
+```text
+2 links to other pages or files can't work on a page on its own; each is marked [TODO] on the page:
+  lecture 2 -> Lists and arrays (lessons-week_01-lecture2.html)
+  slides -> slides/week_01/lecture1.pdf (a file)
+```
+
+Make those links in Brightspace, to the pages and files you uploaded there, or
+replace the placeholders in the file before you upload it.
+
+A file (such as a PDF in `references/`) and the review deck of the key terms
+can't be exported; `course standalone` says why.

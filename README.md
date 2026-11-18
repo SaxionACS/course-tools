@@ -80,11 +80,12 @@ Then, in a course repository:
 course preview         # live preview on http://localhost:4200 (HTML only)
 course preview --pdf   # the same, with the PDFs (slower)
 course build           # website + PDFs in dist/
+course standalone      # one page as a single HTML file for Brightspace, in standalone/ (a menu)
 course doctor          # check the installed tools
 course setup           # download the tools again after an update of course-tools
 course template list   # texts a course can replace, e.g. genAI/not-allowed.md
 course template copy genAI/not-allowed.md   # into the course's templates/, to change it
-course clean           # remove .build/ and dist/
+course clean           # remove .build/, dist/ and .build-standalone/
 ```
 
 ## One-time setup on GitHub

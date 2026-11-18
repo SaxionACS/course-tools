@@ -10,7 +10,9 @@ what changed recently.
 
 | Path | What |
 |:--|:--|
-| `src/course_tools/cli.py` | the `course` command: `build`, `preview`, `stage` (`--preview`: as `course preview` stages), `clean`, `doctor` |
+| `src/course_tools/cli.py` | the `course` command: `build`, `preview`, `standalone`, `stage` (`--preview`: as `course preview` stages), `clean`, `doctor` |
+| `src/course_tools/standalone.py` | `course standalone`: one page as a single HTML file for Brightspace (`stage.Options.standalone`, a plain Quarto project in `.build-standalone/` with `embed-resources`), into `standalone/`; the menu's entries come from the sidebar |
+| `src/course_tools/menu.py` | the arrow-key menu of `course standalone` (termios / msvcrt, standard library only; `Menu` is tested without a terminal) |
 | `src/course_tools/course.py` | scans a course repository: weeks, pages, slides, logbooks; skips `private`, and draft pages (`draft: true`) except in `course preview` |
 | `src/course_tools/stage.py` | writes the Quarto project in `.build/`: pages as `.qmd`, generated pages, zips, sidebar, `_quarto.yml`; rewrites only changed files |
 | `src/course_tools/markdown.py` | GitHub Markdown → Quarto: code fences, titles, `---` rules |
@@ -38,7 +40,7 @@ what changed recently.
 | `src/course_tools/assets/superloop/print.js` | build-time entry point, run with `quarto run` |
 | `src/course_tools/assets/filters/superloop.lua` | Lua filter: superloop blocks as `<div class="course-superloop" data-config>` (HTML) or the code, timelines and exercises (PDF); before `practice.lua` |
 | `src/course_tools/assets/filters/course.lua` | Lua filter: PDF button, learning outcomes and reading time, slides/GenAI/logbook/starter boxes, links, code annotations, diagram alignment, footer, PDF header |
-| `src/course_tools/assets/theme/` | `head.html` (browser script), `practice.html` (self-checks, predictions, comparisons), `terms.html` (definitions on first use, review deck; reads the glossary page) and `saxion.scss` (theme) |
+| `src/course_tools/assets/theme/` | `head.html` (browser script), `practice.html` (self-checks, predictions, comparisons), `terms.html` (definitions on first use, review deck; reads the glossary page) and `saxion.scss` (theme); `standalone.scss` and `standalone.html` for `course standalone` (Brightspace's text, Mermaid SVGs at their own size) |
 | `src/course_tools/assets/typst/header.typ` | PDF styling |
 | `src/course_tools/assets/fonts/` | Lato (OFL), the body font of the PDFs: staged into `_course/fonts`, found by Typst through `font-paths` |
 | `src/course_tools/assets/templates/genAI/` | templates: the GenAI policy page per level, and the GenAI box of an assignment per use |

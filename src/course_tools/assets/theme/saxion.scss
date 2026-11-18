@@ -9,10 +9,12 @@ $saxion-grey-light: #cdd5dc;
 $saxion-blue: #006fbf;
 $saxion-orange: #e87511;
 
-$web-font-path: "https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;1,400;1,700&display=swap";
+// !default: standalone.scss, a later layer whose defaults Quarto puts first,
+// replaces these two for `course standalone` (Brightspace's Lato and text colour).
+$web-font-path: "https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;1,400;1,700&display=swap" !default;
 $font-family-sans-serif: Lato, "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
 
-$body-color: $saxion-grey;
+$body-color: $saxion-grey !default;
 $primary: $saxion-green;
 $link-color: $saxion-blue;
 $headings-color: $saxion-grey;
@@ -207,7 +209,8 @@ code.sourceCode .code-annotation-anchor.course-inline {
   margin-right: .15rem;
 }
 
-a.course-outcome {
+// A link to the outcome map; a span on a page on its own (course standalone).
+.course-outcome {
   display: inline-flex;
   align-items: baseline;
   gap: .35rem;
@@ -218,8 +221,8 @@ a.course-outcome {
   font-weight: 700;
   text-decoration: none;
 
-  &:hover,
-  &:focus-visible {
+  &:is(a):hover,
+  &:is(a):focus-visible {
     background: $saxion-green-dark;
     color: #fff;
   }

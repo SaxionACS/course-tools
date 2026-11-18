@@ -16,6 +16,9 @@ Course page decorations and link handling.
 * Links to other course pages may be written as `page.md` / `README.md`.
 * PDF (Typst): relative links become absolute links to the published site,
   and every page gets a running header and footer.
+* A page on its own (`course standalone`, `course-site.standalone`): no
+  outcome-map links, and links to other pages and files become placeholders
+  with a red [TODO].
 
 The stager provides the data as metadata: `course-site` (project-wide) and
 `course-page` (per page).
@@ -149,16 +152,19 @@ end
 
 -- The learning outcomes of the page (`outcomes` in its front matter): their
 -- titles (or ids), linking to the outcome map; the full outcome on hover
--- (head.html). With the reading time.
+-- (head.html). With the reading time. A page on its own (course standalone)
+-- has no outcome map to link to.
 local function outcomes_banner(outcomes, minutes)
   if is_html then
     local badges = {}
+    local tag = site.standalone == true and 'span' or 'a'
     for _, lo in ipairs(outcomes) do
       local id, title = str(lo.id), str(lo.title) or ''
-      table.insert(badges, '<a class="course-outcome" href="' .. html_escape(str(lo.href)) .. '" data-text="'
-        .. html_escape(id .. ': ' .. str(lo.text)) .. '">'
+      table.insert(badges, '<' .. tag .. ' class="course-outcome"'
+        .. (tag == 'a' and (' href="' .. html_escape(str(lo.href)) .. '"') or '')
+        .. ' data-text="' .. html_escape(id .. ': ' .. str(lo.text)) .. '">'
         .. (title ~= '' and ('<span class="course-outcome-id">' .. html_escape(id) .. '</span>' .. html_escape(title))
-            or html_escape(id)) .. '</a>')
+            or html_escape(id)) .. '</' .. tag .. '>')
     end
     return pandoc.RawBlock('html', '<div class="course-outcomes"><span class="course-outcomes-label">Learning outcomes</span>'
       .. table.concat(badges) .. '<span class="course-reading-time">about ' .. minutes .. ' min read</span></div>')
@@ -289,7 +295,28 @@ local function is_pdf(target)
   return (target:match('^([^#?]*)') or ''):lower():match('%.pdf$') ~= nil
 end
 
+-- A page on its own (course standalone) is uploaded to Brightspace by itself:
+-- its links to other course pages and to files lead nowhere. The link's text
+-- stays, marked, with a red [TODO] after it; `data-target` is the target's
+-- path in the stage (`course standalone` lists them after the export).
+local function placeholder(l)
+  if not is_relative(l.target) then return nil end
+  local path = l.target:match('^([^#?]*)')
+  local dir, name = path:match('^(.-)([^/]*)$')
+  if name:match('%.q?md$') or is_readme(name) or generated(name) then name = staged_name(name) end
+  local target = normalize((str(page.dir) or '') .. '/' .. dir .. name)
+  local shown = target:gsub('%.qmd$', ''):gsub('/index$', ''):gsub('^index$', 'home')   -- the path on the website
+  return {
+    pandoc.Span(l.content, pandoc.Attr('', {'course-todo-link'}, {{'data-target', target}, {'title', 'Link to ' .. shown}})),
+    pandoc.Space(),
+    pandoc.Span(pandoc.Inlines('[TODO]'), pandoc.Attr('', {'course-todo'})),
+  }
+end
+
 local function link(l)
+  if is_html and site.standalone == true then
+    return placeholder(l)
+  end
   if is_html and is_pdf(l.target) then
     l.attributes['target'] = '_blank'
     l.attributes['rel'] = 'noopener'

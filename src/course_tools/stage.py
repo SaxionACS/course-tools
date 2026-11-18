@@ -49,6 +49,7 @@ class Options:
     statemachine_cache: Path | None = None   # the same for state machines
     superloop_cache: Path | None = None      # and for superloop blocks
     preview: bool = False              # course preview: draft pages, and editable widgets, state machines and superloop blocks
+    standalone: bool = False           # course standalone: pages on their own, for Brightspace (see quarto_config)
 
 
 # --------------------------------------------------------------------------
@@ -140,11 +141,13 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
     if course.genai is None:
         print("warning: no info/genAI.yaml: the course has no generative-AI policy "
               "(Saxion's default applies: allowed, with citation)", file=sys.stderr)
-    dates = history.file_history(root)
+    dates = {} if opts.standalone else history.file_history(root)   # a page on its own has no footer
 
     def page_history(source: Path | None) -> dict | None:
-        """Footer data (added / last changed / author) of a source file, from git."""
-        return history.footer(dates.get(source.relative_to(root).as_posix())) if source else None
+        """Footer data (added / last changed / author) of a source file, from git; none for a page on its own."""
+        if source is None or opts.standalone:
+            return None
+        return history.footer(dates.get(source.relative_to(root).as_posix()))
 
     los = info.learning_outcomes(course.general)
     covered = []   # (page, its learning outcomes), for the outcome map
@@ -160,15 +163,16 @@ def desired_files(course: Course, opts: Options) -> dict[str, bytes | Path]:
             covered.append((page, found))
         if found := page_history(page.src):
             extra["history"] = found
-        if page.kind == "lecture" and page.slides_expected:
+        # A page on its own (course standalone) has no boxes with files: slides, starter files, logbooks.
+        if page.kind == "lecture" and page.slides_expected and not opts.standalone:
             extra["slides"] = _rel_link(page.rel, page.slides) if page.slides else False
-        if page.starter_dir is not None:
+        if page.starter_dir is not None and not opts.standalone:
             week_dir = page.starter_dir.parent.parent.name
             zip_name = f"{week_dir}-{page.starter_dir.parent.name}.zip"
             zip_rel = page.rel.parent / zip_name
             files[str(zip_rel)] = _zip_bytes(page.starter_dir, zip_name[:-4])
             extra["starter"] = zip_name
-        if page.logbooks:
+        if page.logbooks and not opts.standalone:
             extra["logbooks"] = [
                 {"title": lb.title,
                  "download": _rel_link(page.rel, PurePosixPath(lb.src.relative_to(root).as_posix())),
@@ -406,6 +410,21 @@ def quarto_config(course: Course, opts: Options) -> dict:
 
     engines = {name: False for name in ("asymptote", "cetz", "d2", "dot", "mermaid", "tikz")}
     engines["plantuml"] = {"execpath": [_literal(a) for a in opts.plantuml]} if opts.plantuml else True
+    filters = [
+        # widgets.lua and superloop.lua before practice.lua: a challenge becomes an exercise in the PDF.
+        f"{ASSETS_DIR}/filters/widgets.lua",
+        f"{ASSETS_DIR}/filters/statemachine.lua",
+        f"{ASSETS_DIR}/filters/superloop.lua",
+        f"{ASSETS_DIR}/filters/practice.lua",
+        f"{ASSETS_DIR}/filters/compiler-explorer.lua",
+        f"{ASSETS_DIR}/filters/terms.lua",
+        f"{ASSETS_DIR}/filters/course.lua",
+        "diagram",
+        f"{ASSETS_DIR}/filters/inline-mediabag.lua",
+    ]
+
+    if opts.standalone:
+        return _standalone_config(course, formats["html"], course_site, filters, engines, pages)
 
     return {
         "project": {
@@ -417,20 +436,44 @@ def quarto_config(course: Course, opts: Options) -> dict:
         "website": website,
         "lang": general.get("lang", "en"),
         "format": formats,
-        "filters": [
-            # widgets.lua and superloop.lua before practice.lua: a challenge becomes an exercise in the PDF.
-            f"{ASSETS_DIR}/filters/widgets.lua",
-            f"{ASSETS_DIR}/filters/statemachine.lua",
-            f"{ASSETS_DIR}/filters/superloop.lua",
-            f"{ASSETS_DIR}/filters/practice.lua",
-            f"{ASSETS_DIR}/filters/compiler-explorer.lua",
-            f"{ASSETS_DIR}/filters/terms.lua",
-            f"{ASSETS_DIR}/filters/course.lua",
-            "diagram",
-            f"{ASSETS_DIR}/filters/inline-mediabag.lua",
-        ],
+        "filters": filters,
         "diagram": {"engine": engines},
         "course-site": course_site,
+    }
+
+
+def _standalone_config(course: Course, html: dict, course_site: dict, filters: list, engines: dict,
+                       pages: list[str]) -> dict:
+    """`course standalone`: one page at a time, as a single HTML file to upload to Brightspace.
+
+    A plain Quarto project (not a website: no sidebar, search or page
+    navigation) whose pages embed everything they use. Maths is MathML and
+    Mermaid diagrams are SVG, both made at build time: MathJax and Mermaid
+    would otherwise load from a CDN or add 2.7 MB of script. The look is the
+    website's with Brightspace's body text (theme/standalone.scss and .html).
+    Key terms have no definitions on hover (theme/terms.html needs the
+    glossary page), and course.lua turns links to other pages into
+    placeholders. The pages are listed (`render`): without the list, Quarto
+    leaves out the files that git ignores (all of them, in a course), and
+    renders a page without the project's settings.
+    """
+    html = dict(html)
+    html.update({
+        "theme": html["theme"] + [f"{ASSETS_DIR}/theme/standalone.scss"],
+        "include-in-header": html["include-in-header"] + [f"{ASSETS_DIR}/theme/standalone.html"],
+        "include-after-body": [f for f in html["include-after-body"] if not f.endswith("/terms.html")],
+        "embed-resources": True,
+        "toc": False,
+        "html-math-method": "mathml",
+        "mermaid-format": "svg",
+    })
+    return {
+        "project": {"type": "default", "output-dir": "_site", "render": pages},
+        "lang": course.general.get("lang", "en"),
+        "format": {"html": html},
+        "filters": filters,
+        "diagram": {"engine": engines},
+        "course-site": {**course_site, "pdf": False, "standalone": True},
     }
 
 

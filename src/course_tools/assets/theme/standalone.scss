@@ -1,0 +1,42 @@
+/*-- scss:defaults --*/
+
+// `course standalone`: a page on its own, uploaded to Brightspace. The body
+// text is that of Brightspace's own pages: Lato from Brightspace's fonts.css
+// (standalone.html links it, so the page does not embed Google's), 19px, and
+// Brightspace's text colour. Everything else looks as on the website.
+// These come before saxion.scss's defaults, which are !default for this.
+$web-font-path: false;
+$font-size-root: 19px;
+$body-color: rgb(32, 33, 34);
+
+/*-- scss:rules --*/
+
+body {
+  border-top: none;
+}
+
+// On a phone, the website's text size, which the widgets are made for: with
+// 19px, some PWM pictures no longer fit a 340px-wide screen.
+@media (max-width: 575.98px) {
+  :root {
+    --bs-root-font-size: 16px;
+  }
+}
+
+// A link to another course page or a file, which a page on its own cannot
+// have (filters/course.lua): the text stays, marked, with a red [TODO] after
+// it, so that the link can be made in Brightspace.
+.course-todo-link {
+  text-decoration: underline dashed #c00000;
+  text-underline-offset: 3px;
+}
+
+.course-todo {
+  color: #c00000;
+  font-weight: 700;
+  font-size: 1.25em;
+}
+
+// Mermaid diagrams (SVG, see standalone.html): centred, unless they say otherwise (`fig-align`).
+.cell[data-layout-align="center"] .cell-output-display figure { text-align: center; }
+.cell[data-layout-align="right"] .cell-output-display figure { text-align: right; }
