@@ -14,7 +14,7 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.16.0 (unreleased)
+## 2.16.0 (2026-11-18)
 
 Pages on their own, for courses that keep their content in Brightspace itself
 instead of embedding the website.
@@ -54,8 +54,7 @@ Platform notes:
   with `CC=gcc-13`; it exports nine pages of the test course, compares
   screenshots of five of them with Quarto's whole output, and runs the
   browser tests of the state machines, superloop blocks and PWM widgets on
-  them. The menu was also tried in a terminal. The Check workflow has not run
-  yet.
+  them. The menu was also tried in a terminal. The Check workflow passes.
 - **macOS:** untested; the menu uses termios, as on Linux.
 - **Windows:** untested; the menu reads the keys with msvcrt and switches on
   the console's escape sequences (Windows 10 and later).
