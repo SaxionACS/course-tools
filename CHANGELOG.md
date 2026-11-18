@@ -14,7 +14,7 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
-## 2.15.0 (unreleased)
+## 2.15.0 (2026-11-18)
 
 Course information: more than one coordinator, and learning outcomes in the
 affective domain, with Krathwohl's taxonomy next to Bloom's.
@@ -41,7 +41,7 @@ Platform notes:
 
 - **Dependencies:** none.
 - **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 219 checks,
-  with `CC=gcc-13`. The Check workflow has not run yet.
+  with `CC=gcc-13`. The Check workflow passes.
 - **macOS:** untested; nothing platform-specific.
 - **Windows:** untested; nothing platform-specific.
 
