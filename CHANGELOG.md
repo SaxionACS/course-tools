@@ -25,6 +25,14 @@ instead of embedding the website.
   everything it uses inside: scripts, styles and pictures. Only Lato comes from
   Brightspace, as on Brightspace's own pages. Self-checks, widgets, state
   machines and superloop blocks work as on the website, also offline.
+- **Small files.** Quarto puts the website's whole CSS and JavaScript in every
+  file (1.3 MB for a page of text); `course standalone` then takes out what the
+  page cannot use: CSS rules that match nothing on the page or in its scripts,
+  the icon font (the Compiler Explorer link draws its two icons inline), and
+  Bootstrap's script, tippy, Popper and the tab scripts when the page has no
+  tabs or nothing to hover. A page of text is now about 120 kB, a page with
+  widgets about 350 kB, and each looks exactly as before (`scripts/check.py`
+  compares screenshots).
 - **What it leaves out.** The sidebar, table of contents, search, PDF button,
   footer, the boxes with slides, starter files and logbooks, the definitions of
   key terms on hover, and the links to the outcome map.
@@ -42,8 +50,9 @@ instead of embedding the website.
 Platform notes:
 
 - **Dependencies:** none (the menu uses termios, or msvcrt on Windows).
-- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 246 checks,
-  with `CC=gcc-13`; it exports seven pages of the test course and runs the
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 257 checks,
+  with `CC=gcc-13`; it exports nine pages of the test course, compares
+  screenshots of five of them with Quarto's whole output, and runs the
   browser tests of the state machines, superloop blocks and PWM widgets on
   them. The menu was also tried in a terminal. The Check workflow has not run
   yet.

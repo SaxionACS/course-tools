@@ -7,6 +7,8 @@ except Lato, which Brightspace serves), and none of the website around it: no
 sidebar, table of contents, PDF button, boxes with files (slides, starter
 files, logbooks) or footer. Links to other pages and to files become
 placeholders with a red [TODO] (filters/course.lua), listed after the export.
+Quarto's `embed-resources` puts the website's whole CSS and JavaScript in the
+file; slim.py then takes out what the page cannot use.
 
 The pages are staged in .build-standalone/ (a plain Quarto project, see
 stage._standalone_config) and written to standalone/ in the course, named
@@ -22,7 +24,7 @@ from dataclasses import dataclass, replace
 from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 
-from . import terms
+from . import slim, terms
 from .course import Course
 from .menu import Entry
 from .stage import Options, desired_files, sidebar, sync
@@ -168,7 +170,7 @@ def export(course: Course, entry: Entry, opts: Options, quarto: str, env: dict) 
     rendered = stage / "_site" / PurePosixPath(entry.rel).with_suffix(".html")
     if result.returncode != 0 or not rendered.is_file():
         raise ExportError("Quarto failed:\n" + "\n".join(log.splitlines()[-40:]))
-    html = rendered.read_text(encoding="utf-8")
+    html = slim.slim(rendered.read_text(encoding="utf-8"))
     scan = _Scan()
     scan.feed(html)
     out = course.root / OUTPUT_DIR

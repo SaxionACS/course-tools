@@ -48,7 +48,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
-from course_tools import info, menu, tools  # noqa: E402  (standard library only, like this script)
+from course_tools import info, menu, slim, tools  # noqa: E402  (standard library only, like this script)
 
 COURSE = REPO / "tests" / "course"
 SITE_URL = "https://example.org/check/"
@@ -369,8 +369,19 @@ STANDALONE = {
     "assignments/week_01/assignment2/index.md": "assignments-week_01-assignment2.html",   # starter files
     "lessons/week_02/lesson4.md": "lessons-week_02-lesson4.html",     # state machines
     "lessons/week_02/lesson5.md": "lessons-week_02-lesson5.html",     # superloop blocks
+    "lessons/week_02/lesson3.md": "lessons-week_02-lesson3.html",     # widgets
     "lessons/week_02/lesson6.md": "lessons-week_02-lesson6.html",     # PWM widgets
+    "lessons/week_02/lesson1.md": "lessons-week_02-lesson1.html",     # Compiler Explorer links
     "info/assessment": "info-assessment.html",                        # a generated page, by its path on the site
+}
+# Pages whose screenshots are the same every time (the others animate or run programs when they load),
+# and Quarto's whole output of each, in .build-standalone/_site.
+STILL = {
+    "lessons/week_01/lesson1.md": "lessons/week_01/lesson1.html",
+    "assignments/week_01/assignment1.md": "assignments/week_01/assignment1.html",
+    "lessons/week_02/lesson1.md": "lessons/week_02/lesson1.html",
+    "lessons/week_02/lesson3.md": "lessons/week_02/lesson3.html",
+    "info/assessment": "info/assessment.html",
 }
 BRIGHTSPACE_FONTS = "https://s.brightspace.com/lib/fonts/0.6.1/fonts.css"
 
@@ -390,12 +401,34 @@ class Links(HTMLParser):
             self.todos.append(a.get("data-target") or "")
 
 
-def embedded_css(html: str) -> str:
-    """The style sheets that the page embeds as data: URLs."""
-    out = []
-    for m in re.finditer(r'data:text/css(;charset=[\w-]+)?(;base64)?,([^"\')]+)', html):
+def page_css(html: str) -> str:
+    """The style sheets of a page: <style> in its head, and those embedded as data: URLs."""
+    head = html[:html.find("</head>")]
+    out = re.findall(r"<style\b[^>]*>(.*?)</style>", head, re.S)
+    for m in re.finditer(r'data:text/css(;charset=[\w-]+)?(;base64)?,([^"\')]+)', head):
         out.append(base64.b64decode(m.group(3)).decode("utf-8", "replace") if m.group(2) else urllib.parse.unquote(m.group(3)))
     return "\n".join(out)
+
+
+def markup(html: str) -> str:
+    """A page without its scripts and styles."""
+    return re.sub(r"<(script|style)\b.*?</\1>", "", html, flags=re.S)
+
+
+def same_screenshots(chrome: str, a: Path, b: Path) -> list[str]:
+    """The widths at which two pages look different (offline, the whole page)."""
+    different = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for width, height in ((1100, 9000), (390, 16000)):
+            shots = []
+            for i, page in enumerate((a, b)):
+                shot = Path(tmp) / f"{i}-{width}.png"
+                run([chrome, "--no-sandbox", "--host-resolver-rules=MAP * ~NOTFOUND", "--hide-scrollbars",
+                     f"--window-size={width},{height}", "--virtual-time-budget=5000", f"--screenshot={shot}", page.as_uri()])
+                shots.append(shot.read_bytes() if shot.is_file() else b"")
+            if not shots[0] or shots[0] != shots[1]:
+                different.append(f"{width} px")
+    return different
 
 
 def check_standalone(c: Checks, course_cmd: list[str], course: Path) -> None:
@@ -436,7 +469,7 @@ def check_standalone(c: Checks, course_cmd: list[str], course: Path) -> None:
     c.ok(not any(SECRET in html for html in pages.values()), "no private content")
 
     lesson = pages["lessons/week_01/lesson1.md"]
-    css = embedded_css(lesson)
+    css = page_css(lesson)
     c.ok(f'<link rel="stylesheet" href="{BRIGHTSPACE_FONTS}"' in lesson and "fonts.googleapis" not in css
          and "--bs-root-font-size: 19px" in css and "--bs-body-color: rgb(32, 33, 34)" in css,
          "Brightspace's body text: its Lato (linked, not Google's), 19px, its text colour")
@@ -467,6 +500,23 @@ def check_standalone(c: Checks, course_cmd: list[str], course: Path) -> None:
     c.ok('class="course-todo-link" data-target="exams/exam1.qmd"' in pages["info/assessment"],
          "a generated page, named by its path on the website")
 
+    sizes = {name: len(html.encode("utf-8")) for name, html in pages.items()}
+    c.ok(sizes["info/assessment"] < 150_000 and all(size < 400_000 for size in sizes.values()),
+         "pages are small: what they cannot use is taken out (a page of text under 150 kB)",
+         ", ".join(f"{name}: {size // 1000} kB" for name, size in sizes.items()))
+    font = [name for name, html in pages.items() if "bootstrap-icons" in page_css(html) and "@font-face" in page_css(html)
+            and re.search(r"@font-face\{[^}]*bootstrap-icons", page_css(html))]
+    ce = pages["lessons/week_02/lesson1.md"]
+    c.ok(not font and '<svg class="course-icon"' in ce and 'class="bi bi-cpu"' not in ce,
+         "no icon font: the Compiler Explorer link's icons are drawn inline", f"with the font: {font}")
+    wrong = [name for name, html in pages.items()
+             if ("* Bootstrap v5" in html) != ("data-bs-toggle" in markup(html))
+             or ('.tippy=t(' in html) != any(h in markup(html) for h in slim.HOVERS)
+             or ("data:text/css" in html[:html.find("</head>")])]
+    c.ok(not wrong and "* Bootstrap v5" in lesson and "* Bootstrap v5" not in pages["info/assessment"],
+         "Bootstrap's script only with tabs or collapsible callouts, tippy only with something to hover; CSS as text",
+         str(wrong))
+
     refused = run(course_cmd + ["standalone", "references/datasheet.pdf", "--source", str(course)], cwd=course)
     c.ok(refused.returncode == 1 and "it is a file, not a page" in refused.stdout,
          "a file is not exported, and the reason is given", refused.stdout.strip())
@@ -489,11 +539,22 @@ def check_standalone(c: Checks, course_cmd: list[str], course: Path) -> None:
         c.skip("pages on their own in a browser", str(e))
         return
     # Offline, as a check that nothing is missing: the console stays empty, the diagrams get their size.
-    shot = run([chrome, "--no-sandbox", "--host-resolver-rules=MAP * ~NOTFOUND", "--enable-logging=stderr", "--v=0",
-                "--virtual-time-budget=8000", "--dump-dom", (out / STANDALONE["lessons/week_01/lesson1.md"]).as_uri()])
-    console = [line for line in shot.stdout.splitlines() if "CONSOLE" in line]
-    c.ok(shot.returncode == 0 and not console and re.search(r'id="mermaid-figure-1"[^>]*max-width', shot.stdout),
-         "offline in Chrome: no errors on the console, the Mermaid diagram at its own size", "\n        ".join(console))
+    console, sized = [], False
+    for name, file in STANDALONE.items():
+        shot = run([chrome, "--no-sandbox", "--host-resolver-rules=MAP * ~NOTFOUND", "--enable-logging=stderr", "--v=0",
+                    "--virtual-time-budget=8000", "--dump-dom", (out / file).as_uri()])
+        console += [f"{name}: {line}" for line in shot.stdout.splitlines() if "CONSOLE" in line]
+        if name == "lessons/week_01/lesson1.md":
+            sized = bool(re.search(r'id="mermaid-figure-1"[^>]*max-width', shot.stdout))
+    c.ok(not console and sized, "offline in Chrome: no errors on the console of any page, the Mermaid diagram at its own size",
+         "\n        ".join(console))
+    # What was taken out made no difference: each page looks exactly like Quarto's whole output.
+    different = []
+    for name, whole in STILL.items():
+        different += [f"{name}: {d}" for d in same_screenshots(chrome, course / ".build-standalone" / "_site" / whole,
+                                                               out / STANDALONE[name])]
+    c.ok(not different, "each page looks exactly as before the scripts and CSS it cannot use were taken out "
+                        "(screenshots at 1100 and 390 px)", ", ".join(different))
     for script, name in (("statemachine_browser.js", "lessons/week_02/lesson4.md"),
                          ("superloop_browser.js", "lessons/week_02/lesson5.md"),
                          ("pwm_browser.js", "lessons/week_02/lesson6.md")):
@@ -501,6 +562,37 @@ def check_standalone(c: Checks, course_cmd: list[str], course: Path) -> None:
         lines = ANSI.sub("", result.stdout).strip().splitlines()
         c.ok(result.returncode == 0 and lines and lines[-1].endswith(" ok, 0 failed"),
              f"tests/{script} passes on the page on its own", "\n        ".join(lines[-12:]))
+
+
+def check_slim_logic(c: Checks) -> None:
+    """slim.py: what a page on its own keeps of the CSS and JavaScript (course standalone)."""
+    c.section("Pages on their own: what they keep (slim.py)")
+    css = ('/* a comment */ a:not(.btn){color:red}.btn{color:blue}.x .y{a:b}.cw-z.g1{c:d}:root{--v:1}'
+           '@media (min-width:1px){.y{e:f}.gone{g:h}}@media print{.gone{i:j}}'
+           '@font-face{font-family:"bootstrap-icons";src:url(i.woff)}.bi::before,[class^="bi-"]::before{font-family:bootstrap-icons}'
+           '.bi-cpu::before{content:"\\f2d6"}@font-face{font-family:Other;src:url(o.woff)}'
+           '@keyframes spin{to{opacity:0}}.spinner{animation:spin 1s}.qq-3{k:l}')
+    scripts = "el.className = 'cw-' + kind; el.classList.add(`qq-${n}`);"
+    out = slim.purge_css(css, slim.Used('<div class="y"></div>' + scripts, scripts, '<div class="y"></div>'))
+    c.ok("a:not(.btn){color:red}" in out and ".btn{" not in out and ":root{--v:1}" in out and "comment" not in out,
+         "a class inside :not() is not needed; a rule for a class that is not on the page goes", out)
+    c.ok(".x .y" not in out and "@media (min-width:1px){.y{e:f}}" in out and "print" not in out,
+         "rules in @media are purged too, and an empty @media goes", out)
+    c.ok(".qq-3{k:l}" in out and ".cw-z.g1" not in out,
+         "a class that a script builds from a string stays (`qq-${n}`); one that is only partly built goes", out)
+    with_widget = slim.purge_css(css, slim.Used(scripts, scripts, '<div class="course-widget"></div>'))
+    c.ok(".cw-z.g1{c:d}" in with_widget, "on a page with a widget, every selector with a cw- class stays", with_widget)
+    c.ok("bootstrap-icons\";src" not in out and "Other" not in out and "@keyframes" not in out,
+         "the icon font goes without a rule for one of its icons; unused fonts and keyframes go", out)
+    page = ('<html><head><script>/*!\n  * Bootstrap v5.3.1 (https://getbootstrap.com/)\n */ var b;</script>'
+            '<script>/**\n * @popperjs/core v2.11.7 - MIT License\n */ var p;</script>'
+            '<link rel="stylesheet" href="data:text/css,.t%7Bcolor%3Ared%7D.u%7Bcolor%3Ablue%7D"></head>'
+            '<body><p class="t">text</p></body></html>')
+    out = slim.slim(page)
+    c.ok("Bootstrap" not in out and "popperjs" not in out and "<style>\n.t{color:red}\n</style>" in out
+         and "data:text/css" not in out, "without tabs or hovers, Bootstrap's script and Popper go; the CSS is text", out)
+    out = slim.slim(page.replace('<p class="t">', '<a data-bs-toggle="tab" class="t">'))
+    c.ok("Bootstrap v5" in out and "popperjs" in out, "with tabs, both stay", out)
 
 
 def check_menu_logic(c: Checks) -> None:
@@ -1162,6 +1254,7 @@ def main() -> int:
     check_widget_logic(c)
     check_statemachine_logic(c)
     check_superloop_logic(c)
+    check_slim_logic(c)
     check_menu_logic(c)
     if check_tools(c, course_cmd) and check_build(c, course_cmd, course, args.html_only):
         check_superloop_gcc(c, course)   # the blocks as the build read them (before `stage --preview`)

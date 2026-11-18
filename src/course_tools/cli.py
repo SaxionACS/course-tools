@@ -225,8 +225,9 @@ def cmd_standalone(args) -> int:
     except standalone.ExportError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    size = result.path.stat().st_size / 1e6
-    print(f"Written to {result.path.relative_to(source).as_posix()} ({size:.1f} MB): upload it to Brightspace as a file.")
+    size = result.path.stat().st_size / 1e3
+    size = f"{size / 1e3:.1f} MB" if size >= 1000 else f"{size:.0f} kB"
+    print(f"Written to {result.path.relative_to(source).as_posix()} ({size}): upload it to Brightspace as a file.")
     if result.todos:
         print(f"{len(result.todos)} link{'s' if len(result.todos) > 1 else ''} to other pages or files "
               "can't work on a page on its own; each is marked [TODO] on the page:")

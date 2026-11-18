@@ -40,3 +40,9 @@ body {
 // Mermaid diagrams (SVG, see standalone.html): centred, unless they say otherwise (`fig-align`).
 .cell[data-layout-align="center"] .cell-output-display figure { text-align: center; }
 .cell[data-layout-align="right"] .cell-output-display figure { text-align: right; }
+
+// Icons drawn inline instead of with the icon font (filters/compiler-explorer.lua),
+// placed as the font places its glyphs.
+.course-icon {
+  vertical-align: -.125em;
+}

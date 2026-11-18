@@ -37,6 +37,7 @@ local LANGUAGES = {
 local KEYS = {'target', 'compiler', 'options'}
 
 local course, page = {}, {}
+local standalone = false   -- a page on its own (course standalone)
 
 local function source_name()
   local file = quarto.doc.input_file
@@ -67,6 +68,23 @@ end
 local function read_meta(meta)
   course = decode((meta['course-site'] or {})['compiler-explorer'])
   page = decode((meta['course-page'] or {})['compiler-explorer'])
+  standalone = (meta['course-site'] or {}).standalone == true
+end
+
+-- The link's icons (Bootstrap Icons 1.13.1, MIT, as Quarto ships them). On the
+-- website they come from the icon font; a page on its own (course standalone)
+-- has them inline, so it needs no 340 kB font for two icons (see slim.py).
+local ICONS = {
+  ['cpu'] = '<path d="M5 0a.5.5 0 0 1 .5.5V2h1V.5a.5.5 0 0 1 1 0V2h1V.5a.5.5 0 0 1 1 0V2h1V.5a.5.5 0 0 1 1 0V2A2.5 2.5 0 0 1 14 4.5h1.5a.5.5 0 0 1 0 1H14v1h1.5a.5.5 0 0 1 0 1H14v1h1.5a.5.5 0 0 1 0 1H14v1h1.5a.5.5 0 0 1 0 1H14a2.5 2.5 0 0 1-2.5 2.5v1.5a.5.5 0 0 1-1 0V14h-1v1.5a.5.5 0 0 1-1 0V14h-1v1.5a.5.5 0 0 1-1 0V14h-1v1.5a.5.5 0 0 1-1 0V14A2.5 2.5 0 0 1 2 11.5H.5a.5.5 0 0 1 0-1H2v-1H.5a.5.5 0 0 1 0-1H2v-1H.5a.5.5 0 0 1 0-1H2v-1H.5a.5.5 0 0 1 0-1H2A2.5 2.5 0 0 1 4.5 2V.5A.5.5 0 0 1 5 0m-.5 3A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 11.5 3zM5 6.5A1.5 1.5 0 0 1 6.5 5h3A1.5 1.5 0 0 1 11 6.5v3A1.5 1.5 0 0 1 9.5 11h-3A1.5 1.5 0 0 1 5 9.5zM6.5 6a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5z"/>',
+  ['box-arrow-up-right'] = '<path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5"/><path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0z"/>',
+}
+
+local function icon(name)
+  if standalone then
+    return '<svg class="course-icon" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="currentColor" '
+      .. 'viewBox="0 0 16 16" aria-hidden="true">' .. ICONS[name] .. '</svg>'
+  end
+  return '<i class="bi bi-' .. name .. '"></i>'
 end
 
 -- Settings ---------------------------------------------------------------
@@ -163,8 +181,8 @@ local function link_block(mode, s, href)
     local words = {}
     for w in table.concat(details, ' · '):gmatch('%S+') do table.insert(words, '<span>' .. escape(w) .. '</span>') end
     return pandoc.RawBlock('html', '<div class="course-ce" data-ce-mode="' .. mode .. '">'
-      .. '<a href="' .. href .. '" target="_blank" rel="noopener"><i class="bi bi-cpu"></i> ' .. text
-      .. ' <i class="bi bi-box-arrow-up-right"></i></a>'
+      .. '<a href="' .. href .. '" target="_blank" rel="noopener">' .. icon('cpu') .. ' ' .. text
+      .. ' ' .. icon('box-arrow-up-right') .. '</a>'
       .. (#words > 0 and ('<span class="course-ce-details">' .. table.concat(words, ' ') .. '</span>') or '')
       .. '</div>')
   end

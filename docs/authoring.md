@@ -1078,9 +1078,10 @@ Brightspace course. Git ignores `standalone/`, and `.build-standalone/`, where
 the pages are made. `course clean` removes `.build-standalone/`, but not the
 pages in `standalone/`.
 
-The file contains everything the page uses: scripts, styles and pictures.
-Self-checks, widgets, state machines and superloop blocks work as on the
-website, also offline. Only the font, Lato, comes from Brightspace, as on
+The file contains everything the page uses, and only that: scripts, styles
+and pictures. A page of text is about 100–150 kB; with widgets, state machines
+or superloop blocks, about 350 kB. Self-checks, widgets, state machines and
+superloop blocks work as on the website, also offline. Only the font, Lato, comes from Brightspace, as on
 Brightspace's own pages. The page looks like the website, with the text of
 Brightspace's pages: 19px and Brightspace's text colour (on a phone, the
 website's 16px). Maths and Mermaid diagrams are drawn when the page is

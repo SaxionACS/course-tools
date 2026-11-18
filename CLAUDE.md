@@ -12,6 +12,7 @@ what changed recently.
 |:--|:--|
 | `src/course_tools/cli.py` | the `course` command: `build`, `preview`, `standalone`, `stage` (`--preview`: as `course preview` stages), `clean`, `doctor` |
 | `src/course_tools/standalone.py` | `course standalone`: one page as a single HTML file for Brightspace (`stage.Options.standalone`, a plain Quarto project in `.build-standalone/` with `embed-resources`), into `standalone/`; the menu's entries come from the sidebar |
+| `src/course_tools/slim.py` | `course standalone`: takes out of a page the CSS rules, fonts and scripts it cannot use (standard library only); `check.py` compares screenshots before and after |
 | `src/course_tools/menu.py` | the arrow-key menu of `course standalone` (termios / msvcrt, standard library only; `Menu` is tested without a terminal) |
 | `src/course_tools/course.py` | scans a course repository: weeks, pages, slides, logbooks; skips `private`, and draft pages (`draft: true`) except in `course preview` |
 | `src/course_tools/stage.py` | writes the Quarto project in `.build/`: pages as `.qmd`, generated pages, zips, sidebar, `_quarto.yml`; rewrites only changed files |
