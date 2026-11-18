@@ -1,4 +1,4 @@
-"""Reference data: the Saxion level model and Bloom's taxonomy."""
+"""Reference data: the Saxion level model, Bloom's and Krathwohl's taxonomies."""
 
 from __future__ import annotations
 
@@ -139,6 +139,68 @@ BLOOM_ALIASES = {
     "evaluate": "evaluating", "evaluating": "evaluating",
     "create": "creating", "creating": "creating",
 }
+
+# --------------------------------------------------------------------------
+# Krathwohl's taxonomy of the affective domain (Krathwohl, Bloom & Masia,
+# 1964): attitudes and values, by how far a student has made them their own.
+# The example verbs avoid the ACS verbs of Bloom's levels; a course can
+# replace them in assessment.yaml (`krathwohl_verbs`).
+# --------------------------------------------------------------------------
+
+KRATHWOHL = (
+    {
+        "key": "receiving",
+        "name": "Receiving",
+        "description": "pay attention to ideas, practices and the views of others",
+        "verbs": ["accept", "acknowledge", "ask", "attend", "listen", "notice", "observe"],
+    },
+    {
+        "key": "responding",
+        "name": "Responding",
+        "description": "take part actively and respond willingly",
+        "verbs": ["answer", "assist", "comply", "contribute", "discuss", "help", "participate", "present", "report"],
+    },
+    {
+        "key": "valuing",
+        "name": "Valuing",
+        "description": "attach worth to an idea or practice and commit to it",
+        "verbs": ["advocate", "appreciate", "commit", "initiate", "justify", "share", "support", "value"],
+    },
+    {
+        "key": "organizing",
+        "name": "Organizing",
+        "description": "combine different values into a consistent whole, resolving conflicts between them",
+        "verbs": ["combine", "formulate", "harmonize", "order", "organize", "reconcile", "systematize", "weigh"],
+    },
+    {
+        "key": "characterizing",
+        "name": "Characterizing",
+        "description": "act consistently on their own values, as part of who they are",
+        "verbs": ["act", "champion", "display", "exemplify", "influence", "internalize", "practice", "question", "uphold"],
+    },
+)
+
+KRATHWOHL_ALIASES = {
+    "receive": "receiving", "receiving": "receiving",
+    "respond": "responding", "responding": "responding",
+    "value": "valuing", "valuing": "valuing",
+    "organize": "organizing", "organise": "organizing", "organizing": "organizing", "organising": "organizing",
+    "organization": "organizing", "organisation": "organizing",
+    "characterize": "characterizing", "characterise": "characterizing", "characterizing": "characterizing",
+    "characterising": "characterizing", "characterization": "characterizing", "characterisation": "characterizing",
+    "internalize": "characterizing", "internalise": "characterizing", "internalizing": "characterizing",
+    "internalising": "characterizing",
+}
+
+# The two taxonomies of the assessment matrices, in the order of the page.
+# `domain` names the kind of learning outcome; `verbs` is the key in
+# assessment.yaml that replaces example verbs; `anchor` is the id of the legend.
+TAXONOMIES = (
+    {"key": "bloom", "name": "Bloom's taxonomy", "domain": "cognitive", "scope": "knowledge and thinking skills",
+     "levels": BLOOM, "aliases": BLOOM_ALIASES, "verbs": "bloom_verbs", "anchor": "blooms-taxonomy"},
+    {"key": "krathwohl", "name": "Krathwohl's taxonomy", "domain": "affective", "scope": "attitudes and values",
+     "levels": KRATHWOHL, "aliases": KRATHWOHL_ALIASES, "verbs": "krathwohl_verbs", "anchor": "krathwohls-taxonomy"},
+)
 
 GRADED = {"individual": "Individual", "individually": "Individual", "group": "Group"}
 

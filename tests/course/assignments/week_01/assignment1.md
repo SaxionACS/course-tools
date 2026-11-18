@@ -1,5 +1,5 @@
 ---
-outcomes: [lo2]
+outcomes: [lo2, LO4]
 logbook: logbook1.md
 genai:
   use: allowed

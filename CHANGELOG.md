@@ -14,6 +14,37 @@ Every release from 1.11.1 on has **platform notes**:
   basis and has no CI; see "Syncing macOS" in [CLAUDE.md](CLAUDE.md).
 - **Windows** (from 2.1.0): the same, for native Windows. Best effort, no CI.
 
+## 2.15.0 (unreleased)
+
+Course information: more than one coordinator, and learning outcomes in the
+affective domain, with Krathwohl's taxonomy next to Bloom's.
+
+- **Coordinators.** `coordinator` and `coordinators` in `general.yaml` each
+  take one person or a list. The row says *Coordinators* when there are several.
+  With both names, the build warns and uses `coordinators`.
+- **Krathwohl's taxonomy.** A row of an assessment matrix can use the levels of
+  the affective domain: `receiving`, `responding`, `valuing`, `organizing` and
+  `characterizing` (short forms, British spellings and nouns work too). The
+  levels say which domain a learning outcome is in. There is no new field.
+- **Columns per domain.** A matrix shows only the levels of the taxonomy it uses.
+  A component with both gets two tables, each closed by a *Subtotal* row, and a
+  line with the total of the component. In a course with both domains, every
+  table says its domain above it; in the PDF, the label stays on the page of
+  its table.
+- **Legends.** Below the matrices there is a legend for each taxonomy that they
+  use: Bloom's, Krathwohl's or both. `krathwohl_verbs` replaces example verbs,
+  like `bloom_verbs`. The build warns about a key that is not a level of that
+  taxonomy. A course with only cognitive learning outcomes gets the same page
+  as before.
+
+Platform notes:
+
+- **Dependencies:** none.
+- **Ubuntu / CI:** `scripts/check.py` passes on Ubuntu 24.04 (WSL), 219 checks,
+  with `CC=gcc-13`. The Check workflow has not run yet.
+- **macOS:** untested; nothing platform-specific.
+- **Windows:** untested; nothing platform-specific.
+
 ## 2.14.0 (2026-11-08)
 
 State machines: the events of a pin can have words of their own, apart from its

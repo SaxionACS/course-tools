@@ -26,7 +26,8 @@ components:
         - RETAKE-PRACTICAL-TEXT
         - A second line of the list.
       matrix:
-        LO2: { applying: 60, evaluating: 40, graded: individual }
+        LO2: { applying: 50, evaluating: 30, graded: individual }
+        LO4: { responding: 10, value: 10 }   # affective: a second table
       rubric:
         learning_outcomes: [LO2]
         description: |

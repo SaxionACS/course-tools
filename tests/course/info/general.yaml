@@ -7,9 +7,11 @@ credits: 5
 language: English
 programme: Applied Computer Science
 
-coordinator:
-  name: Test Coordinator
-  email: coordinator@example.org
+coordinators:                            # two: "Coordinators"
+  - name: Test Coordinator
+    email: coordinator@example.org
+  - name: Second Coordinator
+    email: second@example.org
 
 lecturers:
   - name: Test Lecturer
@@ -34,6 +36,9 @@ learning_outcomes:
     - id: LO3
       title: Debugging
       text: Find bugs in embedded programs with a debugger.
+    - id: LO4                            # affective (Krathwohl's levels in the matrix)
+      title: Code reviews
+      text: Take part in code reviews and act on the feedback you receive.
 
 levels:
   independence: low

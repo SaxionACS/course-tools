@@ -9,7 +9,7 @@ import html
 import re
 import sys
 
-from .models import BLOOM, BLOOM_ALIASES, GRADED, LEVEL_ALIASES, LEVELS, PILLARS, level_model_problems
+from .models import GRADED, LEVEL_ALIASES, LEVELS, PILLARS, TAXONOMIES, level_model_problems
 from .outcomes import anchor, of_page
 
 
@@ -30,6 +30,18 @@ def _person(p) -> str:
     role = p.get("role")
     text = f"[{name}](mailto:{email})" if email else name
     return f"{text} ({role})" if role else text
+
+
+def _people(general: dict, names: tuple[str, str]) -> list:
+    """One person or a list of people, under either of two names (the first wins)."""
+    used, value = _either(general, names, "general.yaml")
+    if value is None:
+        return []
+    people = value if isinstance(value, list) else [value]
+    valid = [p for p in people if isinstance(p, (str, dict))]
+    if len(valid) < len(people):
+        _warn(f"general.yaml: `{used}` must be a person ({{name, email}}) or a list of people")
+    return valid
 
 
 def _separator(spec: list[tuple[str, int]]) -> str:
@@ -129,9 +141,10 @@ def general_page(general: dict, has_assessment: bool, has_genai: bool = False,
         ("Language", general.get("language")),
         ("Programme", general.get("programme")),
     ]
-    coordinator = general.get("coordinator")
-    if coordinator:
-        rows.append(("Coordinator", _person(coordinator)))
+    coordinators = _people(general, ("coordinators", "coordinator"))
+    if coordinators:
+        rows.append(("Coordinators" if len(coordinators) > 1 else "Coordinator",
+                     ", ".join(_person(p) for p in coordinators)))
     lecturers = general.get("lecturers") or []
     if lecturers:
         rows.append(("Lecturers", ", ".join(_person(p) for p in lecturers)))
@@ -411,13 +424,21 @@ def assessment_page(assessment: dict, general: dict) -> str:
 
     out += resits
 
+    # Read every matrix first: the taxonomies the course uses decide the
+    # introduction, the labels above the tables and the legends.
+    matrices = {id(c): _read_matrix(c, los) for c in components if c.get("matrix")}
+    used = [t for t in TAXONOMIES if any(t["key"] in m["taxonomies"] for m in matrices.values())]
+    both = len(used) > 1
     if has_matrices:
-        out += [
-            "## Assessment matrices", "",
-            "For every component, the matrix shows which [learning outcomes](#learning-outcomes) it "
-            "assesses, how much each one counts (as a percentage of the component), at which levels of "
-            "[Bloom's taxonomy](#blooms-taxonomy), and whether it is graded individually or as a group.", "",
-        ]
+        levels = " or ".join(f"[{t['name']}](#{t['anchor']})" + (f" ({t['domain']} domain)" if both else "")
+                             for t in used)
+        intro = ("For every component, the matrix shows which [learning outcomes](#learning-outcomes) it "
+                 f"assesses, how much each one counts (as a percentage of the component), at which levels of "
+                 f"{levels}, and whether it is graded individually or as a group.")
+        if any(len(m["taxonomies"]) > 1 for m in matrices.values()):
+            intro += (" A component that assesses learning outcomes of both domains has a matrix for each; "
+                      "together they make up the component.")
+        out += ["## Assessment matrices", "", intro, ""]
     for c in components:
         if c.get("description") or c.get("matrix") or c.get("rubric"):
             weight = c.get("weight")
@@ -426,16 +447,19 @@ def assessment_page(assessment: dict, general: dict) -> str:
             if c.get("description"):
                 out += [str(c["description"]).strip(), ""]
             if c.get("matrix"):
-                out += _component_matrix(c, los)
+                out += _matrix_tables(matrices[id(c)], labelled=both)
             if c.get("rubric"):
                 out += _component_rubric(c, los)
 
+    for t in TAXONOMIES:
+        _check_verbs(assessment, t)
     if has_matrices:
         assessed = {str(lo) for c in components for lo in (c.get("matrix") or {})}
         for lo in los:
             if lo["id"] not in assessed:
                 _warn(f"assessment.yaml: learning outcome {lo['id']} is not assessed by any component")
-        out += _bloom_legend(assessment.get("bloom_verbs") or {})
+        for t in used:
+            out += _legend(t, assessment.get(t["verbs"]) or {}, both)
     return "\n".join(out)
 
 
@@ -472,66 +496,126 @@ def _resits_section(assessment: dict, components: list[dict]) -> list[str]:
     return out
 
 
-def _component_matrix(component: dict, los: list[dict]) -> list[str]:
-    """Matrix of one component: learning outcomes x Bloom levels, plus grading."""
+def _level(key) -> tuple[dict, str] | None:
+    """(taxonomy, level) of a key in a matrix row, e.g. `apply` -> (Bloom's, "applying")."""
+    for taxonomy in TAXONOMIES:
+        if level := taxonomy["aliases"].get(str(key).lower()):
+            return taxonomy, level
+    return None
+
+
+def _read_matrix(component: dict, los: list[dict]) -> dict:
+    """The matrix of one component, checked: {name, rows, taxonomies, total}.
+
+    A row is {id, values: {taxonomy key: {level: number}}, graded}; `taxonomies`
+    are the keys of the taxonomies whose levels the matrix uses, in the order
+    of TAXONOMIES (Bloom's if it uses none).
+    """
     name = _component_title(component)
     matrix = {str(k): (v or {}) for k, v in (component.get("matrix") or {}).items()}
     known = [lo["id"] for lo in los]
     for lo_id in matrix:
         if lo_id not in known:
             _warn(f"assessment.yaml: {name}: {lo_id} is not a learning outcome in general.yaml")
-    rows = [lo_id for lo_id in known if lo_id in matrix] + [k for k in matrix if k not in known]
+    order = [lo_id for lo_id in known if lo_id in matrix] + [k for k in matrix if k not in known]
 
     default_graded = component.get("graded")
-    bloom_keys = [b["key"] for b in BLOOM]
-    column_totals = dict.fromkeys(bloom_keys, 0)
-    lines = [
-        "::: {.assessment-matrix}", "",
-        # PDF: the page is narrower than the screen; smaller text, let long
-        # Bloom level names in the header break, and keep the (short) table on
-        # one page (scoped to this matrix).
-        "```{=typst}",
-        "#set text(size: 8.5pt)",
-        "#show table.cell.where(y: 0): set text(hyphenate: true)",
-        "#show table: it => block(breakable: false, it)",
-        "```", "",
-        "| LO | " + " | ".join(b["name"] for b in BLOOM) + " | Total | Graded |",
-        _separator([("l", 9)] + [("c", 13)] * len(BLOOM) + [("c", 9), ("l", 13)]),
-    ]
-    for lo_id in rows:
+    rows = []
+    for lo_id in order:
         row = matrix[lo_id]
         if not isinstance(row, dict):
             _warn(f"assessment.yaml: {name}: matrix row {lo_id} must be a mapping")
             continue
-        values: dict[str, float] = {}
+        values: dict[str, dict[str, float]] = {t["key"]: {} for t in TAXONOMIES}
         graded = row.get("graded", default_graded)
         for key, value in row.items():
             if key == "graded":
                 continue
-            bloom = BLOOM_ALIASES.get(str(key).lower())
-            if bloom is None:
-                _warn(f"assessment.yaml: {name}, {lo_id}: `{key}` is not a Bloom level")
-            elif not isinstance(value, (int, float)):
+            found = _level(key)
+            if found is None:
+                _warn(f"assessment.yaml: {name}, {lo_id}: `{key}` is not a level of Bloom's or Krathwohl's taxonomy")
+            elif not isinstance(value, (int, float)) or isinstance(value, bool):
                 _warn(f"assessment.yaml: {name}, {lo_id}: `{key}` must be a number")
             else:
-                values[bloom] = values.get(bloom, 0) + value
-                column_totals[bloom] += value
+                taxonomy, level = found
+                levels = values[taxonomy["key"]]
+                levels[level] = levels.get(level, 0) + value
         graded_text = GRADED.get(str(graded).lower()) if graded is not None else None
         if graded is None:
             _warn(f"assessment.yaml: {name}, {lo_id}: not specified whether it is graded individually or as a group")
         elif graded_text is None:
             _warn(f"assessment.yaml: {name}, {lo_id}: graded `{graded}` is not individual or group")
             graded_text = _cell(graded)
-        cells = [_num(values[k]) if k in values else "" for k in bloom_keys]
-        lines.append(f"| **{_cell(lo_id)}** | " + " | ".join(cells)
-                     + f" | **{_num(sum(values.values()))}** | {graded_text or ''} |")
+        rows.append({"id": lo_id, "values": values, "graded": graded_text or ""})
 
-    total = sum(column_totals.values())
+    total = sum(v for r in rows for levels in r["values"].values() for v in levels.values())
     if total != 100:
         _warn(f"assessment.yaml: the matrix of {name} adds up to {total:g}%, not 100%")
-    lines.append("| **Total** | " + " | ".join(f"**{_num(column_totals[k])}**" if column_totals[k] else "" for k in bloom_keys)
-                 + f" | **{_num(total)}** | |")
-    return lines + ["", ":::", ""]
+    taxonomies = [t["key"] for t in TAXONOMIES if any(r["values"][t["key"]] for r in rows)]
+    return {"name": name, "rows": rows, "taxonomies": taxonomies or [TAXONOMIES[0]["key"]], "total": total}
+
+
+def _matrix_tables(matrix: dict, labelled: bool) -> list[str]:
+    """The matrix of one component: learning outcomes x levels, plus grading.
+
+    One table per taxonomy the matrix uses, each with only that taxonomy's
+    levels; with two, a line with the total of the component follows. With
+    `labelled` (the course uses both taxonomies), every table says its domain.
+    """
+    lines = [
+        "::: {.assessment-matrix}", "",
+        # PDF: the page is narrower than the screen; smaller text, let long
+        # level names in the header break, and keep each (short) table on one
+        # page, with its label (scoped to this matrix).
+        "```{=typst}",
+        "#set text(size: 8.5pt)",
+        "#show table.cell.where(y: 0): set text(hyphenate: true)",
+        "#show table: it => block(breakable: false, it)",
+        "```", "",
+    ]
+    several = len(matrix["taxonomies"]) > 1
+    for i, taxonomy in enumerate(t for t in TAXONOMIES if t["key"] in matrix["taxonomies"]):
+        levels = taxonomy["levels"]
+        keys = [level["key"] for level in levels]
+        # With two tables, a row is in the table(s) of its levels; a row
+        # without any is in the first.
+        rows = [r for r in matrix["rows"]
+                if not several or r["values"][taxonomy["key"]] or (i == 0 and not any(r["values"].values()))]
+        if labelled:
+            lines += _domain_label(taxonomy)
+        column_totals = dict.fromkeys(keys, 0)
+        lines += [
+            "| LO | " + " | ".join(level["name"] for level in levels) + " | Total | Graded |",
+            _separator([("l", 9)] + [("c", 13)] * len(levels) + [("c", 9), ("l", 13)]),
+        ]
+        for r in rows:
+            values = r["values"][taxonomy["key"]]
+            for key, value in values.items():
+                column_totals[key] += value
+            cells = [_num(values[k]) if k in values else "" for k in keys]
+            lines.append(f"| **{_cell(r['id'])}** | " + " | ".join(cells)
+                         + f" | **{_num(sum(values.values()))}** | {r['graded']} |")
+        subtotal = sum(column_totals.values())
+        lines.append(f"| **{'Subtotal' if several else 'Total'}** | "
+                     + " | ".join(f"**{_num(column_totals[k])}**" if column_totals[k] else "" for k in keys)
+                     + f" | **{_num(subtotal)}** | |")
+        lines.append("")
+    if several:
+        lines += [f"**Total of the component: {_num(matrix['total'])}%**", ""]
+    return lines + [":::", ""]
+
+
+def _domain_label(taxonomy: dict) -> list[str]:
+    """"Cognitive domain (Bloom's taxonomy)" above a table; in the PDF, on the same page as the table."""
+    domain, name = f"{taxonomy['domain'].capitalize()} domain", taxonomy["name"]
+    return [
+        "```{=html}",
+        f'<p class="assessment-matrix-domain"><strong>{domain}</strong> ({html.escape(name)})</p>',
+        "```", "",
+        "```{=typst}",
+        f"#block(sticky: true)[#strong[{domain}] ({name})]",
+        "```", "",
+    ]
 
 
 def _points(value, where: str) -> str | None:
@@ -589,20 +673,46 @@ def _component_rubric(component: dict, los: list[dict]) -> list[str]:
     return out
 
 
-def _bloom_legend(custom_verbs: dict) -> list[str]:
-    verbs = {BLOOM_ALIASES.get(str(k).lower(), str(k)): v for k, v in custom_verbs.items()}
+def _check_verbs(assessment: dict, taxonomy: dict) -> None:
+    """Warn about keys of `bloom_verbs` / `krathwohl_verbs` that are not levels of that taxonomy."""
+    custom = assessment.get(taxonomy["verbs"])
+    if custom is None:
+        return
+    if not isinstance(custom, dict):
+        _warn(f"assessment.yaml: `{taxonomy['verbs']}` must be a mapping from levels to verbs")
+        return
+    for key in custom:
+        if str(key).lower() in taxonomy["aliases"]:
+            continue
+        found = _level(key)
+        hint = f" (use `{found[0]['verbs']}` for the levels of {found[0]['name']})" if found else ""
+        _warn(f"assessment.yaml: `{taxonomy['verbs']}`: `{key}` is not a level of {taxonomy['name']}{hint}")
+
+
+def _legend(taxonomy: dict, custom_verbs: dict, both: bool) -> list[str]:
+    """The levels of a taxonomy with examples of verbs; with `both`, it names its domain."""
+    if not isinstance(custom_verbs, dict):
+        custom_verbs = {}
+    aliases = taxonomy["aliases"]
+    verbs = {aliases.get(str(k).lower(), str(k)): v for k, v in custom_verbs.items()}
+    if taxonomy["key"] == "bloom":
+        what = (f"Bloom's taxonomy of the cognitive domain ({taxonomy['scope']})" if both else "Bloom's taxonomy")
+        order = "from simple to complex"
+    else:
+        what = f"Krathwohl's taxonomy of the affective domain ({taxonomy['scope']})"
+        order = "from paying attention to a value to acting on it as one's own"
     out = [
-        "## Bloom's taxonomy", "",
-        "The levels of Bloom's taxonomy, from simple to complex, with examples of verbs that "
-        "describe what students do at each level.", "",
+        f"## {taxonomy['name']} {{#{taxonomy['anchor']}}}", "",
+        f"The levels of {what}, {order}, with examples of verbs that describe what students do at each level.", "",
         "| Level | Students can … | Example verbs |",
         _separator([("l", 16), ("l", 30), ("l", 54)]),
     ]
-    for b in BLOOM:
-        example = verbs.get(b["key"], b["verbs"])
+    for level in taxonomy["levels"]:
+        example = verbs.get(level["key"], level["verbs"])
         if isinstance(example, str):
             example = [example]
-        out.append(f"| **{b['name']}** | {b['description']} | {_cell(', '.join(str(v) for v in example))} |")
+        out.append(f"| **{level['name']}** | {level['description']} "
+                   f"| {_cell(', '.join(str(v) for v in example))} |")
     out.append("")
     return out
 

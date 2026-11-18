@@ -182,6 +182,12 @@ code.sourceCode .code-annotation-anchor.course-inline {
   }
 }
 
+// The domain above each table of a matrix, in a course with learning outcomes
+// of both domains (cognitive: Bloom, affective: Krathwohl).
+.assessment-matrix-domain {
+  margin: 1rem 0 .35rem;
+}
+
 // Learning outcomes at the top of a page (filters/course.lua).
 .course-outcomes {
   display: flex;

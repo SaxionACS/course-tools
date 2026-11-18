@@ -222,6 +222,67 @@ def check_info_logic(c: Checks) -> None:
     page, _ = assessment({"components": [{**component, "resit": "- A\n- B\n"}]})
     c.ok("- **Exam:**\n\n  - A\n  - B\n" in page, "rules of a component that are a list: nested in the item")
 
+    c.section("Course information: coordinators")
+    base = {"organization": "O", "topics": ["A"]}
+    page, log = general({**base, "coordinator": {"name": "A"}})
+    c.ok("| **Coordinator** | A |" in page and not log, "one coordinator: the label is singular", log)
+    page, log = general({**base, "coordinator": [{"name": "A", "email": "a@example.org"}, "B"]})
+    c.ok("| **Coordinators** | [A](mailto:a@example.org), B |" in page and not log,
+         "`coordinator` with a list: all of them, and the label is plural", log)
+    page, log = general({**base, "coordinators": [{"name": "A"}]})
+    c.ok("| **Coordinator** | A |" in page and not log, "`coordinators` with one person: the label is singular", log)
+    page, log = general({**base, "coordinators": {"name": "A"}, "coordinator": {"name": "X"}})
+    c.ok("both `coordinators` and `coordinator`" in log and "| **Coordinator** | A |" in page and "X |" not in page,
+         "`coordinators` and `coordinator`: a warning, and `coordinators` is used", log)
+    page, log = general({**base, "coordinators": [{"name": "A"}, 5]})
+    c.ok("`coordinators` must be a person" in log and "| **Coordinator** | A |" in page,
+         "a coordinator that is not a person is reported and left out", log)
+
+    c.section("Assessment matrices: Bloom's and Krathwohl's taxonomies")
+    two_los = {"learning_outcomes": [{"id": "LO1", "text": "x"}, {"id": "LO2", "text": "y"}]}
+
+    def matrices(*rows: dict, **fields) -> tuple[str, str]:
+        components = [{"name": f"C{i}", "weight": 100 / len(rows), "graded": "individual", "matrix": m}
+                      for i, m in enumerate(rows, start=1)]
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            return info.assessment_page({"components": components, **fields}, two_los), err.getvalue()
+
+    bloom_header = "| LO | Remembering | Understanding | Applying | Analyzing | Evaluating | Creating | Total | Graded |"
+    krathwohl_header = "| LO | Receiving | Responding | Valuing | Organizing | Characterizing | Total | Graded |"
+    page, log = matrices({"LO1": {"apply": 50}, "LO2": {"create": 50}})
+    c.ok(not log and bloom_header in page and "## Bloom's taxonomy {#blooms-taxonomy}" in page
+         and "Krathwohl" not in page and "domain" not in page and "| **Total** |" in page,
+         "only cognitive learning outcomes: Bloom's levels and legend, as before", log)
+    page, log = matrices({"LO1": {"receive": 50}, "LO2": {"organisation": 20, "characterization": 30}})
+    c.ok(not log and krathwohl_header in page and "| **LO2** |  |  |  | 20 | 30 | **50** | Individual |" in page
+         and "## Krathwohl's taxonomy {#krathwohls-taxonomy}" in page and "Bloom" not in page
+         and "levels of [Krathwohl's taxonomy](#krathwohls-taxonomy), and" in page,
+         "only affective learning outcomes: Krathwohl's levels (short forms, nouns, British spellings) and legend", log)
+    page, log = matrices({"LO1": {"apply": 60}, "LO2": {"understand": 10, "valuing": 30}})
+    c.ok(not log and page.count(bloom_header) == 1 and page.count(krathwohl_header) == 1
+         and "| **LO2** |  | 10 |  |  |  |  | **10** | Individual |" in page
+         and "| **LO2** |  |  | 30 |  |  | **30** | Individual |" in page
+         and page.count("| **Subtotal** |") == 2 and "**Total of the component: 100%**" in page
+         and "<strong>Cognitive domain</strong>" in page and "#strong[Affective domain]" in page
+         and "has a matrix for each" in page and "## Bloom's taxonomy" in page and "## Krathwohl's taxonomy" in page
+         and "Bloom's taxonomy of the cognitive domain" in page,
+         "a component with both: a table per domain, each with a subtotal and a label, the total of the "
+         "component, both legends; an outcome with levels of both is in both tables", log)
+    page, log = matrices({"LO1": {"apply": 100}}, {"LO2": {"respond": 100}})
+    c.ok(not log and page.count("<strong>Cognitive domain</strong>") == 1 and page.count("<strong>Affective domain</strong>") == 1
+         and "Subtotal" not in page and "Total of the component" not in page and "has a matrix for each" not in page,
+         "components of one domain each: one table each, labelled, with a total", log)
+    page, log = matrices({"LO1": {"apply": 50}, "LO2": {"valuing": 40}})
+    c.ok("the matrix of C1 adds up to 90%, not 100%" in log and "**Total of the component: 90%**" in page,
+         "both domains together make up 100%", log)
+    page, log = matrices({"LO1": {"applying": 100, "caring": 5, "valuing": "x"}})
+    c.ok("`caring` is not a level of Bloom's or Krathwohl's taxonomy" in log and "`valuing` must be a number" in log,
+         "unknown levels and values that are not numbers are reported", log)
+    page, log = matrices({"LO1": {"valuing": 100}}, krathwohl_verbs={"value": ["care"]}, bloom_verbs={"valuing": ["x"]})
+    c.ok("| **Valuing** | attach worth to an idea or practice and commit to it | care |" in page
+         and "`bloom_verbs`: `valuing` is not a level of Bloom's taxonomy (use `krathwohl_verbs`" in log,
+         "`krathwohl_verbs` replaces example verbs; a level of the other taxonomy is reported", log)
+
 
 def check_tools(c: Checks, course_cmd: list[str]) -> bool:
     c.section("Tools")
@@ -424,7 +485,8 @@ def check_outcomes(c: Checks, read) -> None:
     lesson = badges("lessons/week_02/lesson1.html")
     c.ok(lesson == [("../../info/outcomes.html#lo1", "LO1", "Superloops"), ("../../info/outcomes.html#lo2", "LO2", "LO2")],
          "badges show the title (or the id without one) and link to the outcome map", f"found: {lesson}")
-    c.ok(badges("assignments/week_01/assignment1.html") == [("../../info/outcomes.html#lo2", "LO2", "LO2")],
+    c.ok(badges("assignments/week_01/assignment1.html") == [("../../info/outcomes.html#lo2", "LO2", "LO2"),
+                                                            ("../../info/outcomes.html#lo4", "LO4", "Code reviews")],
          "outcome ids in the front matter are not case-sensitive")
     c.ok(badges("exams/exam1.html") == [("../info/outcomes.html#lo2", "LO2", "LO2")], "an unknown outcome is left out")
     c.ok(not badges("lessons/week_01/lesson2.html"), "no badges without outcomes")
@@ -435,7 +497,8 @@ def check_outcomes(c: Checks, read) -> None:
     rows = [re.sub(r"<[^>]+>|\s+", " ", r).split() for r in re.findall(r"<tr[^>]*>(.*?)</tr>", m, re.S)]
     c.ok(rows[1:] == [["LO1", "Superloops", "●", "●", "Written", "exam"],
                       ["LO2", "●", "●", "●", "Written", "exam,", "Practical"],
-                      ["LO3", "Debugging", "Written", "exam"]],
+                      ["LO3", "Debugging", "Written", "exam"],
+                      ["LO4", "Code", "reviews", "●", "Practical"]],
          "outcome map: the weeks (and other pages) that cover each outcome, and where it is assessed", f"rows: {rows}")
     c.ok('id="lo2"' in m and 'href="../assignments/week_01/assignment1.html"' in m
          and 'href="../exams/exam1.html"' in m and "No pages work towards this outcome yet." in m,
@@ -739,7 +802,14 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     c.ok(all(line in info for line in FOOTER), "generated pages have a footer from their YAML file")
     assessment = main_content(read("info/assessment.html"))
     c.ok(assessment.count('class="assessment-matrix"') == 2, "an assessment matrix per component")
-    c.ok("RUBRIC-DESCRIPTION-TEXT" in assessment and "Bloom" in assessment, "rubric and Bloom legend")
+    c.ok("RUBRIC-DESCRIPTION-TEXT" in assessment and 'id="blooms-taxonomy"' in assessment
+         and 'id="krathwohls-taxonomy"' in assessment and 'href="#krathwohls-taxonomy"' in assessment,
+         "rubric, and the legends of Bloom's and Krathwohl's taxonomies, linked from the introduction")
+    c.ok(assessment.count('class="assessment-matrix-domain"') == 3 and "Total of the component: 100%" in assessment
+         and -1 < assessment.find("Cognitive domain") < assessment.find("RUBRIC-DESCRIPTION-TEXT"),
+         "a mixed course: every matrix table says its domain; the practical has a table for each domain")
+    c.ok(re.search(r"<strong>Coordinators</strong>.*Test Coordinator.*Second Coordinator", info, re.S),
+         "course information: two coordinators")
     c.ok(-1 < info.find("course-levels") < info.find("ORGANIZATION-TEXT") < info.find("TOPIC-PLAIN") < info.find("Kernighan"),
          "course information: organization and topics, after the level and before the literature")
     rows = [re.sub(r"<[^>]+>", "", row).split() for row in re.findall(r"<tr.*?</tr>", info, re.S)]
@@ -833,6 +903,9 @@ def check_site(c: Checks, dist: Path, html_only: bool) -> None:
     t = text("info/assessment.pdf")
     c.ok("Resits RESIT-GENERAL-TEXT" in t and "Written exam: RESIT-EXAM-TEXT" in t and "RETAKE-PRACTICAL-TEXT" in t,
          "assessment PDF: the rules for resits")
+    c.ok("Affective domain (Krathwohl’s taxonomy)" in t and "Total of the component: 100%" in t
+         and "Characterizing" in t and "Krathwohl’s taxonomy of the affective domain" in t,
+         "assessment PDF: the tables of a mixed component, and Krathwohl's legend", t)
     t = text("lessons/week_02/lesson3.pdf")
     questions, _, key = t.partition(" Answers ")
     c.ok("WIDGET-TITLE" in questions and "binary 1101 0010 hexadecimal 0xD2 · uint8_t 210 · int8_t −46" in questions

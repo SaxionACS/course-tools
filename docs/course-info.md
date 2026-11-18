@@ -16,7 +16,7 @@ a complete example.
 | `credits` | Number of EC. |
 | `language` | Language of instruction. |
 | `programme` | E.g. `Applied Computer Science`. |
-| `coordinator` | `{name, email}`. |
+| `coordinator` or `coordinators` | `{name, email}`, or a list of them for a course with more than one coordinator (see below). |
 | `lecturers` | List of `{name, email, role}`. |
 | `description` | Course description (Markdown). |
 | `prerequisites` | Required prior knowledge (Markdown). |
@@ -58,6 +58,22 @@ levels:
 
 Without an introduction, a plain list (as in earlier versions) also works for
 `learning_outcomes`, `topics`, `literature` and `links`.
+
+### Coordinators
+
+A course has one coordinator or more. `coordinator` and `coordinators` mean
+the same, and each takes one person or a list:
+
+```yaml
+coordinators:
+  - name: Jane Doe
+    email: j.doe@saxion.nl
+  - name: John Smith
+    email: j.smith@saxion.nl
+```
+
+The course information page shows them in one row, *Coordinator* or
+*Coordinators*. With both names, the build warns and uses `coordinators`.
 
 ### Learning outcomes
 
@@ -201,7 +217,7 @@ compiler_explorer:
 | `components` | List of assessment components (see below), optionally with an introduction. |
 | `final_grade` | How the final grade is determined. |
 | `resit` or `retake` | Optional: the general rules for resits (see below). |
-| `bloom_verbs` | Optional: other example verbs for the Bloom legend (see below). |
+| `bloom_verbs`, `krathwohl_verbs` | Optional: other example verbs for the legends of Bloom's and Krathwohl's taxonomies (see below). |
 
 The table of components has a default introduction ("The course is assessed
 with the components below. The weight is the share of a component in the final
@@ -260,8 +276,15 @@ that has its own. Without any rules, there is no section.
 
 Every component has its own matrix. It lists the learning outcomes that the
 component assesses; leave out the outcomes it doesn't assess. For each
-learning outcome, give the weight per level of Bloom's taxonomy, as a
-percentage of the component. All numbers in one matrix add up to 100.
+learning outcome, give the weight per level, as a percentage of the
+component. All numbers in one matrix add up to 100.
+
+The levels are those of Bloom's taxonomy for learning outcomes in the
+*cognitive* domain (knowledge and thinking skills), and those of Krathwohl's
+taxonomy for learning outcomes in the *affective* domain (attitudes and
+values). The levels in the matrix say which domain a learning outcome is in;
+`general.yaml` doesn't say it. A course, and a component, can have learning
+outcomes of both domains.
 
 ```yaml
 components:
@@ -274,22 +297,53 @@ components:
       LO3: { applying: 40, evaluating: 20, creating: 30 }
 ```
 
-The Bloom levels are `remembering`, `understanding`, `applying`, `analyzing`,
-`evaluating` and `creating`. The short forms (`remember`, `apply`, …) and the
-British spellings (`analyse`, `analysing`) also work.
+The levels of Bloom's taxonomy are `remembering`, `understanding`,
+`applying`, `analyzing`, `evaluating` and `creating`. The short forms
+(`remember`, `apply`, …) and the British spellings (`analyse`, `analysing`)
+also work.
+
+The levels of Krathwohl's taxonomy are `receiving`, `responding`, `valuing`,
+`organizing` and `characterizing`. The short forms (`receive`, `value`, …),
+the British spellings (`organising`, `characterise`, …), the nouns
+(`organization`, `characterization`) and `internalizing` (another name for
+`characterizing`) also work.
+
+```yaml
+components:
+  - id: PROJ
+    name: Project
+    weight: 40
+    graded: group
+    matrix:
+      LO3: { applying: 30, creating: 30 }         # cognitive
+      LO4: { responding: 20, valuing: 20 }        # affective
+```
 
 The page starts with a *Learning outcomes* section listing all learning
-outcomes of `general.yaml`. Then it shows a table for each component. Each row
-is a learning outcome, with columns for the six Bloom levels, a total, and
-whether it is graded individually or as a group. A *Total* row closes the
-table. Below all matrices is a legend of Bloom's taxonomy with example verbs.
+outcomes of `general.yaml`. Then it shows the matrix of each component as a
+table. Each row is a learning outcome, with a column for each level, a total,
+and whether it is graded individually or as a group. A *Total* row closes the
+table. The columns are the levels of the taxonomy the component uses: Bloom's
+or Krathwohl's.
+
+A component with learning outcomes of both domains has two tables, one with
+Bloom's levels and one with Krathwohl's. Each closes with a *Subtotal* row,
+and a line under them gives the total of the component. A learning outcome
+with levels of both taxonomies is in both tables, with its share in each.
+When the course uses both taxonomies, every table says its domain above it
+(*Cognitive domain (Bloom's taxonomy)*, *Affective domain (Krathwohl's
+taxonomy)*).
+
+Below all matrices is a legend for each taxonomy that the matrices use, with
+the levels and example verbs: *Bloom's taxonomy*, *Krathwohl's taxonomy*, or
+both.
 
 The build warns:
 
 - when a matrix doesn't add up to 100;
 - when the component weights don't add up to 100;
 - when an id doesn't match a learning outcome in `general.yaml`;
-- when a key is not a Bloom level;
+- when a key is not a level of Bloom's or Krathwohl's taxonomy;
 - when `graded` is missing or is not `individual` / `group`;
 - when a learning outcome isn't assessed by any component.
 
@@ -330,15 +384,22 @@ The build warns when a criterion has no `name` or no valid `points`, or when a
 learning outcome of the rubric is not in `general.yaml` or not in the matrix of
 the component.
 
-### Bloom legend
+### Legends
 
-The legend uses the ACS list of technical verbs. To use other examples for
-some levels, add for example:
+The legend of Bloom's taxonomy uses the ACS list of technical verbs. The
+legend of Krathwohl's taxonomy uses common examples from the literature,
+chosen to be different from the ACS verbs. To use other examples for some
+levels, add for example:
 
 ```yaml
 bloom_verbs:
   applying: [implement, test, measure]
+krathwohl_verbs:
+  valuing: [advocate, justify, support]
 ```
+
+The build warns about a key that is not a level of that taxonomy, for
+example `valuing` in `bloom_verbs`.
 
 ## `info/genAI.yaml`
 
